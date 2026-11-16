@@ -71,6 +71,15 @@ export interface CompanyItem {
   name: string;
 }
 
+/** List snapshots omit run output and execution payloads; the detail panel reads those on demand. */
+export function activityRunSummary(run: CompanyRun): CompanyRun {
+  return { id: run.id, companyId: run.companyId, projectId: run.projectId, task: run.task,
+    requestedMode: run.requestedMode, executionMode: run.executionMode, status: run.status,
+    omnirouteComboName: run.omnirouteComboName, totalDurationMs: run.totalDurationMs,
+    totalTokens: run.totalTokens, totalCost: run.totalCost, createdAt: run.createdAt, completedAt: run.completedAt,
+    workerId: run.workerId, heartbeatAt: run.heartbeatAt, leaseExpiresAt: run.leaseExpiresAt, turnIndex: run.turnIndex };
+}
+
 export type RunStatusFilter = "all" | "completed" | "running" | "failed";
 
 export interface ProjectTaskItem {

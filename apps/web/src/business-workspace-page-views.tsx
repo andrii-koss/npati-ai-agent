@@ -1,5 +1,6 @@
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { ALL_COMPANIES } from "./company-scope";
+import { SettingsListMore, useProgressiveSettingsItems } from "./useProgressiveSettingsItems";
 import { PageGuideLink } from "./PageGuideLink";
 import { useTranslation } from "./i18n";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -218,6 +219,7 @@ export function BusinessPage() {
     });
   }, [allItems, filterTab, searchQuery, sortBy, companyScope]);
 
+  const visiblePage = useProgressiveSettingsItems(visibleItems, `${companyScope}:${filterTab}:${searchQuery}:${sortBy}`);
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -482,7 +484,7 @@ export function BusinessPage() {
             </div>
           ) : (
             <div className={viewMode === "grid" ? "biz-cards-grid" : "biz-cards-list"}>
-              {visibleItems.map((item) => (
+              {visiblePage.items.map((item) => (
                 <article
                   className={`biz-card ${selectedIds.has(item.id) ? "selected" : ""}`}
                   key={item.id}
@@ -606,6 +608,7 @@ export function BusinessPage() {
           )}
         </>
       )}
+      <SettingsListMore state={visiblePage} label="Load more" />
     </main>
   );
 }

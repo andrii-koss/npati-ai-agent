@@ -1,4 +1,5 @@
 import { getStoredAuthToken } from "./AuthContext";
+import { requestSettingsRead } from "./settings-page-cache";
 
 export interface WebsiteProject {
   id: string;
@@ -47,6 +48,10 @@ let companiesMemoryCache: { token: string | null; time: number; items: Array<{ i
 export async function listProjectCompanies(): Promise<Array<{ id: string; name: string }>> {
   const token = getStoredAuthToken();
   if (companiesMemoryCache && companiesMemoryCache.token === token && Date.now() - companiesMemoryCache.time < 60_000) return companiesMemoryCache.items;
+  return requestSettingsRead("companies:list", () => readProjectCompanies(token), false);
+}
+
+async function readProjectCompanies(token: string | null): Promise<Array<{ id: string; name: string }>> {
   const companies = new Map<string, { id: string; name: string }>();
   const cursors = new Set<string>();
   let cursor: string | undefined;

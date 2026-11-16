@@ -24,6 +24,7 @@ import {
 import { ConfirmDialogContainer, alertModal } from "./ConfirmDialog";
 import { ConversationalChat } from "./ConversationalChat";
 import { prefetchProjectCatalog } from "./project-catalog-client";
+import { prefetchSettingsPage } from "./settings-prefetch";
 import { I18nProvider, useTranslation } from "./i18n";
 import { ChatAvatarImage } from "./ChatAvatarImage";
 
@@ -560,7 +561,7 @@ function SettingsPage() {
 
       <div className="settings-card-grid">
         {cards.map((card) => (
-          <Link className="settings-ai-card" to={card.to} key={card.to} onMouseEnter={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); }} onFocus={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); }}>
+          <Link className="settings-ai-card" to={card.to} key={card.to} onMouseEnter={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(card.to); }} onFocus={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(card.to); }}>
             <span className="provider-avatar" aria-hidden="true">{card.icon}</span>
             <span>
               <strong>{card.title}</strong>

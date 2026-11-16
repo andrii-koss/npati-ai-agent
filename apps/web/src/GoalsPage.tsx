@@ -1,3 +1,4 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
@@ -41,7 +42,7 @@ export function GoalsPage() {
   const scopeKey = scopeIds.join("\0");
   const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
 
-  const [goals, setGoals] = useState<Goal[]>(() => getCachedGoals(businessId));
+  const [goals, setGoals] = useState<Goal[]>(() => readSettingsSnapshot<Goal[]>(`goals:${companyScope}`) ?? (companyScope === ALL_COMPANIES ? scopeIds.flatMap(id => getCachedGoals(id)) : getCachedGoals(businessId)));
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const loadVersion = useRef(0);
@@ -60,19 +61,27 @@ export function GoalsPage() {
   const loadGoals = async () => {
     const version = ++loadVersion.current;
     if (!scopeIds.length) {
-      setGoals([]);
+      if (overview) setGoals([]);
       setLoading(false);
       return;
     }
-    setGoals(scopeIds.flatMap(id => getCachedGoals(id)));
+    const snapshotKey = `goals:${companyScope}`;
+    const cached = readSettingsSnapshot<Goal[]>(snapshotKey);
+    if (cached) setGoals(cached);
+    const publish = (data: Goal[]) => {
+      if (version !== loadVersion.current) return;
+      setGoals(data);
+      writeSettingsSnapshot(snapshotKey, data);
+      if (data.length) setLoading(false);
+    };
     try {
       const pages = await loadCompanyScopes(scopeIds, async id => {
         const records = await api<Goal[]>(`/businesses/${id}/goals`);
         return { id, records: records.map(item => ({ ...item, businessId: id })) };
-      });
+      }, { key: "goals", initial: cached ? scopeIds.map(id => ({ id, records: cached.filter(item => item.businessId === id) })) : undefined, isActive: () => version === loadVersion.current, onProgress: pages => publish(pages.flatMap(page => page.records)) });
       const data = pages.flatMap(page => page.records);
       if (version !== loadVersion.current) return;
-      setGoals(data);
+      publish(data);
       pages.forEach(page => updateCachedGoals(page.id, page.records));
     } catch (err: any) {
       if (version !== loadVersion.current) return;
@@ -94,6 +103,7 @@ export function GoalsPage() {
     window.addEventListener("npati:goals-changed", handleGoalsChanged);
     window.addEventListener("npati:business-changed", handleGoalsChanged);
     return () => {
+      ++loadVersion.current;
       window.removeEventListener("npati:goals-changed", handleGoalsChanged);
       window.removeEventListener("npati:business-changed", handleGoalsChanged);
     };

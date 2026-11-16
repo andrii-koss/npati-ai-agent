@@ -1,4 +1,5 @@
 import { PageGuideLink } from "./PageGuideLink";
+import { prefetchSettingsPage } from "./settings-prefetch";
 import { Link } from "react-router-dom";
 import type { EmailAnalytics } from "./email-settings-types";
 
@@ -32,6 +33,8 @@ export function EmailSettingsHeroHeader({
         <div className="automations-header-actions">
           <Link
             to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox"}
+            onMouseEnter={event => prefetchSettingsPage(event.currentTarget.getAttribute("href") || "/settings/email/inbox")}
+            onFocus={event => prefetchSettingsPage(event.currentTarget.getAttribute("href") || "/settings/email/inbox")}
             className="button-secondary"
             style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
           >

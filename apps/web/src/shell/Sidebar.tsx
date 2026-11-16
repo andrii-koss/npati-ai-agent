@@ -9,6 +9,7 @@ import { SidebarActionMenu } from "./SidebarActionMenu";
 import { ConversationRow } from "./SidebarItemRows";
 import { useSidebarState } from "./use-sidebar-state";
 import { prefetchProjectCatalog } from "../project-catalog-client";
+import { prefetchSettingsPage } from "../settings-prefetch";
 import { conversationActivity, stopConversationActivity, useChatActivity } from "../chat-activity";
 
 const navigation = ["Settings"];
@@ -185,8 +186,8 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
             <Link
               className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`}
               to={href}
-              onMouseEnter={() => { if (href === "/settings/projects") prefetchProjectCatalog(); }}
-              onFocus={() => { if (href === "/settings/projects") prefetchProjectCatalog(); }}
+              onMouseEnter={() => { if (href === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(href); }}
+              onFocus={() => { if (href === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(href); }}
               onClick={onClose}
             >
               {item === "Settings" ? t("common.settings") : item === "Projects" ? "Projects" : item}

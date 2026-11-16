@@ -1,3 +1,4 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { listProjectCompanies } from "./website-builder-cache";
@@ -62,8 +63,10 @@ function CodeSettingsPageContent() {
   const [companies, setCompanies] = useState<CompanySummary[]>(() => readCachedCompanies<CompanySummary>());
   const [companyId, setCompanyId] = useState<string>("");
 
-  const [projects, setProjects] = useState<CodeProject[]>([]);
-  const [sessions, setSessions] = useState<CodeSession[]>([]);
+  const initialSnapshot = useMemo(() => readSettingsSnapshot<{ projects: CodeProject[]; sessions: CodeSession[] }>("code:all"), []);
+  const companyIdsKey = companies.map(company => company.id).join("\0");
+  const [projects, setProjects] = useState<CodeProject[]>(initialSnapshot?.projects ?? []);
+  const [sessions, setSessions] = useState<CodeSession[]>(initialSnapshot?.sessions ?? []);
   const [limits, setLimits] = useState<CodeLimits | null>(null);
   const [limitsError, setLimitsError] = useState<string | null>(null);
 
@@ -133,13 +136,23 @@ function CodeSettingsPageContent() {
   useEffect(() => {
     const scopeIds = companyId ? [companyId] : companies.map(company => company.id);
     if (!scopeIds.length) {
-      setProjects([]);
-      setSessions([]);
+      if (companyId) { setProjects([]); setSessions([]); }
       setLimits(null);
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    const snapshotKey = `code:${companyId || "all"}`;
+    const cached = readSettingsSnapshot<{ projects: CodeProject[]; sessions: CodeSession[] }>(snapshotKey);
+    if (cached) { setProjects(cached.projects); setSessions(cached.sessions); }
+    else if (companyId) { setProjects([]); setSessions([]); }
+    const publish = (pages: Array<{ projects: CodeProject[]; sessions: CodeSession[]; limits?: CodeLimits | null }>) => {
+      if (cancelled) return;
+      const data = { projects: pages.flatMap(page => page.projects), sessions: pages.flatMap(page => page.sessions) };
+      setProjects(data.projects); setSessions(data.sessions);
+      writeSettingsSnapshot(snapshotKey, data);
+      if (data.projects.length || data.sessions.length) setLoading(false);
+    };
+    setLoading(!cached);
     void loadCompanyScopes(scopeIds, async id => {
       const base = "/companies/" + encodeURIComponent(id);
       const [projectList, sessionList, limitsList] = await Promise.all([
@@ -149,11 +162,10 @@ function CodeSettingsPageContent() {
       ]);
       const companyName = companies.find(company => company.id === id)?.name;
       return { projects: projectList.map(item => ({ ...item, companyId: id, companyName })), sessions: sessionList.map(item => ({ ...item, companyId: id, companyName })), limits: limitsList };
-    })
+    }, { key: "code", initial: cached ? scopeIds.map(id => ({ projects: cached.projects.filter(item => item.companyId === id), sessions: cached.sessions.filter(item => item.companyId === id), limits: null })) : undefined, isActive: () => !cancelled, onProgress: publish })
       .then(pages => {
         if (cancelled) return;
-        setProjects(pages.flatMap(page => page.projects));
-        setSessions(pages.flatMap(page => page.sessions));
+        publish(pages);
         const limitsList = companyId ? pages[0]?.limits ?? null : null;
         setLimits(limitsList);
         setLimitsError(!companyId || limitsList ? null : isUk ? "Ліміти недоступні." : "Limits are unavailable.");
@@ -165,7 +177,7 @@ function CodeSettingsPageContent() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [companyId, companies, reloadToken, isUk]);
+  }, [companyId, companyIdsKey, reloadToken, isUk]);
 
   const companyList = Array.isArray(companies) ? companies : [];
   const projectList = Array.isArray(projects) ? projects : [];

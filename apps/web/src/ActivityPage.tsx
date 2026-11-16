@@ -1,3 +1,5 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
+import { SettingsListMore, useProgressiveSettingsItems } from "./useProgressiveSettingsItems";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
@@ -28,6 +30,7 @@ import type {
 } from "./activity-types";
 import {
   visibleRunTask,
+  activityRunSummary,
   getCachedRuns,
   updateCachedRuns,
 } from "./activity-types";
@@ -42,9 +45,11 @@ export function ActivityPage() {
     () => new URLSearchParams(window.location.search).get("company") || (new URLSearchParams(window.location.search).get("runId") ? chooseAvailableCompanyId(initialCompanies) : ALL_COMPANIES),
     [initialCompanies]
   );
-  const initialRuns = useMemo(() => getCachedRuns(initialCompanyId), [initialCompanyId]);
+  const initialRuns = useMemo(() => readSettingsSnapshot<CompanyRun[]>(`activity:${initialCompanyId}`) ?? getCachedRuns(initialCompanyId), [initialCompanyId]);
 
   const [companies, setCompanies] = useState<CompanyItem[]>(initialCompanies);
+  const companyIdsKey = companies.map(company => company.id).join("\0");
+  const runLoadVersion = useRef(0);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
   const [runs, setRuns] = useState<CompanyRun[]>(initialRuns);
   const selectedCompanyRef=useRef(selectedCompanyId);
@@ -90,7 +95,8 @@ export function ActivityPage() {
     setSelectedCompanyId(companyId);
     if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId);
     allCodingCursors.current.clear();
-    const cachedForNewCompany = getCachedRuns(companyId);
+    ++runLoadVersion.current;
+    const cachedForNewCompany = readSettingsSnapshot<CompanyRun[]>(`activity:${companyId}`) ?? getCachedRuns(companyId);
     setRuns([]);setSelectedRunId("");setActiveRunDetails(null);setCodingCursor(null);
     if (cachedForNewCompany.length > 0) {
       setRuns(cachedForNewCompany);
@@ -117,7 +123,9 @@ export function ActivityPage() {
 
   // Fetch runs for the selected company
   const loadRuns = async (companyId: string, isManualRefresh = false) => {
-    if (!companyId) return;
+    if (!companyId || companyId === ALL_COMPANIES && !companies.length) return;
+    const version = ++runLoadVersion.current;
+    const snapshotKey = `activity:${companyId}`;
     if (isManualRefresh) setRefreshing(true);
     else if (runs.length === 0) setLoading(true);
     setError(null);
@@ -128,6 +136,14 @@ export function ActivityPage() {
 
     try {
       const scopeIds = companyId === ALL_COMPANIES ? companies.map(company => company.id) : [companyId];
+      const cached = readSettingsSnapshot<CompanyRun[]>(snapshotKey);
+      const publish = (pages: Array<{ items: CompanyRun[] }>) => {
+        if (version !== runLoadVersion.current || selectedCompanyRef.current !== companyId) return;
+        const items = pages.flatMap(page => page.items).sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt));
+        const merged = [...items, ...runsRef.current.filter(run => scopeIds.includes(run.companyId) && run.requestedMode.startsWith("coding") && !items.some(item => item.id === run.id))];
+        runsRef.current = merged; setRuns(merged); writeSettingsSnapshot(snapshotKey, merged.map(activityRunSummary));
+        if (merged.length) { setLoading(false); setSelectedRunId(previous => previous || merged[0]!.id); }
+      };
       const pages = await loadCompanyScopes(scopeIds, async id => {
         const [res, coding] = await Promise.all([fetch(`/api/companies/${id}/runs?limit=50`, { headers }), fetch(`/api/companies/${id}/code/monitor/runs`, { headers })]);
         if (!res.ok || !coding.ok) throw new Error(`HTTP ${!res.ok ? res.status : coding.status}: Failed to load runs`);
@@ -139,8 +155,8 @@ export function ActivityPage() {
           if (linked.ok) items.unshift({ ...(await linked.json()).run, companyId: id });
         }
         return { id, items, cursor: codeData.nextCursor };
-      });
-      if (selectedCompanyRef.current !== companyId) return;
+      }, { key: `activity:${queryRunId || ""}`, initial: cached ? scopeIds.map(id => ({ id, items: cached.filter(run => run.companyId === id), cursor: allCodingCursors.current.get(id) ?? null })) : undefined, isActive: () => version === runLoadVersion.current && selectedCompanyRef.current === companyId, onProgress: publish });
+      if (selectedCompanyRef.current !== companyId || version !== runLoadVersion.current) return;
       const items = pages.flatMap(page => page.items).sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt));
       pages.forEach(page => updateCachedRuns(page.id, page.items));
       if (companyId === ALL_COMPANIES) {
@@ -150,7 +166,7 @@ export function ActivityPage() {
         if(historyCursor.current?.companyId!==companyId) historyCursor.current={companyId,cursor:pages[0]?.cursor ?? null};
         setCodingCursor(historyCursor.current.cursor);
       }
-      setRuns(previous => [...items, ...previous.filter(run => (companyId === ALL_COMPANIES ? scopeIds.includes(run.companyId) : run.companyId === companyId) && run.requestedMode.startsWith("coding") && !items.some(item => item.id === run.id))]);
+      publish(pages);
 
       if (items.length > 0) {
         // If current selection is still in list keep it, otherwise pick first
@@ -163,10 +179,9 @@ export function ActivityPage() {
         setActiveRunDetails(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("activity.errors.loadRunsFailed"));
+      if (version === runLoadVersion.current) setError(err instanceof Error ? err.message : t("activity.errors.loadRunsFailed"));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (version === runLoadVersion.current) { setLoading(false); setRefreshing(false); }
     }
   };
 
@@ -174,7 +189,8 @@ export function ActivityPage() {
     if (selectedCompanyId) {
       loadRuns(selectedCompanyId);
     }
-  }, [selectedCompanyId, companies]);
+    return () => { ++runLoadVersion.current; };
+  }, [selectedCompanyId, companyIdsKey]);
 
   const selectedRunCompanyId = runs.find(run => run.id === selectedRunId)?.companyId || (selectedCompanyId === ALL_COMPANIES ? "" : selectedCompanyId);
 
@@ -212,9 +228,9 @@ export function ActivityPage() {
 
   useEffect(()=>{
     if(!selectedCompanyId) return;
-    const timer=setInterval(()=>{if(!document.hidden) void loadRuns(selectedCompanyId);},10000);
+    const timer=setInterval(()=>{if(!document.hidden) void loadRuns(selectedCompanyId);},selectedCompanyId === ALL_COMPANIES ? 30000 : 10000);
     return()=>clearInterval(timer);
-  },[selectedCompanyId, companies]);
+  },[selectedCompanyId, companyIdsKey]);
 
   const loadOlderCodingRuns=async()=>{
     if(!codingCursor) return;
@@ -336,6 +352,11 @@ export function ActivityPage() {
       return true;
     });
   }, [runs, statusFilter, searchQuery]);
+
+  const visiblePage = useProgressiveSettingsItems(filteredRuns, `${selectedCompanyId}:${statusFilter}:${searchQuery}`, 20);
+  const selectedVisibleRun = filteredRuns.find(run => run.id === selectedRunId);
+  const visibleRuns = selectedVisibleRun && !visiblePage.items.some(run => run.id === selectedRunId)
+    ? [...visiblePage.items, selectedVisibleRun] : visiblePage.items;
 
   const quickPrompts = useMemo(() => [
     { label: t("activity.dispatch.presets.marketAuditLabel"), prompt: t("activity.dispatch.presets.marketAuditPrompt") },
@@ -661,7 +682,7 @@ export function ActivityPage() {
                 </div>
               ) : (
                 <div className="activity-run-list">
-                  {filteredRuns.map((r) => {
+                  {visibleRuns.map((r) => {
                     const isSelected = selectedRunId === r.id;
                     const dateObj = new Date(r.createdAt);
                     const timeFormatted = dateObj.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -689,6 +710,7 @@ export function ActivityPage() {
                       </button>
                     );
                   })}
+                  <SettingsListMore state={visiblePage} label={language === "uk" ? "Завантажити ще" : "Load more"} />
                 </div>
               )}
               {codingCursor && <button type="button" className="button-secondary" onClick={()=>void loadOlderCodingRuns()}>{language==="uk"?"Попередні Coding Runs":"Older Coding Runs"}</button>}

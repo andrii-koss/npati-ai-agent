@@ -2,6 +2,7 @@ import type { EmailThread } from "../email-inbox-shared";
 import { getStatusLabel } from "../email-inbox-shared";
 import { useTranslation } from "../i18n";
 import type { EmailFolder } from "./FolderSidebar";
+import { SettingsListMore, useProgressiveSettingsItems } from "../useProgressiveSettingsItems";
 
 export interface ThreadListColumnProps {
   readingFocus: boolean;
@@ -13,6 +14,8 @@ export interface ThreadListColumnProps {
   onPriorityFilterChange: (priority: string) => void;
   folder: EmailFolder;
   threads: EmailThread[];
+  loading?: boolean;
+  listKey?: string;
   selectedThreadId: string | null;
   onOpenThread: (thread: EmailThread) => void;
   language: string;
@@ -59,11 +62,16 @@ export function ThreadListColumn({
   onPriorityFilterChange,
   folder,
   threads,
+  loading = false,
+  listKey = "",
   selectedThreadId,
   onOpenThread,
   language,
 }: ThreadListColumnProps) {
   const { t } = useTranslation();
+  const visiblePage = useProgressiveSettingsItems(threads, `${listKey}:${folder}:${statusFilter}:${priorityFilter}:${searchQuery}`, 20);
+  const selected = threads.find(thread => thread.id === selectedThreadId);
+  const visibleThreads = selected && !visiblePage.items.some(thread => thread.id === selectedThreadId) ? [...visiblePage.items, selected] : visiblePage.items;
 
   return (
     <div className={`email-inbox-threads-col ${readingFocus ? "hidden" : ""}`}>
@@ -120,7 +128,9 @@ export function ThreadListColumn({
 
       {/* Threads Scroll List */}
       <div className="email-inbox-threads-scroll">
-        {threads.length === 0 ? (
+        {threads.length === 0 && loading ? (
+          <div role="status" style={{ padding: "40px 20px", textAlign: "center" }}>{language === "uk" ? "Завантаження листування…" : "Loading conversations..."}</div>
+        ) : threads.length === 0 ? (
           <div style={{ padding: "40px 20px", textAlign: "center" }}>
             <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
             <strong style={{ display: "block", marginBottom: 4, color: "#1e293b" }}>
@@ -129,7 +139,7 @@ export function ThreadListColumn({
             <small style={{ color: "#475569" }}>{getEmptyFolderHint(folder, t)}</small>
           </div>
         ) : (
-          threads.map((tItem) => {
+          visibleThreads.map((tItem) => {
             const isSelected = tItem.id === selectedThreadId;
             return (
               <div
@@ -174,6 +184,7 @@ export function ThreadListColumn({
             );
           })
         )}
+        <SettingsListMore state={visiblePage} label={language === "uk" ? "Завантажити ще" : "Load more"} />
       </div>
     </div>
   );

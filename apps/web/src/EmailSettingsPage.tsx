@@ -1,3 +1,4 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { readEmailCollection, mergeEmailAnalytics } from "./email-company-scope";
 import { listProjectCompanies } from "./website-builder-cache";
@@ -47,6 +48,7 @@ export function EmailSettingsPage() {
   const { t, language } = useTranslation();
   const { overview } = useWorkspace();
   const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
+  const companyIdsKey = companies.map(company => company.id).join("\0");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
     const currentUrl = new URL(window.location.href);
     return currentUrl.searchParams.get("company") || ALL_COMPANIES;
@@ -55,7 +57,7 @@ export function EmailSettingsPage() {
   const [accounts, setAccounts] = useState<EmailAccount[]>(() => {
     const currentUrl = new URL(window.location.href);
     const scope = currentUrl.searchParams.get("company") || ALL_COMPANIES;
-    return readCachedAccounts(scope);
+    return readSettingsSnapshot<EmailAccount[]>(`email-accounts:${scope}`) ?? readCachedAccounts(scope);
   });
   const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
   const [searchQuery, setSearchQuery] = useState("");
@@ -218,8 +220,8 @@ export function EmailSettingsPage() {
   // Analytics
   const [analytics, setAnalytics] = useState<EmailAnalytics | null>(() => {
     const currentUrl = new URL(window.location.href);
-    const scope = getInitialCompanyScope(currentUrl.searchParams.get("company"));
-    return readCachedAnalytics(scope);
+    const scope = currentUrl.searchParams.get("company") || ALL_COMPANIES;
+    return readSettingsSnapshot<EmailAnalytics>(`email-analytics:${scope}`) ?? readCachedAnalytics(scope);
   });
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
 
@@ -260,16 +262,30 @@ export function EmailSettingsPage() {
     let active = true;
     if (selectedCompanyId === ALL_COMPANIES) {
       const ids = companies.map(company => company.id);
-      setAccounts([]); setAgents([]); setAnalytics(null); setLoading(true);
-      void Promise.all([
-        readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts"),
-        readEmailCollection<Agent>(ids, "agents", "agents"),
-        loadCompanyScopes(ids, id => api<{ analytics: EmailAnalytics }>(`/companies/${id}/email-inbox/analytics`).then(result => result.analytics)),
-      ]).then(([accounts, agents, analytics]) => {
+      if (!ids.length) return;
+      const cached = readSettingsSnapshot<EmailAccount[]>("email-accounts:all");
+      if (cached) setAccounts(cached);
+      const analytics = readSettingsSnapshot<EmailAnalytics>("email-analytics:all");
+      if (analytics) setAnalytics(analytics);
+      setLoading(!cached);
+      const publish = (accounts: EmailAccount[]) => {
         if (!active) return;
-        setAccounts(accounts); setAgents(agents); setAnalytics(mergeEmailAnalytics(analytics.filter(Boolean)));
-      }).catch(error => { if (active) setNotice(error.message); })
-        .finally(() => { if (active) setLoading(false); });
+        setAccounts(accounts); writeSettingsSnapshot("email-accounts:all", accounts);
+        if (accounts.length) setLoading(false);
+      };
+      void readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts", { onProgress: publish, isActive: () => active, initial: cached })
+        .then(accounts => {
+          if (!active) return;
+          publish(accounts);
+          const agentOwners = [...new Set(accounts.filter(account => account.agentId).map(account => account.companyId))];
+          void readEmailCollection<Agent>(agentOwners, "agents", "agents", { isActive: () => active })
+            .then(agents => { if (active) setAgents(agents); }).catch(() => undefined);
+          // Analytics starts after mailboxes have painted and never holds their list back.
+          void loadCompanyScopes(ids, id => api<{ analytics: EmailAnalytics }>(`/companies/${id}/email-inbox/analytics`).then(result => result.analytics), { key: "email-analytics", isActive: () => active, onProgress: analytics ? undefined : pages => { if (active) setAnalytics(mergeEmailAnalytics(pages.filter(Boolean))); } })
+            .then(pages => { if (active) { const merged = mergeEmailAnalytics(pages.filter(Boolean)); setAnalytics(merged); if (merged) writeSettingsSnapshot("email-analytics:all", merged); } })
+            .catch(() => undefined);
+        }).catch(error => { if (active) setNotice(error.message); })
+          .finally(() => { if (active) setLoading(false); });
       return () => { active = false; };
     }
     const personalScope = selectedCompanyId === "personal";
@@ -291,7 +307,7 @@ export function EmailSettingsPage() {
       .catch((e) => setNotice(e.message))
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [selectedCompanyId, companies]);
+  }, [selectedCompanyId, companyIdsKey]);
 
   // Load rules/templates/contacts on tab switch
   useEffect(() => {
@@ -349,7 +365,7 @@ export function EmailSettingsPage() {
         .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope: string) => scope.startsWith("email:")))))
         .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     }
-  }, [selectedCompanyId, activeTab, companies]);
+  }, [selectedCompanyId, activeTab, companyIdsKey]);
 
   async function createPermissionKey(event: FormEvent) {
     event.preventDefault();

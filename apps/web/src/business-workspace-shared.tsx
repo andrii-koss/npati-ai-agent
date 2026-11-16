@@ -1,4 +1,5 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
+import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from "./settings-page-cache";
 import { ReactNode, createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { chatOpen, isChatPage } from "./chat-open";
@@ -80,13 +81,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(() => getInitialWorkspaceOverview() === null);
   const [error, setError] = useState("");
   async function refresh(initial = false) {
+    const cached = getInitialWorkspaceOverview();
+    if (cached) setOverview(previous => previous ?? cached);
     if (!overview && !cachedWorkspaceOverview) {
       setLoading(true);
     }
     try {
       // Opening a chat page reads the overview from its single open request instead of a request of its own.
       const opened = initial && isChatPage() ? await chatOpen().catch(() => null) : null;
-      const nextOverview = opened?.overview ?? await api<WorkspaceOverview>("/workspace/context");
+      const nextOverview = opened?.overview ?? await requestSettingsRead("business:overview", () => api<WorkspaceOverview>("/workspace/context"));
+      if (getStoredAuthToken() !== token) return;
       updateCachedWorkspaceOverview(nextOverview);
       setOverview((prev) => {
         if (prev && JSON.stringify(prev) === JSON.stringify(nextOverview)) {
@@ -162,21 +166,13 @@ export type WorkspaceOverview = {
 };
 export let cachedWorkspaceOverview: WorkspaceOverview | null = null;
 export function getInitialWorkspaceOverview(): WorkspaceOverview | null {
-  if (cachedWorkspaceOverview) return cachedWorkspaceOverview;
-  try {
-    const raw = sessionStorage.getItem(WORKSPACE_OVERVIEW_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && Array.isArray(parsed.businesses)) {
-        cachedWorkspaceOverview = parsed as WorkspaceOverview;
-        return cachedWorkspaceOverview;
-      }
-    }
-  } catch { /* storage may be restricted */ }
-  return null;
+  const cached = readSettingsSnapshot<WorkspaceOverview>("business:overview");
+  cachedWorkspaceOverview = cached ?? null;
+  return cachedWorkspaceOverview;
 }
 export function updateCachedWorkspaceOverview(data: WorkspaceOverview) {
   cachedWorkspaceOverview = data;
+  writeSettingsSnapshot("business:overview", data);
   try {
     sessionStorage.setItem(WORKSPACE_OVERVIEW_STORAGE_KEY, JSON.stringify(data));
   } catch { /* storage may be restricted */ }

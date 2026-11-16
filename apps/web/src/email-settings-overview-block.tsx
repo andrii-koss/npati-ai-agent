@@ -1,4 +1,5 @@
 import { ALL_COMPANIES } from "./company-scope";
+import { prefetchSettingsPage } from "./settings-prefetch";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { Link } from "react-router-dom";
@@ -91,6 +92,8 @@ export function EmailSettingsOverviewBlock({ selectedCompanyId, t, setSelectedCo
         <div className="email-scope-right">
           <Link
             to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?compose=1&company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox?compose=1"}
+            onMouseEnter={event => prefetchSettingsPage(event.currentTarget.getAttribute("href") || "/settings/email/inbox")}
+            onFocus={event => prefetchSettingsPage(event.currentTarget.getAttribute("href") || "/settings/email/inbox")}
             className="email-compose-btn"
             title={accounts.length ? t("emailSettings.scope.composeTitle") : t("emailSettings.scope.composeDisabledTitle")}
             aria-disabled={accounts.length === 0}

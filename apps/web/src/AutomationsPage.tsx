@@ -1,3 +1,4 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { listProjectCompanies } from "./website-builder-cache";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
@@ -40,11 +41,12 @@ export function AutomationsPage() {
   const requestedCompanyId = searchParams.get("company") ?? "";
   const cachedCompanies = useMemo(() => readCachedCompanies<Company>(), []);
   const [companies, setCompanies] = useState<Company[]>(cachedCompanies);
+  const companyIdsKey = companies.map(company => company.id).join("\0");
   const initialCompanyId = useMemo(() => {
     return requestedCompanyId || ALL_COMPANIES;
   }, [cachedCompanies, requestedCompanyId]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
-  const initialAutomations = useMemo(() => getCachedAutomations(initialCompanyId), [initialCompanyId]);
+  const initialAutomations = useMemo(() => readSettingsSnapshot<CompanyAutomation[]>(`automations:${initialCompanyId}`) ?? getCachedAutomations(initialCompanyId), [initialCompanyId]);
   const [automations, setAutomations] = useState<CompanyAutomation[]>(initialAutomations);
   const [agents, setAgents] = useState<Agent[]>(() => getCachedAgents(initialCompanyId));
   const [loading, setLoading] = useState(() => initialAutomations.length === 0);
@@ -127,18 +129,24 @@ export function AutomationsPage() {
     if (!selectedCompanyId) return;
     let active = true;
     if (selectedCompanyId === ALL_COMPANIES) {
-      setLoading(true);
-      setBrowserTargets([]); setBrowserEmails([]);
-      void loadCompanyScopes(companies.map(company => company.id), async id => {
-        const [auto, agent] = await Promise.all([
-          api<{ automations: CompanyAutomation[] }>(`/companies/${id}/automations`),
-          api<{ agents: Agent[] }>(`/companies/${id}/agents`),
-        ]);
-        return { automations: auto.automations.map(item => ({ ...item, companyId: id })), agents: agent.agents };
-      }).then(pages => {
+      const cached = readSettingsSnapshot<CompanyAutomation[]>("automations:all");
+      if (cached) setAutomations(cached);
+      setLoading(!cached); setBrowserTargets([]); setBrowserEmails([]);
+      const publish = (pages: Array<{ automations: CompanyAutomation[] }>) => {
         if (!active) return;
-        setAutomations(pages.flatMap(page => page.automations));
-        setAgents(pages.flatMap(page => page.agents));
+        const records = pages.flatMap(page => page.automations);
+        setAutomations(records); writeSettingsSnapshot("automations:all", records);
+        if (records.length) setLoading(false);
+      };
+      void loadCompanyScopes(companies.map(company => company.id), async id => {
+        const auto = await api<{ automations: CompanyAutomation[] }>(`/companies/${id}/automations`);
+        return { automations: auto.automations.map(item => ({ ...item, companyId: id })) };
+      }, { key: "automations", initial: cached ? companies.map(company => ({ automations: cached.filter(item => item.companyId === company.id) })) : undefined, isActive: () => active, onProgress: publish }).then(pages => {
+        if (!active) return;
+        publish(pages);
+        const ids = [...new Set(pages.flatMap(page => page.automations).filter(item => item.agentId).map(item => item.companyId))];
+        void loadCompanyScopes(ids, id => api<{ agents: Agent[] }>(`/companies/${id}/agents`), { key: "agents", isActive: () => active })
+          .then(pages => { if (active) setAgents(pages.flatMap(page => page.agents)); }).catch(() => undefined);
       }).catch(error => { if (active) setNotice(error.message); })
         .finally(() => { if (active) setLoading(false); });
       return () => { active = false; };
@@ -177,7 +185,7 @@ export function AutomationsPage() {
     return () => {
       active = false;
     };
-  }, [selectedCompanyId, companies]);
+  }, [selectedCompanyId, companyIdsKey]);
 
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === selectedCompanyId),

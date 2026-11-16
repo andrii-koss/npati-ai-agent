@@ -1,10 +1,15 @@
 import { loadCompanyScopes } from "./company-scope";
 import { api, type EmailAnalytics } from "./email-settings-types";
 
-export async function readEmailCollection<T>(ids: string[], path: string, key: string): Promise<Array<T & { companyId: string }>> {
+export async function readEmailCollection<T>(ids: string[], path: string, key: string, options: {
+  initial?: T[]; onProgress?: (records: Array<T & { companyId: string }>) => void; isActive?: () => boolean;
+} = {}): Promise<Array<T & { companyId: string }>> {
   const pages = await loadCompanyScopes(ids, async id => {
     const response = await api<Record<string, T[]>>(`/companies/${id}/${path}`);
     return (response[key] ?? []).map(item => ({ ...item, companyId: id }));
+  }, { key: `email:${path}`, isActive: options.isActive,
+    initial: options.initial ? ids.map(id => options.initial!.filter(item => (item as { companyId?: string }).companyId === id).map(item => ({ ...item, companyId: id }))) : undefined,
+    onProgress: options.onProgress ? pages => options.onProgress!(pages.flat()) : undefined,
   });
   return pages.flat();
 }

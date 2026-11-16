@@ -11,6 +11,7 @@ import { EmailSettingsPage } from "./EmailSettingsPage";
 import { EmailInboxPage } from "./EmailInboxPage";
 import { CodeSettingsPage } from "./CodeSettingsPage";
 import { BusinessPage } from "./business-workspace-page-views";
+import { clearSettingsSnapshots } from "./settings-page-cache";
 
 const fixture = vi.hoisted(() => {
   const companies = [{ id: "alpha", name: "Alpha Company", businessStage: "active" }, { id: "beta", name: "Beta Company", businessStage: "active" }];
@@ -26,7 +27,7 @@ let host: HTMLDivElement, root: Root;
 const requests: string[] = [];
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  requests.length = 0; localStorage.clear(); sessionStorage.clear();
+  clearSettingsSnapshots(); requests.length = 0; localStorage.clear(); sessionStorage.clear();
   localStorage.setItem("npati_selected_company_id_v1", "beta");
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -53,7 +54,102 @@ beforeEach(() => {
     return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
   }));
 });
+
+it("paints email accounts without waiting for slow analytics", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const analytics = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/email-inbox/analytics")) { await analytics; return new Response(JSON.stringify({ analytics: null })); }
+    return original(input, init);
+  });
+  await act(async () => root.render(<MemoryRouter><EmailSettingsPage /></MemoryRouter>));
+  expect(host.textContent).toContain("alpha@example.com");
+  expect(host.textContent).toContain("beta@example.com");
+  await act(async () => release());
+});
+
+it("keeps code records visible immediately on remount while the refresh is pending", async () => {
+  await act(async () => root.render(<MemoryRouter><CodeSettingsPage /></MemoryRouter>));
+  expect(host.textContent).toContain("Record alpha");
+  await act(async () => root.unmount()); root = createRoot(host);
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const refresh = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => { await refresh; return original(input, init); });
+  await act(async () => root.render(<MemoryRouter><CodeSettingsPage /></MemoryRouter>));
+  expect(host.textContent).toContain("Record alpha");
+  expect(host.textContent).toContain("Record beta");
+  await act(async () => release());
+});
+
+it("mounts the first business cards immediately and loads more on demand without losing totals", async () => {
+  const previous = fixture.workspace.overview.businesses;
+  fixture.workspace.overview.businesses = Array.from({ length: 40 }, (_, index) => ({ id: `business-${index}`, name: `Business ${index}`, businessStage: "active" }));
+  try {
+    await act(async () => root.render(<MemoryRouter><BusinessPage /></MemoryRouter>));
+    expect(host.querySelectorAll(".biz-card")).toHaveLength(12);
+    expect(host.querySelector(".business-stats-grid")?.textContent).toContain("40");
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Load more")!.click());
+    expect(host.querySelectorAll(".biz-card")).toHaveLength(24);
+  } finally { fixture.workspace.overview.businesses = previous; }
+});
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+
+it("shows a ready Inbox conversation and its body before slow companies, counts, notifications and audit finish", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const slow = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/beta/email-inbox/threads?") || url.includes("/folder-counts") || url.endsWith("/notifications") || url.endsWith("/audit")) await slow;
+    return original(input, init);
+  });
+  await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
+  expect(host.querySelector(".email-inbox-thread-card")?.textContent).toContain("Record alpha");
+  expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record alpha");
+  expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).not.toContain("Record beta");
+  await act(async () => release());
+  expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).toContain("Record beta");
+});
+
+it("restores Inbox conversations and the selected body immediately while the refresh is pending", async () => {
+  await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
+  expect(host.querySelector(".email-inbox-detail-header")).not.toBeNull();
+  await act(async () => root.unmount()); root = createRoot(host);
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const refresh = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => { await refresh; return original(input, init); });
+  await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
+  expect(host.querySelectorAll(".email-inbox-thread-card")).toHaveLength(2);
+  expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record alpha");
+  await act(async () => release());
+});
+
+it("ignores delayed Inbox search results after the query changes", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const oldQuery = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/threads?") && (url.includes("search=old") || url.includes("search=new"))) {
+      const old = url.includes("search=old");
+      if (old) await oldQuery;
+      const id = url.includes("/alpha/") ? "alpha" : "beta";
+      return new Response(JSON.stringify({ threads: [{ id: `${id}-${old ? "old" : "new"}`, companyId: id, subject: old ? "Obsolete result" : "Newest result", customerEmail: `${id}@example.com`, unreadCount: 0, lastMessageAt: "2026-11-16", folder: "inbox", status: "new", priority: "normal" }] }));
+    }
+    return original(input, init);
+  });
+  await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="emailInbox.threadsList.searchAria"]')!;
+  const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => { set.call(input, "old"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => { set.call(input, "new"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).toContain("Newest result");
+  await act(async () => release());
+  expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).not.toContain("Obsolete result");
+});
 
 it.each([
   ["goals", GoalsPage, "Record alpha", "Record beta"],

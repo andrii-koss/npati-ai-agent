@@ -1,3 +1,5 @@
+import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
+import { SettingsListMore, useProgressiveSettingsItems } from "./useProgressiveSettingsItems";
 import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
@@ -102,7 +104,7 @@ function getInitialBusinessName(): string {
 
 export function MemoryPage() {
   const { t, language } = useTranslation();
-  const { overview, loading: workspaceLoading, refresh, switchBusiness } = useWorkspace();
+  const { overview, refresh, switchBusiness } = useWorkspace();
   const business = useLinkedBusiness(overview, switchBusiness);
   const [scopeParams] = useSearchParams();
   const [companyScope, setCompanyScope] = useState(() => scopeParams.get("business") || ALL_COMPANIES);
@@ -111,7 +113,7 @@ export function MemoryPage() {
   const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
   const businessName = companyScope === ALL_COMPANIES ? (language === "uk" ? "Усі компанії" : "All companies") : business?.name ?? (overview ? "" : getInitialBusinessName());
 
-  const [items, setItems] = useState<MemoryItem[]>(() => getCachedMemory(businessId));
+  const [items, setItems] = useState<MemoryItem[]>(() => readSettingsSnapshot<MemoryItem[]>(`memory:${companyScope}`) ?? (companyScope === ALL_COMPANIES ? scopeIds.flatMap(id => getCachedMemory(id)) : getCachedMemory(businessId)));
   const [loading, setLoading] = useState(() => getCachedMemory(businessId).length === 0);
   const [search, setSearch] = useState("");
   const [selectedTab, setSelectedTab] = useState<string>("all");
@@ -134,19 +136,27 @@ export function MemoryPage() {
   const loadMemory = async () => {
     const version = ++loadVersion.current;
     if (!scopeIds.length) {
-      setItems([]);
+      if (overview) setItems([]);
       setLoading(false);
       return;
     }
-    setItems(scopeIds.flatMap(id => getCachedMemory(id)));
+    const snapshotKey = `memory:${companyScope}`;
+    const cached = readSettingsSnapshot<MemoryItem[]>(snapshotKey);
+    if (cached) setItems(cached);
+    const publish = (data: MemoryItem[]) => {
+      if (version !== loadVersion.current) return;
+      setItems(data);
+      writeSettingsSnapshot(snapshotKey, data);
+      if (data.length) setLoading(false);
+    };
     try {
       const pages = await loadCompanyScopes(scopeIds, async id => {
         const records = await api<MemoryItem[]>(`/businesses/${id}/memory`);
         return { id, records: records.map(item => ({ ...item, businessId: id })) };
-      });
+      }, { key: "memory", initial: cached ? scopeIds.map(id => ({ id, records: cached.filter(item => item.businessId === id) })) : undefined, isActive: () => version === loadVersion.current, onProgress: pages => publish(pages.flatMap(page => page.records)) });
       const data = pages.flatMap(page => page.records);
       if (version !== loadVersion.current) return;
-      setItems(data);
+      publish(data);
       pages.forEach(page => updateCachedMemory(page.id, page.records));
     } catch (error) {
       if (version !== loadVersion.current) return;
@@ -162,7 +172,8 @@ export function MemoryPage() {
 
   useEffect(() => {
     void loadMemory();
-  }, [scopeKey, workspaceLoading]);
+    return () => { ++loadVersion.current; };
+  }, [scopeKey]);
 
   // Tab definitions
   const tabs = useMemo(() => {
@@ -236,6 +247,7 @@ export function MemoryPage() {
     });
   }, [items, selectedTab, search, t]);
 
+  const visiblePage = useProgressiveSettingsItems(filteredItems, `${companyScope}:${selectedTab}:${search}`);
   const openCreateDrawer = () => {
     if (companyScope === ALL_COMPANIES && businessId) setCompanyScope(businessId);
     setEditingItem(null);
@@ -506,7 +518,7 @@ export function MemoryPage() {
         </div>
       ) : (
         <div className="memory-grid">
-          {filteredItems.map((item) => {
+          {visiblePage.items.map((item) => {
             const meta = MEMORY_TYPE_META[item.type] || MEMORY_TYPE_META.other;
             return (
               <article key={item.id} className="memory-card">
@@ -601,6 +613,7 @@ export function MemoryPage() {
       )}
 
       {/* Slide-over Drawer for Add / Edit Memory */}
+      <SettingsListMore state={visiblePage} label={language === "uk" ? "Завантажити ще" : "Load more"} />
       <MemoryDrawer
         drawerOpen={drawerOpen}
         setDrawerOpen={setDrawerOpen}
