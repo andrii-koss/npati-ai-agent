@@ -46,8 +46,9 @@ export function registerDataStudioRoutes(
     service!.rows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body ?? {})));
   app.post<{ Params: Params; Body: { row: Record<string, unknown> } }>(base + "/collections/:collection/rows", (request, reply) => run(request, reply, "business:manage", (ctx) =>
     service!.createRow(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.row)));
-  app.patch<{ Params: Params; Body: { row: Record<string, unknown> } }>(base + "/collections/:collection/rows/:id", (request, reply) => run(request, reply, "business:manage", (ctx) =>
-    service!.updateRow(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.params.id!, request.body.row)));
+  app.patch<{ Params: Params; Body: { row: Record<string, unknown>; expected?: Record<string, unknown> } }>(base + "/collections/:collection/rows/:id", (request, reply) => run(request, reply, "business:manage", (ctx) =>
+    service!.updateRow(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.params.id!, request.body.row,
+      request.body.expected && typeof request.body.expected === "object" && !Array.isArray(request.body.expected) ? request.body.expected : undefined)));
   app.post<{ Params: Params; Body: { ids: string[]; confirmed: boolean } }>(base + "/collections/:collection/rows/delete", (request, reply) => run(request, reply, "business:manage", (ctx) =>
     service!.deleteRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.params.collection!, request.body.ids, request.body.confirmed)));
   app.post<{ Params: Params; Body: { format: "csv" | "json"; content: string } }>(base + "/collections/:collection/import", (request, reply) => run(request, reply, "business:manage", (ctx) =>

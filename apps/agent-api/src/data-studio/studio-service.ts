@@ -214,9 +214,9 @@ export class DataStudioUiService {
     return { row: await this.migrations.createOwnerRow(ctx, backend, environment, collection, row) };
   }
 
-  async updateRow(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName, collection: string, id: string, row: Row) {
+  async updateRow(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName, collection: string, id: string, row: Row, expected?: Row) {
     const { backend } = await this.context(ctx, companyId, projectId, environment);
-    return { row: await this.migrations.updateOwnerRow(ctx, backend, environment, collection, id, row) };
+    return { row: await this.migrations.updateOwnerRow(ctx, backend, environment, collection, id, row, expected) };
   }
 
   async deleteRows(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName, collection: string, ids: string[], confirmed: boolean) {

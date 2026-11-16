@@ -136,10 +136,25 @@ export function useDataStudioRows({
       }
 
       if (editingRow?.id) {
-        await apiFetch(
-          `${basePath}/collections/${encodeURIComponent(selectedCollection)}/rows/${encodeURIComponent(String(editingRow.id))}`,
-          { method: "PATCH", body: JSON.stringify({ row: payload }) }
-        );
+        // Only the fields this editor changed are sent, with the values it saw: a change another tab saved to another
+        // field stays, and a change to the same field is refused instead of being overwritten (V6 step 16).
+        const changed = Object.keys(payload).filter((name) => rowFormData[name] !== editingRow[name]);
+        if (!changed.length) { setRowDrawerOpen(false); return; }
+        const row = Object.fromEntries(changed.map((name) => [name, payload[name]]));
+        const expected = Object.fromEntries(changed.map((name) => [name, editingRow[name] ?? null]));
+        try {
+          await apiFetch(
+            `${basePath}/collections/${encodeURIComponent(selectedCollection)}/rows/${encodeURIComponent(String(editingRow.id))}`,
+            { method: "PATCH", body: JSON.stringify({ row, expected }) }
+          );
+        } catch (error) {
+          if (error instanceof Error && /changed by someone else/i.test(error.message)) {
+            notify(isUk ? "Цей рядок щойно змінили в іншому місці. Ваші зміни не збережено: оновіть рядок і спробуйте ще раз." : "This row was just changed elsewhere. Your changes were not saved: reload the row and try again.", "error");
+            await loadRows();
+            return;
+          }
+          throw error;
+        }
         notify(isUk ? "Рядок оновлено" : "Row updated");
       } else {
         await apiFetch(

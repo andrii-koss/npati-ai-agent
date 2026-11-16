@@ -39,6 +39,8 @@ export interface MigrationResult extends MigrationPreview {
 
 import { transferProjectRows, type RowTransferInput } from "./row-transfer";
 
+const rowChanged = () => new DataStudioError(409, "owner_data", "This row was changed by someone else. Reload it and try again.", false, "ROW_CHANGED");
+
 export class ProjectMigrationEngine {
   constructor(
     private readonly provisioner: DatabaseProvisioner,
@@ -351,14 +353,34 @@ export class ProjectMigrationEngine {
     return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, values))[0];
   }
 
-  async updateOwnerRow(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, id: string, row: Record<string, unknown>) {
+  /**
+   * `expected` holds the values the editor saw for the fields it changes. When another tab saved one of them since,
+   * the change is refused with ROW_CHANGED instead of silently overwriting it (V6 step 16). The row version (xmin)
+   * guards the moment between the check and the write.
+   */
+  async updateOwnerRow(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, id: string, row: Record<string, unknown>, expected?: Record<string, unknown>) {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new DataStudioError(400, "owner_data", "Invalid row ID", false, "INVALID_ROW_ID");
     const fields = Object.keys(row).filter((f) => row[f] !== undefined);
     if (!fields.length || fields.length > 100 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
     const values = await this.ownerParameters(ctx, backend, environment, collection, fields, row);
-    const sql = "UPDATE " + quoteIdentifier(collection) + " SET " + fields.map((field, index) => quoteIdentifier(field) + "=$" + (index + 1)).join(",") +
-      " WHERE id=$" + (fields.length + 1) + " RETURNING *";
-    return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, [...values, id]))[0] ?? null;
+    let sql = "UPDATE " + quoteIdentifier(collection) + " SET " + fields.map((field, index) => quoteIdentifier(field) + "=$" + (index + 1)).join(",") +
+      " WHERE id=$" + (fields.length + 1);
+    const parameters: unknown[] = [...values, id];
+    if (expected && Object.keys(expected).length) {
+      const checked = Object.keys(expected);
+      if (checked.length > 100 || checked.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
+      checked.forEach((field) => validateIdentifier(field));
+      const current = (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment,
+        "SELECT *, xmin::text AS \"__row_version\" FROM " + quoteIdentifier(collection) + " WHERE id=$1", [id]))[0];
+      if (!current) return null;
+      const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      if (checked.some((field) => !same(current[field], expected[field]))) throw rowChanged();
+      parameters.push(current.__row_version);
+      sql += " AND xmin::text=$" + parameters.length;
+    }
+    const updated = (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql + " RETURNING *", parameters))[0];
+    if (!updated && expected && Object.keys(expected).length) throw rowChanged();
+    return updated ?? null;
   }
 
   /** The WHERE clause of a filtered row change or delete; at least one filter is required. */

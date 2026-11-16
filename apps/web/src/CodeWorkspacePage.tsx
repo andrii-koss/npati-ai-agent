@@ -483,7 +483,11 @@ function CodeWorkspaceContent() {
       setTimeout(() => setSaveSuccess(false), 2500);
       void loadFiles();
     } catch (cause) {
-      if (requestId === fileRequest.current) setFileError(cause instanceof Error ? cause.message : String(cause));
+      // Another tab or the agent saved this file since it was opened: say so plainly instead of the server's code (V6 step 16).
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (requestId === fileRequest.current) setFileError(/revision/i.test(message)
+        ? (isUk ? "Файл змінився після відкриття. Ваші зміни не збережено: оновіть файл, щоб не перезаписати нову версію." : "The file changed after you opened it. Your changes were not saved: reload the file so the newer version is not overwritten.")
+        : message);
     } finally {
       setSavingFile(false);
     }
