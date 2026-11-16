@@ -1,3 +1,4 @@
+import { detectCompanyChatLanguage } from "@npati/shared";
 import { CODING_RESPONSE_PUNCTUATION } from "./coding-response-style";
 import {
   SELF_REVIEW_FINDING_CATEGORIES,
@@ -115,9 +116,16 @@ export function buildSelfReviewPrompt(input: SelfReviewInput): string {
     block("test_integrity", input.testIntegrity || "(test integrity did not run)"),
     ...(input.runtimeEvidence ? ["", block("runtime_tool_receipts", input.runtimeEvidence)] : []),
     "",
+    // The person reads the findings in the chat: a Ukrainian chat showed an English one (V6 step 15).
+    `Write "reason" and "suggested_fix" in ${REVIEW_LANGUAGE_NAMES[detectCompanyChatLanguage(input.originalGoal ?? "")] ?? "English"}.`,
     ANSWER_INSTRUCTION,
   ].join("\n");
 }
+
+const REVIEW_LANGUAGE_NAMES: Record<string, string> = {
+  en: "English", uk: "Ukrainian", ru: "Russian", de: "German", fr: "French", es: "Spanish", it: "Italian", pl: "Polish",
+  pt: "Portuguese", nl: "Dutch", tr: "Turkish", zh: "Chinese", ja: "Japanese", ko: "Korean", ar: "Arabic", hi: "Hindi",
+};
 
 // ---------------------------------------------------------------------------------------------------------
 // Answer parsing
