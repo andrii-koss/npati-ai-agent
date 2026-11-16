@@ -304,6 +304,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) { return company.heartbeatCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs); }
   async requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number) { return company.requeueCompanyAgentRun(this.pool, context, companyId, runId, workerId, delayMs); }
   async listRecoverableCompanyAgentRuns(limit = 200) { return company.listRecoverableCompanyAgentRuns(this.pool, limit); }
+  async heartbeatInlineCompanyAgentRuns(owner: string, runIds: string[]) { return company.heartbeatInlineCompanyAgentRuns(this.pool, owner, runIds); }
+  async failOrphanedInlineCompanyAgentRuns(staleMs: number) { return company.failOrphanedInlineCompanyAgentRuns(this.pool, staleMs); }
   async listGoals(context: AuthContext, businessId: string) { return collab.listGoals(this.pool, context, businessId); }
   async listUserGoals(context: AuthContext) { return collab.listUserGoals(this.pool, context); }
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) { return collab.createGoal(this.pool, context, businessId, input); }

@@ -259,6 +259,8 @@ export class ProjectMultiAgentService {
       task: clean(prompt, 4000), requestedMode: "pipeline", projectId,
     }, idempotencyKey);
     if (!created) return this.store.getCompanyAgentRun(ctx, companyId, parent.id);
+    // The parent run lives in this process: it is renewed while it works and closed as interrupted if the process stops.
+    const releaseParent = this.runtime.holdInline?.(parent.id);
     try {
       await this.store.updateCompanyAgentRun(ctx, companyId, parent.id, { status: "planning" });
       let tasks: ProjectTask[];
@@ -629,6 +631,7 @@ export class ProjectMultiAgentService {
       });
       return this.store.getCompanyAgentRun(ctx, companyId, parent.id);
     } finally {
+      releaseParent?.();
       if (this.worktreeMode && this.gitService) {
         await this.gitService.cleanupAllWorktrees(ctx, companyId, projectId).catch(() => undefined);
       }

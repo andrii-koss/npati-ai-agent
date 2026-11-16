@@ -453,6 +453,30 @@ export async function listRecoverableCompanyAgentRuns(host: InMemoryCompanyState
       permissions: ["workspace:read","business:manage"] }, companyId: run.companyId, runId: run.id }));
 }
 
+export async function heartbeatInlineCompanyAgentRuns(host: InMemoryCompanyState, owner: string, runIds: string[]) {
+  let renewed = 0;
+  for (const id of runIds) {
+    const run = host.companyRuns.get(id);
+    if (!run || !["planning", "running"].includes(run.status) || run.leaseExpiresAt != null || (run.workerId && run.workerId !== owner)) continue;
+    run.workerId = owner; run.lastHeartbeatAt = new Date().toISOString(); renewed += 1;
+  }
+  return renewed;
+}
+
+export async function failOrphanedInlineCompanyAgentRuns(host: InMemoryCompanyState, staleMs: number) {
+  const before = Date.now() - staleMs, closed: string[] = [];
+  for (const run of host.companyRuns.values()) {
+    if (!["planning", "running"].includes(run.status) || run.leaseExpiresAt != null) continue;
+    const seen = run.workerId?.startsWith("inline:") ? run.lastHeartbeatAt : run.workerId ? undefined : run.updatedAt;
+    if (!seen || Date.parse(seen) >= before) continue;
+    const at = new Date().toISOString();
+    Object.assign(run, run.cancelRequested ? { status: "cancelled" } : { status: "failed", errorCode: "INTERRUPTED",
+      errorMessage: "The run stopped because the service restarted before it finished." }, { completedAt: at, updatedAt: at });
+    closed.push(run.id);
+  }
+  return closed;
+}
+
 export async function replaceCompanyAgentRunSteps(
   host: InMemoryCompanyState,
   context: AuthContext,

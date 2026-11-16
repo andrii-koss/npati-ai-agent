@@ -1,6 +1,7 @@
 import { companyChatEntityReferencesPrompt, companyChatRecentTurnsPrompt } from "./project-chat-cards";
 import { CODING_RESPONSE_STYLE } from "./coding-response-style";
 import {canonicalJson,sha256} from "@npati/workspace";
+import { randomUUID } from "node:crypto";
 import {defaultCapabilityRegistry} from "@npati/shared";
 import type {ChatToolDefinition} from "@npati/omniroute-adapter";
 import {chatCapabilityParameters, CHAT_ROW_CAPABILITIES} from "./chat-project-data-capabilities";
@@ -43,6 +44,13 @@ export * from "./company-runtime-types";
  * user's work). Each model call keeps its own timeout as a guard against a hung provider. An operator can still set
  * NPATI_COMPANY_RUN_DEADLINE_MS.
  */
+/** A run map that reports additions and removals, so the in-process heartbeat starts and stops with the work. */
+class ObservedRunMap extends Map<string, AbortController> {
+  constructor(private readonly changed: () => void) { super(); }
+  override set(key: string, value: AbortController) { super.set(key, value); this.changed?.(); return this; }
+  override delete(key: string) { const removed = super.delete(key); this.changed?.(); return removed; }
+}
+
 function runDeadline(): AbortSignal {
   const ms = Number(process.env.NPATI_COMPANY_RUN_DEADLINE_MS ?? 0);
   return Number.isFinite(ms) && ms > 0 ? AbortSignal.timeout(ms) : new AbortController().signal;
@@ -66,8 +74,32 @@ export function agentsNamedInTask<T extends { name: string }>(task: string, agen
   return agents.filter((agent) => found.includes(agent));
 }
 
+/** This process's mark on the runs it executes itself; a worker's claimed runs carry a lease instead. */
+const INLINE_RUN_OWNER = `inline:${process.env.HOSTNAME ?? "api"}:${process.pid}:${randomUUID().slice(0, 8)}`;
+export const INLINE_RUN_HEARTBEAT_MS = 20_000;
+/** A run whose process has not renewed it for this long is closed as interrupted (see failOrphanedInlineCompanyAgentRuns). */
+export const INLINE_RUN_STALE_MS = 120_000;
+
 export class CompanyDelegationRuntime {
-  private readonly controllers = new Map<string, AbortController>();
+  private readonly controllers = new ObservedRunMap(() => this.inlineRunsChanged());
+  private readonly held = new Set<string>();
+  private inlineHeartbeat?: ReturnType<typeof setInterval>;
+  /** Keeps a run this process executes outside `process` (a project plan's parent run) marked as alive. */
+  holdInline(runId: string): () => void {
+    this.held.add(runId); this.inlineRunsChanged();
+    return () => { this.held.delete(runId); this.inlineRunsChanged(); };
+  }
+  private inlineRunsChanged() {
+    const active = this.controllers.size + this.held.size > 0;
+    if (active && !this.inlineHeartbeat && this.store.heartbeatInlineCompanyAgentRuns) {
+      this.inlineHeartbeat = setInterval(() => void this.renewInlineRuns(), INLINE_RUN_HEARTBEAT_MS);
+      this.inlineHeartbeat.unref?.();
+    } else if (!active && this.inlineHeartbeat) { clearInterval(this.inlineHeartbeat); this.inlineHeartbeat = undefined; }
+  }
+  async renewInlineRuns() {
+    const ids = [...new Set([...this.controllers.keys(), ...this.held])];
+    if (ids.length) await this.store.heartbeatInlineCompanyAgentRuns?.(INLINE_RUN_OWNER, ids).catch(() => 0);
+  }
   private readonly toolRuntime: CompanyToolExecutor;
   private readonly capabilityResolver: EffectiveCapabilityResolver;
   private readonly riskApprovalService: RiskApprovalService;

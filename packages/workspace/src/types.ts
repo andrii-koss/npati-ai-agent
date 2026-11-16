@@ -405,6 +405,10 @@ export interface WorkspaceStore {
   heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number): Promise<boolean>;
   requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number): Promise<boolean>;
   listRecoverableCompanyAgentRuns(limit?: number): Promise<Array<{ context: AuthContext; companyId: string; runId: string }>>;
+  /** Renews the runs this API process executes itself (no worker lease); see failOrphanedInlineCompanyAgentRuns. */
+  heartbeatInlineCompanyAgentRuns?(owner: string, runIds: string[]): Promise<number>;
+  /** Closes runs whose executing process stopped renewing them; returns their ids. */
+  failOrphanedInlineCompanyAgentRuns?(staleMs: number): Promise<string[]>;
   listGoals(context: AuthContext, businessId: string): Promise<Goal[]>;
   listUserGoals(context: AuthContext): Promise<Goal[]>;
   createGoal(context: AuthContext, businessId: string, input: GoalInput): Promise<Goal>;

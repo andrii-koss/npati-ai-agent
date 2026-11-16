@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
-import { CompanyDelegationRuntime } from "./company-runtime";
+import { CompanyDelegationRuntime, INLINE_RUN_STALE_MS } from "./company-runtime";
 
 const STREAM = "npati:company-runs:v1";
 const GROUP = "npati-company-workers";
@@ -123,6 +123,9 @@ export class CompanyRunQueueWorker {
     const client = this.client;
     if (this.stopped || !client?.isReady) return;
     await client.set('npati:company-worker:heartbeat', new Date().toISOString(), { PX: Math.max(30_000, this.recoveryMs * 3) });
+    // A run the API executed in its own process cannot be resumed here; once that process stops renewing it, it is
+    // closed as interrupted instead of staying "planning" forever (V6 step 16).
+    await this.store.failOrphanedInlineCompanyAgentRuns?.(INLINE_RUN_STALE_MS).catch(() => []);
     for (const job of await this.store.listRecoverableCompanyAgentRuns(500)) {
       if (this.stopped || !client.isReady) return;
       await client.sendCommand(["XADD",STREAM,"*","payload",JSON.stringify(job)]);

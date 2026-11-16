@@ -526,6 +526,36 @@ export async function listRecoverableCompanyAgentRuns(pool: Pool, limit = 200) {
       permissions: ['workspace:read','business:manage'] }, companyId: row.companyId, runId: row.runId }));
   }
 
+/**
+ * A run the API executes in its own process (a chat turn, an automation, a project plan) has no worker lease. Its
+ * process marks it as its own and renews last_heartbeat_at while it works. Runs a worker claimed keep their lease.
+ */
+export async function heartbeatInlineCompanyAgentRuns(pool: Pool, owner: string, runIds: string[]) {
+  if (!runIds.length) return 0;
+  const result = await pool.query(`UPDATE company_agent_runs SET worker_id=$1,last_heartbeat_at=now()
+    WHERE id=ANY($2::text[]) AND status IN ('planning','running') AND lease_expires_at IS NULL
+      AND (worker_id IS NULL OR worker_id=$1)`, [owner, runIds]);
+  return result.rowCount ?? 0;
+}
+
+/**
+ * A run whose process stopped (an API restart) is never finished by anyone: the worker recovers only runs with an
+ * expired lease, so it stayed "planning" for days (V6 step 16). It is closed honestly once its process stopped
+ * renewing it; a run without an owner yet is judged by its last change. Work itself has no deadline.
+ */
+export async function failOrphanedInlineCompanyAgentRuns(pool: Pool, staleMs: number) {
+  const result = await pool.query<{ id: string }>(`UPDATE company_agent_runs SET
+      status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,
+      error_code=CASE WHEN cancel_requested THEN error_code ELSE 'INTERRUPTED' END,
+      error_message=CASE WHEN cancel_requested THEN error_message ELSE 'The run stopped because the service restarted before it finished.' END,
+      completed_at=now(),updated_at=now()
+    WHERE status IN ('planning','running') AND lease_expires_at IS NULL
+      AND ((worker_id LIKE 'inline:%' AND last_heartbeat_at < now()-($1::text||' milliseconds')::interval)
+        OR (worker_id IS NULL AND updated_at < now()-($1::text||' milliseconds')::interval))
+    RETURNING id`, [staleMs]);
+  return result.rows.map((row) => row.id);
+}
+
 export async function getCompanyMembership(pool: Pool, companyId: string, userId: string): Promise<CompanyMember | null> {
     const result = await pool.query<CompanyMember>(`SELECT ${companyMemberColumns} FROM company_members
       WHERE company_id=$1 AND user_id=$2`, [companyId, userId]);
