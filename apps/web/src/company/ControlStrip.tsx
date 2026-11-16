@@ -1,4 +1,5 @@
 import { Trash2 } from "lucide-react";
+import { CompanyScopeSelect } from "../CompanyScopeSelect";
 import { useTranslation } from "../i18n";
 import type { Company, Agent } from "./types";
 import { SELECTED_COMPANY_ID_KEY } from "./cache";
@@ -50,11 +51,11 @@ export function ControlStrip({
           <span className="company-strip-badge badge-active">{t("companySettings.strip.active")}</span>
         </div>
         <div className="company-strip-control-row">
-          <select
+          <CompanyScopeSelect
+            includeAll={false}
             aria-label={t("companySettings.strip.selectCompany")}
             value={selectedId}
-            onChange={(event) => {
-              const next = event.target.value;
+            onValueChange={(next) => {
               onSelectCompanyId(next);
               try {
                 sessionStorage.setItem(SELECTED_COMPANY_ID_KEY, next);
@@ -68,7 +69,7 @@ export function ControlStrip({
                 {company.name}
               </option>
             ))}
-          </select>
+          </CompanyScopeSelect>
         </div>
         <span
           className="company-strip-footer-text"
@@ -96,10 +97,12 @@ export function ControlStrip({
           <span className="company-strip-badge badge-linked">{t("companySettings.strip.linked")}</span>
         </div>
         <div className="company-strip-control-row">
-          <select
+          <CompanyScopeSelect
+            includeAll={false}
+            entity="business"
             aria-label={t("companySettings.strip.selectLinkedBusiness")}
             value={selected.businessId ?? ""}
-            onChange={(event) => void onUpdateBusiness(event.target.value)}
+            onValueChange={(value) => void onUpdateBusiness(value)}
             className="company-strip-select"
           >
             <option value="">{t("companySettings.strip.independent")}</option>
@@ -108,7 +111,7 @@ export function ControlStrip({
                 {business.name}
               </option>
             ))}
-          </select>
+          </CompanyScopeSelect>
         </div>
         <span
           className="company-strip-footer-text"

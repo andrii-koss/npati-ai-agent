@@ -7,6 +7,7 @@ type Props = Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value">
   value: string;
   onValueChange: (value: string) => void;
   includeAll?: boolean;
+  entity?: "company" | "business";
 };
 type Option = { value: string; label: string; disabled?: boolean };
 
@@ -16,7 +17,7 @@ function optionText(node: ReactNode): string {
 }
 
 /** Shared company scope picker; option values and scope callbacks belong to each page. */
-export function CompanyScopeSelect({ children, value, onValueChange, includeAll = true, className, style, id, disabled, title, "aria-label": ariaLabel, "aria-labelledby": labelledBy }: Props) {
+export function CompanyScopeSelect({ children, value, onValueChange, includeAll = true, entity = "company", className, style, id, disabled, title, "aria-label": ariaLabel, "aria-labelledby": labelledBy }: Props) {
   const { language } = useTranslation();
   const isUk = language === "uk";
   const uid = useId();
@@ -39,7 +40,9 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
   const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const selected = options.find((option) => option.value === value);
   const companyCount = options.filter((option) => option.value && !["all", "__all__", "personal"].includes(option.value)).length;
-  const heading = isUk ? "Виберіть компанію" : "Select company";
+  const heading = entity === "business" ? (isUk ? "Виберіть бізнес" : "Select business") : (isUk ? "Виберіть компанію" : "Select company");
+  const searchLabel = entity === "business" ? (isUk ? "Пошук бізнесів" : "Search businesses") : (isUk ? "Пошук компаній" : "Search companies");
+  const countLabel = entity === "business" ? (isUk ? "бізнесів" : "businesses") : (isUk ? "компаній" : "companies");
 
   const close = (restoreFocus = false) => {
     setOpen(false);
@@ -124,13 +127,13 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
       }}>
       <div className="company-scope-heading">
         <Building2 size={22} aria-hidden="true" /><strong>{heading}</strong>
-        <span>{companyCount} {isUk ? "компаній" : "companies"}</span>
+        <span>{companyCount} {countLabel}</span>
       </div>
       <div className="company-scope-search">
         <Search size={20} aria-hidden="true" />
         <input ref={search} type="text" role="combobox" autoComplete="off" spellCheck={false}
-          aria-label={isUk ? "Пошук компаній" : "Search companies"}
-          placeholder={isUk ? "Пошук компаній…" : "Search companies..."}
+          aria-label={searchLabel}
+          placeholder={`${searchLabel}${isUk ? "…" : "..."}`}
           value={query} onChange={(event) => { setQuery(event.target.value); setActive(-1); }}
           aria-expanded="true" aria-controls={listId} aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined} />

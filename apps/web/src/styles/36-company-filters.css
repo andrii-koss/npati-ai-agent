@@ -31,6 +31,20 @@
 .company-scope-trigger > svg { flex-shrink: 0; }
 .company-scope-trigger:disabled { opacity: .5; cursor: default; }
 .company-scope-trigger:focus-visible { outline: 2px solid #ed292e; outline-offset: 3px; }
+.company-strip-control-row .company-scope-trigger {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 40px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--npati-black);
+}
+.company-strip-control-row .company-scope-trigger > span {
+  color: inherit;
+  font: inherit;
+}
 .email-scope-select-wrap:has(.company-scope-trigger) > .email-scope-select-arrow { display: none; }
 
 .company-scope-popover {
