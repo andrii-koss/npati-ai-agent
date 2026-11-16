@@ -19,6 +19,10 @@ function failure(reply: FastifyReply, error: unknown) {
   if (error instanceof CompanyRuntimeError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Company runtime request failed";
+  // A company without a runnable Main Agent is a configuration precondition, not a server failure.
+  if (message === "Select an active Main Agent before running the company" || message === "The Main Agent is inactive") {
+    return reply.code(400).send({ error: { code: "MAIN_AGENT_UNAVAILABLE", message } });
+  }
   const status = /required|invalid|must/i.test(message) ? 400 : 500;
   return reply.code(status).send({ error: { code: status === 400 ? "INVALID_INPUT" : "COMPANY_RUNTIME_ERROR", message } });
 }

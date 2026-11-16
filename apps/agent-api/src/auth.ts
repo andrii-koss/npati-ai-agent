@@ -18,6 +18,13 @@ export class AuthenticationError extends Error {
   }
 }
 
+/** Delegated keys must explicitly grant chat access independently of workspace read access. */
+export function assertChatKeyScope(auth: AuthContext): void {
+  if (auth.apiKeyId && !auth.permissions.includes("chat:use")) {
+    throw new AuthenticationError("API key requires chat:use scope", 403, "CHAT_SCOPE_REQUIRED");
+  }
+}
+
 export interface AuthProvider {
   authenticate(request: FastifyRequest): Promise<AuthContext>;
 }

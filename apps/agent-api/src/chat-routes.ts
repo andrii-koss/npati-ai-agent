@@ -4,7 +4,7 @@ import { isOllamaChatPayload } from "./runtime-compat-routes";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
-import { AuthenticationError } from "./auth";
+import { AuthenticationError, assertChatKeyScope } from "./auth";
 import { ChatAttachmentInput } from "./chat-attachments";
 import { conversationTitle, inferOnboardingScenario, isLikelyOnboardingAside, isShortAffirmativeReply, isSimpleGreeting, onboardingGoalQuestion, quickOnboardingReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
@@ -52,6 +52,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
   const { activeChatStreams, activeContextResolver, agent, authProvider, companyRuntime, getAIContext, marketplace, persistAutomaticCompanyMemory, projectOrchestrator, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
   app.post<{Params:{streamId:string}}>("/chat/streams/:streamId/cancel",async(request,reply)=>{
     const auth=await authProvider.authenticate(request);
+    try { assertChatKeyScope(auth); } catch (error) {
+      if (error instanceof AuthenticationError) return reply.code(error.status).send({error:{code:error.code,message:error.message}});
+      throw error;
+    }
     const active=activeChatStreams.get(request.params.streamId);
     if(!active)return {cancelled:false};
     if(active.workspaceId!==auth.workspaceId||active.userId!==auth.userId)return reply.code(403).send({error:{code:"STREAM_FORBIDDEN",message:"This chat stream belongs to another user."}});
@@ -168,6 +172,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     try {
       if (deps.ollamaChat && isOllamaChatPayload(request.body)) return deps.ollamaChat(request as Parameters<NonNullable<typeof deps.ollamaChat>>[0], reply);
       const auth = await authProvider.authenticate(request);
+      assertChatKeyScope(auth);
       authForError = auth;
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });

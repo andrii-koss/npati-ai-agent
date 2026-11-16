@@ -8,7 +8,7 @@ import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatL
 import { ProjectNameAmbiguityError } from "./same-name-project-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
-import { AuthenticationError } from "./auth";
+import { AuthenticationError, assertChatKeyScope } from "./auth";
 import { prepareChatAttachments, ChatAttachmentInput } from "./chat-attachments";
 import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
@@ -78,6 +78,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
     let clarify: ((question: string) => Promise<void>) | undefined;
     try {
       const auth = await authProvider.authenticate(request);
+      assertChatKeyScope(auth);
       streamId=request.body.streamId?.trim();
       if(streamId&&!/^[A-Za-z0-9._:-]{8,100}$/.test(streamId))return reply.code(400).send({error:{code:"INVALID_STREAM_ID",message:"Invalid chat stream identifier."}});
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);

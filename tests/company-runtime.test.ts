@@ -99,6 +99,24 @@ async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key
   return response.json() as { id: string };
 }
 
+it.each(["missing", "inactive"])("step 16: dispatch with a %s Main Agent is a client state error, not HTTP 500", async state => {
+  const active = { value: { userId: "v6test16-owner", workspaceId: "v6test16-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] } };
+  const ai = engine(); const inference = vi.spyOn(ai, "chat");
+  const { app, companyId } = await setup(ai, active);
+  if (state === "inactive") {
+    const agent = await addAgent(app, companyId, "v6test16-main", { name: "V6TEST16 Main", role: "planner", tools: [], modelId: "openai/gpt-4o" });
+    const company = (await app.inject({ method: "GET", url: `/companies/${companyId}` })).json();
+    expect((await app.inject({ method: "PUT", url: `/companies/${companyId}/main-agent`, payload: { agentId: agent.id, expectedRevision: company.revision } })).statusCode).toBe(200);
+    const selected = (await app.inject({ method: "GET", url: `/companies/${companyId}/agents/${agent.id}` })).json();
+    expect((await app.inject({ method: "PATCH", url: `/companies/${companyId}/agents/${agent.id}`, payload: { isActive: false, expectedRevision: selected.revision } })).statusCode).toBe(200);
+  }
+  const response = await app.inject({ method: "POST", url: `/companies/${companyId}/runs`, headers: { "idempotency-key": "v6test16-state-" + state }, payload: { task: "V6TEST16 read-only plan", mode: "single" } });
+  expect(response.statusCode).toBe(400);
+  expect(response.json().error.code).toBe("MAIN_AGENT_UNAVAILABLE");
+  expect(inference).not.toHaveBeenCalled();
+  expect((await app.inject({ method: "GET", url: `/companies/${companyId}/runs` })).json().runs).toEqual([]);
+});
+
 describe("Project delegation JSON recovery", () => {
   it("repairs malformed planning output once for a bound project agent", async () => {
     const store = new InMemoryWorkspaceStore();

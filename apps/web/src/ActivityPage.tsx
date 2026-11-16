@@ -1,4 +1,5 @@
 import { PageGuideLink } from "./PageGuideLink";
+import { listProjectCompanies } from "./website-builder-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
 // C6b: read-only "why did this run act this way" — execution snapshot, snapshot diff and replay status.
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
@@ -95,14 +96,8 @@ export function ActivityPage() {
 
   // Fetch initial companies list
   useEffect(() => {
-    const headers: HeadersInit = {};
-    const token = getStoredAuthToken();
-    if (token) headers["authorization"] = `Bearer ${token}`;
-
-    fetch("/api/companies?limit=50", { headers })
-      .then((res) => (res.ok ? res.json() : { companies: [] }))
-      .then((data: { companies?: CompanyItem[] }) => {
-        const list = data.companies ?? [];
+    listProjectCompanies()
+      .then((list) => {
         setCompanies(list);
         writeCachedCompanies(list);
         if (list.length > 0) {
