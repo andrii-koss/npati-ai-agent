@@ -7,6 +7,7 @@ import type { CodeSessionRunInput } from "./code-session-run-executor";
 import { canonicalFrameworkName, isSupportedProjectFramework, isWebsiteReferenceEdit, isDesktopProjectFramework, isBackendProjectFramework } from "@npati/shared";
 import type { CodeService } from "./code-service";
 import { CODE_TOOL_MANIFEST_VERSION } from "./code-tool-registry";
+import { previewFailedNotice } from "./code-preview-failure-i18n";
 
 /** Main Chat may start a current Preview-capable session; existing published pins remain immutable. */
 export async function refreshChatPreviewSession(ctx: AuthContext, project: Pick<Project,"id"|"companyId"|"type"|"framework">, session: CodeSession | null,
@@ -133,18 +134,6 @@ export function hasCodeChatPreview(result: unknown): boolean {
   return view.websitePreview?.status === "running" || view.backendPreview?.status === "running";
 }
 
-const BACKEND_PREVIEW_FAILED: Record<string, (reason: string) => string> = {
-  uk: reason => `⚠️ Сервер не запустився в Preview: ${reason}. Код і зміни збережено; запустіть Preview знову або попросіть агента виправити запуск.`,
-  ru: reason => `⚠️ Сервер не запустился в Preview: ${reason}. Код и изменения сохранены; запустите Preview снова или попросите агента исправить запуск.`,
-  en: reason => `⚠️ The server did not start in Preview: ${reason}. The code and changes are saved; start Preview again or ask the agent to fix the start.`,
-};
-
-const WEBSITE_PREVIEW_FAILED: Record<string, (reason: string) => string> = {
-  uk: reason => `⚠️ Preview сайту не запустився: ${reason}. Зміни у файлах збережено; запустіть Preview знову або попросіть агента виправити запуск.`,
-  ru: reason => `⚠️ Preview сайта не запустился: ${reason}. Изменения в файлах сохранены; запустите Preview снова или попросите агента исправить запуск.`,
-  en: reason => `⚠️ The site Preview did not start: ${reason}. The file changes are saved; start Preview again or ask the agent to fix the start.`,
-};
-
 export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: unknown, ports: {
   getProject(ctx: AuthContext, companyId: string, projectId: string): Promise<Project>;
   prepareStaticPreview?(ctx: AuthContext, companyId: string, projectId: string): Promise<Project | null>;
@@ -173,7 +162,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
       if (input.sink?.signal.aborted) throw error;
       await ports.markFailed(input.ctx, companyId, projectId);
       const reason = error instanceof Error ? error.message : String(error);
-      const notice = (BACKEND_PREVIEW_FAILED[input.responseLanguage ?? ""] ?? BACKEND_PREVIEW_FAILED.en!)(reason);
+      const notice = previewFailedNotice("backend", input.responseLanguage, reason);
       const message = typeof run.message === "string" && run.message.trim() ? run.message.trimEnd() + "\n\n" + notice : notice;
       return { ...run, message, backendPreview: { status: "failed", error: reason } };
     }
@@ -215,7 +204,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     // The run still ends failed with the Preview error as its reason, but the reply keeps the finished edit: it was only
     // "Preview server did not become HTTP-ready", in English, for a Ukrainian request whose file change was saved (V6 step 17).
     const reason = error instanceof Error ? error.message : String(error);
-    const notice = (WEBSITE_PREVIEW_FAILED[input.responseLanguage ?? ""] ?? WEBSITE_PREVIEW_FAILED.en!)(reason);
+    const notice = previewFailedNotice("website", input.responseLanguage, reason);
     const message = typeof run.message === "string" && run.message.trim() ? run.message.trimEnd() + "\n\n" + notice : notice;
     return { ...run, status: "failed", reason, message, websitePreview: { status: "failed", error: reason } };
   }
