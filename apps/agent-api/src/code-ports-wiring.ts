@@ -223,6 +223,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
   const codeVerifyRunnerPort: CodeVerifyRunnerPort | undefined = projectSandbox ? {
     run: async (input: {
       ctx: AuthContext; companyId: string; projectId: string;
+      signal?: AbortSignal; runId?: string;
       tools: Array<"lint" | "typecheck" | "test" | "build">; changedOnly: boolean; timeoutMs: number;
     }) => {
       const project = (await projectService.get(input.ctx, input.companyId, input.projectId)) as
@@ -234,6 +235,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; state?: "unavailable" | "approval_required"; code?: string; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
       let dependenciesInstalled = false, pythonRequirementsSynced = false;
       for (const tool of input.tools) {
+        input.signal?.throwIfAborted();
         const command = commands[tool];
         if (!command) {
           results.push({ tool, ok: false, state: "unavailable", code: "tool_not_configured", summary: `No ${tool} command is configured for this project`, findings: [] });
@@ -243,6 +245,8 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         let result: { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string } | undefined;
         const runCommand = (line: string) => projectSandbox!.execute(input.ctx, input.companyId, {
           projectId: input.projectId, command: line, agentId: "system", approved: true,
+          signal: input.signal, runId: input.runId,
+          captureFailure: line === command,
           timeoutMs: input.timeoutMs,
         }) as Promise<{ stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string }>;
         // A Python check runs the project's .venv, which must hold what requirements.txt says now: an agent that added a
@@ -275,6 +279,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
             }
           }
         } catch (error) {
+          if (input.signal?.aborted) throw error;
           const errMsg = error instanceof Error ? error.message : String(error);
           const failure = error as { code?: string; details?: { exitCode?: number | null } };
           const state = failure.code === "tool_not_configured" || (failure.code === "command_not_found" && !/^npm\b/.test(command)) ? "unavailable" as const

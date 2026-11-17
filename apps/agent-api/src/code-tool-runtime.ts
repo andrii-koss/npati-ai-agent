@@ -485,6 +485,7 @@ export class CodeToolRuntime {
 
       let raw: unknown;
       const runExecutor = (approvalId: string | undefined) => executor({
+          signal: input.signal,
           ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, sessionMode: input.sessionMode, turnId,
           ...(input.runId ? { runId: input.runId } : {}),
           toolCallId: input.toolCallId, leaseOwner: input.leaseOwner,

@@ -60,6 +60,15 @@ async function fixture() {
   return { root, store, company, otherCompany, project, projects, workspace, provider, events, sandbox };
 }
 describe("Project terminal integration", () => {
+  it("verification can read a failed command's separate redacted streams without changing direct-call failures", async () => {
+    const { company, project, provider, sandbox } = await fixture();
+    provider.commandResult = { ...result("failed", 7, "V6TEST18 stdout"), stderr: "V6TEST18 stderr" };
+    const captured = await sandbox.execute(owner, company.id, { projectId: project.id, command: "npm test", agentId: "system", captureFailure: true });
+    expect(captured).toMatchObject({ status: "failed", exitCode: 7, stdout: "V6TEST18 stdout", stderr: "V6TEST18 stderr" });
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm test", agentId: "system" })).rejects.toMatchObject({ code: "command_failed" });
+    provider.commandResult = result("failed", 127);
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm test", agentId: "system", captureFailure: true })).rejects.toMatchObject({ code: "command_not_found" });
+  });
   it("syncs unchanged production SDK and new typed account fields after dependency installation", async () => {
     const { company, project, workspace, provider, sandbox } = await fixture();
     const sdk = await readFile("packages/project-client/src/index.ts", "utf8");

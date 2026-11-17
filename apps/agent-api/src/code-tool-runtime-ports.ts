@@ -40,6 +40,7 @@ export interface CodeToolInvokeFailure {
 }
 
 export interface CodeToolExecutionContext {
+  signal?: AbortSignal;
   ctx: AuthContext;
   companyId: string;
   projectId: string;

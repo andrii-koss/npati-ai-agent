@@ -31,7 +31,7 @@ export function extractCleanProjectName(prompt: string, explicitName?: string): 
   const commandPatterns = [
     /^(?:створи(?: мені)?|зроби(?: мені)?|розроби(?: мені)?|побудуй|запусти|згенеруй|відкрий)\s+(?:(?:новий|сучасний|адаптивний|тестовий|демо)\s+)*(?:веб-?сайт|сайт|проєкт|проект|лендінг|додаток)(?:\s+(?:для|під|про|компанії))?/iu,
     /^(?:створи(?:ти)?|зроби(?:ти)?)\s+(?:новий\s+)?(?:веб-?сайт|сайт|проєкт|проект)/iu,
-    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?\s+(?:(?:new|modern|responsive|test|demo)\s+)*(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
+    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?\s+(?:(?:new|modern|responsive|test|demo|simple|basic|plain|static|html(?:\/css(?:\/js)?)?|css|javascript)\s+)*(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
   ];
 
   for (const pattern of commandPatterns) {

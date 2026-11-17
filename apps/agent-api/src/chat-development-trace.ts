@@ -233,7 +233,7 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
         id: run.runId + ":" + call.toolCallId, runId: run.runId, stage: "tool", title: call.tool,
         at: executionIso(call.startedAt, executionIso(turn.startedAt, executionIso(run.startedAt, process.createdAt))), status: status === "completed" && (resultDetails.status === "failed" || live?.status === "failed") ? "failed" : status, tool: call.tool,
         arguments: Object.keys(input).length ? JSON.stringify(input, null, 2) : live?.arguments,
-        command: string(input.command) ?? live?.command, file: string(input.path ?? input.file) ?? resultDetails.file ?? live?.file, cwd: string(input.cwd) ?? live?.cwd,
+        command: string(input.command) ?? live?.command ?? resultDetails.command, file: string(input.path ?? input.file) ?? resultDetails.file ?? live?.file, cwd: string(input.cwd) ?? live?.cwd,
         result: output ?? live?.result, resultTruncated: replay?.truncated === true || live?.resultTruncated,
         durationMs: started !== undefined && finished !== undefined && finished >= started ? finished - started : live?.durationMs,
         error: string(data.error) ?? string(object(result.error).message) ?? live?.error, errorCode: call.errorCode ?? string(replay?.errorCode) ?? live?.errorCode,
@@ -284,7 +284,7 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
       // A failed dispatch only has a hash for its command. Without a call to attach to it says nothing to a user.
       if (dispatched && !existing) continue;
       const details = { command: dispatched ? existing?.command ?? log.commandSummary : log.commandSummary, result: log.output, exitCode: log.exitCode ?? undefined,
-        durationMs: log.durationMs, errorCode: log.errorCode, agentId: log.agentId };
+        durationMs: existing?.durationMs ?? log.durationMs, errorCode: log.errorCode, agentId: log.agentId };
       if (existing) { Object.assign(existing, sanitizeProgress({ ...existing, ...details, status:log.exitCode !== null && log.exitCode !== 0 || log.status==="failed" || log.status==="timed_out" ? "failed" : log.status==="running" ? "running" : log.status==="stopped" ? "cancelled" : existing.status === "failed" ? "failed" : "completed" })); continue; }
       progress.push(sanitizeProgress({ id: "terminal:" + log.id, runId: log.runId ?? (matchedVerification ? process.runId : undefined), stage: "command", title: "Running command", at: log.createdAt,
         status: log.status === "failed" || log.status === "timed_out" || log.exitCode !== null && log.exitCode !== 0 ? "failed" : log.status === "running" ? "running" : log.status === "stopped" ? "cancelled" : "completed",

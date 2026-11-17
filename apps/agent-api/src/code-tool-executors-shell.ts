@@ -110,6 +110,8 @@ export interface CodeShellRuntimePort {
  */
 export interface CodeVerifyRunnerPort {
   run(input: {
+    signal?: AbortSignal;
+    runId?: string;
     ctx: CodeToolExecutionContext["ctx"];
     companyId: string;
     projectId: string;
@@ -295,6 +297,8 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
       if (!tools.length) throw new CodeToolError("invalid_arguments", "code.verify.run requires at least one of lint, typecheck, test, build", 400, "validate_arguments", false, input.tool.name);
       try {
         return await options.verifyRunner.run({
+          signal: input.signal,
+          runId: input.runId,
           ctx: input.ctx,
           companyId: input.companyId,
           projectId: input.projectId,

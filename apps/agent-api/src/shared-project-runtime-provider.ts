@@ -49,7 +49,7 @@ const NO_PREPARED_DEPENDENCIES = 75;
 
 export class SharedProjectRuntimeProvider implements SandboxProvider {
   readonly executionMode = "shared" as const;
-  async processCapabilities() { await this.ready; return { durableIdentity: true, terminalStatus: true }; }
+  async processCapabilities() { await this.ready; return { durableIdentity: true, terminalStatus: true, foregroundCancellation: true }; }
   private entries: Entry[] = [];
   private ready: Promise<void>;
   private ownerFence?: KernelFileLease;
@@ -257,7 +257,27 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     return { running: Boolean(live), output: live?.text ?? "", ...(live && Date.now() - live.at > 5_000 ? { cpu: await this.liveCpu(entry, live) } : {}) };
   }
   private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false, wholeOutput = false, live = false) {
+    // Foreground calls retain their existing environment/namespace policy. A scoped
+    // handle only lets Stop reach this exact child; it does not promote a background process.
+    let record: ProcessRecord | undefined;
+    if (options.processId) {
+      const id = options.processId;
+      if (!UUID.test(id)) throw new SandboxProviderError("invalid_process", "Invalid process identity", 400);
+      if (this.entries.some(other => other !== entry && other.processes[id])) throw new SandboxProviderError("process_identity_conflict", "Process belongs to another project", 409);
+      const commandHash = createHash("sha256").update(JSON.stringify([executable, args, input, options.environment ?? {}, cwd, options.timeoutMs])).digest("hex");
+      const existing = entry.processes[id];
+      if (existing) {
+        if (existing.status === "stopped" && !existing.commandHash || existing.commandHash === commandHash) return this.processResult(existing);
+        throw new SandboxProviderError("process_identity_conflict", "Process belongs to another command", 409);
+      }
+      record = { id, status: "running", exitCode: null, commandHash, generation: entry.generation };
+      entry.processes[id] = record;
+      await this.persist();
+      // A cancellation may have arrived while the reservation was being persisted.
+      if (record.status === "stopped") return this.processResult(record);
+    }
     const child = this.launch(entry, executable, args, cwd, options.environment, true, false, offline);
+    if (record) { record.pid = child.pid; this.children.set(record.id, child); }
     const jobs = this.jobs.get(entry.id) ?? new Set<ChildProcess>(); this.jobs.set(entry.id, jobs); jobs.add(child);
     if (live) { const mine = { text: "", at: Date.now() }; this.liveOutput.set(entry.id, mine); child.once("close", () => { if (this.liveOutput.get(entry.id) === mine) this.liveOutput.delete(entry.id); }); }
     // File sync needs every byte; cutting its output would only produce broken JSON.
@@ -318,7 +338,13 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       child.on("close", code => settle(code));
       child.stdin!.on("error", () => undefined);
       child.stdin!.end(input);
-    }).finally(() => { jobs.delete(child); });
+    }).then(async result => {
+      if (record) { if (record.status === "running") record.status = result.status; record.exitCode = result.exitCode; await this.persist(); }
+      return result;
+    }).finally(async () => {
+      jobs.delete(child);
+      if (record) { this.children.delete(record.id); if (record.status === "running") { record.status = "failed"; await this.persist(); } }
+    });
   }
   private command(command: string, cwd?: string) { const normalized = normalizeTerminalCommand({ command, cwd }); classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd }); return normalized; }
   async executeCommand(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions) {

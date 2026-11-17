@@ -107,7 +107,7 @@ export function sandboxProcessEnvironment(environment: Record<string, string> | 
 }
 export interface SandboxProvider {
   readonly executionMode?: ProjectRuntimeMode;
-  processCapabilities?(scope: SandboxScope): Promise<{ durableIdentity: boolean; terminalStatus: boolean }>;
+  processCapabilities?(scope: SandboxScope): Promise<{ durableIdentity: boolean; terminalStatus: boolean; foregroundCancellation?: boolean }>;
   proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
   createSandbox(scope: SandboxScope, options?: SandboxCreateOptions): Promise<SandboxStatus>;
@@ -159,7 +159,7 @@ export class SandboxProviderError extends Error {
 }
 export class RemoteSandboxProvider implements SandboxProvider {
   get executionMode(): ProjectRuntimeMode { return this.runtimeMode ?? projectRuntimeMode(); }
-  processCapabilities(scope: SandboxScope) { return this.request<{ durableIdentity: boolean; terminalStatus: boolean }>("processCapabilities", { scope }); }
+  processCapabilities(scope: SandboxScope) { return this.request<{ durableIdentity: boolean; terminalStatus: boolean; foregroundCancellation?: boolean }>("processCapabilities", { scope }); }
   private readonly endpoint: URL;
   constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = runnerFetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote"), private readonly runtimeMode?: ProjectRuntimeMode) {
     if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");

@@ -29,6 +29,20 @@ it("distinguishes command transport success from failed exit codes and reads can
   expect(executionResultDetails({files:[{path:"app/page.tsx",action:"update",linesAdded:4,linesRemoved:2},{path:"app/contact.tsx",action:"add"}],tests:{total:24,passed:23,failed:1,skipped:0}})).toMatchObject({files:[{path:"app/page.tsx",action:"modified"},{path:"app/contact.tsx",action:"created"}],tests:{total:24,failed:1}});
 });
 describe("existing runtime execution trace projection", () => {
+  it("keeps the full tool duration when a shorter terminal phase supplies its output", async () => {
+    const f = fixture("completed");
+    f.mocks.listCodeRunTurns.mockResolvedValue([{ toolCalls: [{
+      toolCallId: "verify", tool: "code.verify.run", outcome: "failed",
+      startedAt: new Date("2026-10-13T10:00:01Z"), finishedAt: new Date("2026-10-13T10:00:18Z"),
+    }] }]);
+    f.mocks.listReplayBundleSteps.mockResolvedValue([{ kind: "tool_call", toolCallId: "verify", payload: {
+      settledResult: JSON.stringify({ results: [{ command: "npm test", exitCode: 2, ok: false, stderr: "V6TEST failing assertion", stdout: "V6TEST test output" }] }),
+    } }]);
+    const terminal = { list: async () => [{ id: "phase", runId: "run", createdAt: "2026-10-13T10:00:17Z", commandSummary: "npm test", output: "V6TEST failing assertion", durationMs: 3500, exitCode: 2, status: "failed" }] };
+    const events = await developmentTrace(f.store, ctx, { ...process, status: "failed", progress: [{ id: "run:verify", runId: "run", stage: "tool", tool: "code.verify.run", title: "Verify", at: "2026-10-13T10:00:01Z", command: "npm test", status: "failed" }] }, terminal as never);
+    expect(events.find(e => e.id === "run:verify")).toMatchObject({ durationMs: 17000, exitCode: 2, stderr: "V6TEST failing assertion", status: "failed" });
+    expect(events.filter(e => e.stage === "command")).toHaveLength(0);
+  });
   it("shows the failing check's command and output when build passed in the same verification call", () => {
     const results = [
       { tool: "build", ok: true, command: "make build", exitCode: 0, stdout: "python3 -m compileall -q main.py", raw: "python3 -m compileall -q main.py" },

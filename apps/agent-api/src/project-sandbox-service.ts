@@ -1,4 +1,5 @@
 import { codeSearchTypeArguments } from "./code-search-types";
+import { executeCancellableSandboxCommand } from "./cancellable-sandbox-command";
 import { hasQuotedCredential } from "./workspace-protected-content";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { commitSandboxBinaries, commitSandboxWrites, type SandboxBinaryWrite } from "./project-sandbox-write-commit";
@@ -27,6 +28,9 @@ export interface TerminalRequest {
   action?: "start" | "status" | "logs" | "stop";
   environmentReferences?: Record<string, TerminalSecretReference>;
   approved?: boolean; runId?: string; agentId: string; timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Internal verification caller consumes a failed execution result; policy/approval failures still throw. */
+  captureFailure?: boolean;
   policyCleared?: boolean; // The coding policy ruled this command read-only; the stricter terminal rules do not apply.
 }
 export interface TerminalLimits {
@@ -452,7 +456,7 @@ export class ProjectSandboxService {
       commandDispatched = true;
       const raw = startProcess
         ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd, ...(beforeStart ? { processId: request.processId } : {}) })
-        : withoutRuntimeNoise(await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd }));
+        : withoutRuntimeNoise(await executeCancellableSandboxCommand(this.provider, ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd }, request.signal));
       execution = raw;
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
       /**
@@ -474,7 +478,7 @@ export class ProjectSandboxService {
       const failureMessage = raw.status === "timed_out" ? "Sandbox command timed out" : commandKind === "install" ? `Dependency install failed${detail ? `: ${detail}` : ""}` : commandKind === "build" ? `Build command failed${detail ? `: ${detail}` : ""}` : commandKind === "preview" ? `Preview server failed to start${detail ? `: ${detail}` : ""}` : `Sandbox command failed${detail ? `: ${detail}` : ""}`;
       terminalEventAttempted = true;
       await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId, processId: raw.processId, commandSummary: decision.requiresApproval ? "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")" : redactTerminalText(command, secrets), riskLevel: decision.level, status: raw.status, exitCode: raw.exitCode, output, durationMs: raw.durationMs, errorCode: ["failed", "timed_out"].includes(raw.status) ? failureCode : undefined });
-      if (raw.status !== "completed" && !startProcess) {
+      if (raw.status !== "completed" && !startProcess && (!request.captureFailure || raw.exitCode === 127)) {
         throw Object.assign(new SandboxProviderError(failureCode, failureMessage, raw.status === "timed_out" ? 504 : 409, stepOf(decision), tool, false), {
           details: { exitCode: raw.exitCode, status: raw.status, durationMs: raw.durationMs },
         });
