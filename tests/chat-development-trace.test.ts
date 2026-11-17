@@ -99,6 +99,17 @@ describe("existing runtime execution trace projection", () => {
     const selected = selectDevelopmentTraceRuns([root, child, unrelated, foreign] as unknown as Parameters<typeof selectDevelopmentTraceRuns>[0], ctx, process);
     expect(selected.roots.map(r => r.runId)).toEqual(["run"]); expect(selected.children.map(r => r.runId)).toEqual(["child"]);
   });
+  // V6 step 17: two chats share a project's session; each shows the runs it started, with their child agents.
+  it("splits a shared session's runs between the chat that made the site and a chat that edited it", () => {
+    const made = { ...process, runId: "made", workspaceId: ctx.workspaceId, details: {} };
+    const edit = { ...made, runId: "edit" };
+    const editChild = { ...made, runId: "edit-child", sessionId: "child-session", details: { parentRunId: "edit" } };
+    const runs = [made, edit, editChild] as unknown as Parameters<typeof selectDevelopmentTraceRuns>[0];
+    const editChat = selectDevelopmentTraceRuns(runs, ctx, process, { own: new Set(["edit"]) });
+    expect(editChat.roots.map(r => r.runId)).toEqual(["edit"]); expect(editChat.children.map(r => r.runId)).toEqual(["edit-child"]);
+    const creatingChat = selectDevelopmentTraceRuns(runs, ctx, process, { claimed: new Set(["edit"]) });
+    expect(creatingChat.roots.map(r => r.runId)).toEqual(["made"]); expect(creatingChat.children).toEqual([]);
+  });
   it("masks JSON credentials, short passwords, database URLs, JWTs and private keys", () => {
     const input = '{"password":"p","API_TOKEN":"sensitive-value"} postgres://alice:pass@localhost/db Bearer hello.secret.value sk-proj-abcdefghijklmnop';
     const output = sanitizeExecutionTrace(input);

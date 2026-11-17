@@ -59,6 +59,20 @@ async function fixture(maxConcurrentPerUser = 4) {
   return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
 describe("durable coding activity", () => {
+  // V6 step 17: an edit asked in a chat where the site was not created recorded no steps, so the chat showed only the answer.
+  it("gives a chat that edits a project made elsewhere its own process and records that run's steps there", async () => {
+    const f = await fixture();
+    const { project } = await f.projects.create(owner, f.company.id, { name: "Made elsewhere", type: "website" }, "made-elsewhere");
+    const chat = (await f.store.createNeutralConversation(owner, "Edit chat")).id;
+    const first = await f.service.ensureChatProcess(owner, { companyId: f.company.id, projectId: project.id, conversationId: chat, sessionId: "session-edit" });
+    expect(await f.service.ensureChatProcess(owner, { companyId: f.company.id, projectId: project.id, conversationId: chat, sessionId: "session-edit" })).toBe(first);
+    await f.service.recordActivity(owner, f.company.id, "session-edit", chat, { id: "step-1", runId: "code-run-edit-1", stage: "agent", title: "Read index.html", at: new Date().toISOString(), status: "completed" });
+    const own = (await f.service.list(owner)).find(process => process.id === first)!;
+    expect(own).toMatchObject({ conversationId: chat, projectId: project.id, sessionId: "session-edit" });
+    expect(own.progress?.map(event => event.id)).toEqual(["step-1"]);
+    expect((await f.service.listForChat(owner, chat)).some(process => process.id === first)).toBe(true);
+  });
+
   it("discovers a live inbox run behind another chat's idle binding without reading its replay", async () => {
     const f = await fixture();
     await f.start("Create a Next.js website");

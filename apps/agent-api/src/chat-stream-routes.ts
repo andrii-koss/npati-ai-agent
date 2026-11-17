@@ -524,6 +524,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 title: (codeProject.framework ?? "") + ": " + selection.reason, agentId: selection.source === "ai_planner" ? "AI Planner" : "System", result: JSON.stringify(selection),
               });
             }
+            // The steps of this run belong to this chat, also when the site was made in another chat or outside chat: without a
+            // process of its own the chat recorded none and showed only the answer (V6 step 17).
+            if (memoryPolicy.writeAllowed && cardConversationId && effectiveProjectId && deps.chatDevelopment) {
+              await deps.chatDevelopment.ensureChatProcess(auth, { companyId: activeCompanyId!, projectId: effectiveProjectId, conversationId: cardConversationId, sessionId: codeSession.id })
+                .catch((error: unknown) => request.log.warn({ err: error }, "chat_process_bind_failed"));
+            }
             const userStopped = bindChatStreamUserStop(activeChatStreams, streamId, streamController, () => {
               codeRunCancellation.requestSessionCancel({ sessionId: codeSession.id, companyId: activeCompanyId!, projectId: effectiveProjectId ?? null, requestedBy: auth.userId, runId: runKey });
               codeRunCancellation.abortLiveRuns(codeSession.id, new Error("Stopped by request"));

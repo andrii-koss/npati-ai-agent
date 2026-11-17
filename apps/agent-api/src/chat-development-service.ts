@@ -23,7 +23,9 @@ import type { ProjectTerminalEventsRepository } from "./project-terminal-events"
 import { readIntentHistory } from "./chat-project-intent";
 
 const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
-type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
+type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string;
+  /** A chat that edits a project made elsewhere: it shows only the runs it started (V6 step 17). */
+  chatScoped?: boolean };
 /** A dev server is a working Preview too; only a production start needs a verified build. */
 const previewBuildUsable = (status: string | null | undefined) => status === "ready" || status === "development";
 const STALE_PROCESS_MS = 30 * 60_000;
@@ -153,10 +155,14 @@ export class ChatDevelopmentService {
       return [companyId, await this.d.store.listCodeRunStates({ companyId, limit: 200 })] as const;
     })));
     const inboxEnabled = includeTrace ? new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const))) : new Map<string, boolean>();
+    const runsOf = (entry: Entry) => new Set((entry.progress ?? []).map(event => event.runId).filter((id): id is string => typeof id === "string" && id.startsWith("code-run-")));
+    const scopedRuns = new Map(items.filter(entry => entry.chatScoped).map(entry => [entry.id, runsOf(entry)] as const));
     const views = await Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }): Promise<DevelopmentProcess | null> => {
       try {
       const detailed = includeTrace && (!detailsFor || detailsFor(stored));
-      const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored);
+      // A chat-scoped process shows the runs it started; any other process leaves out runs another chat started.
+      const claimed = new Set([...scopedRuns].filter(([id]) => id !== stored.id).flatMap(([, ids]) => [...ids]));
+      const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored, (stored as Entry).chatScoped ? { own: scopedRuns.get(stored.id) ?? new Set() } : { claimed });
       const latestRun = traceRuns.roots.sort((a, b) => (executionTimestamp(b.startedAt) ?? 0) - (executionTimestamp(a.startedAt) ?? 0))[0];
       // An inbox can start a new run while its persisted binding is still idle. Discover it from the already
       // loaded lease summaries, without hydrating every unrelated project's replay, inbox and conversation.
@@ -633,6 +639,31 @@ export class ChatDevelopmentService {
     }
     if (changed) await this.patch(ctx, id, { conversationId: process.conversationId, parentConversationId: process.parentConversationId });
     return { url: "/c/" + process.conversationId + "?company=" + encodeURIComponent(process.companyId) + "&project=" + encodeURIComponent(project.id) + "&developmentRoot=" + process.parentConversationId };
+  }
+  /**
+   * A chat that asks to change a project gets a process of its own before the run starts, so the steps of that run are
+   * recorded and shown in that chat. Steps were recorded only into the process of the chat that created the site: an edit
+   * asked in any other chat (or of a project made elsewhere) showed no steps at all, only the answer (V6 step 17).
+   */
+  async ensureChatProcess(ctx: AuthContext, input: { companyId: string; projectId: string; conversationId: string; sessionId: string }) {
+    return this.serialize(ctx, async () => {
+      const existing = (await this.entries(ctx)).find(p => p.companyId === input.companyId && p.projectId === input.projectId && p.conversationId === input.conversationId);
+      if (existing) {
+        if (existing.sessionId !== input.sessionId) await this.patch(ctx, existing.id, { sessionId: input.sessionId });
+        return existing.id;
+      }
+      const project = await this.d.projects.get(ctx, input.companyId, input.projectId);
+      const now = new Date().toISOString();
+      const entry: Entry = {
+        id: randomUUID(), requestId: randomUUID(), companyId: input.companyId, projectId: input.projectId, conversationId: input.conversationId, parentConversationId: input.conversationId,
+        sessionId: input.sessionId, name: project.name, framework: project.framework ?? "", chatScoped: true,
+        status: project.previewUrl && previewBuildUsable(project.lastBuildStatus) ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle",
+        hidden: true, createdAt: now, updatedAt: now,
+      };
+      const activeIds = new Set((await this.list(ctx)).filter(developmentIsActive).map(p => p.id));
+      await this.change(ctx, items => this.bounded(ctx, [...items, entry], activeIds));
+      return entry.id;
+    });
   }
   async openProject(ctx: AuthContext, companyId: string, projectId: string) {
     return this.serialize(ctx, () => this.openProjectOwned(ctx, companyId, projectId));

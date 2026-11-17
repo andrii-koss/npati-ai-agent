@@ -56,10 +56,12 @@ export function metadataOnlyProgress(events: DevelopmentProcessProgressItem[], l
   });
 }
 /** Include only the session's roots and their explicitly linked children in this tenant/project. */
-export function selectDevelopmentTraceRuns(runs: CodeRunStateRecord[], ctx: AuthContext, process: DevelopmentProcess) {
+/** `own`: the runs a chat-scoped process started; `claimed`: runs other chats started, left out of this process. */
+export function selectDevelopmentTraceRuns(runs: CodeRunStateRecord[], ctx: AuthContext, process: DevelopmentProcess, scope: { own?: ReadonlySet<string>; claimed?: ReadonlySet<string> } = {}) {
   const scoped = runs.filter(run => run.workspaceId === ctx.workspaceId && run.companyId === process.companyId && run.projectId === process.projectId);
   // A chat opened from an existing project has no session of its own yet: its runs are simply this project's runs.
-  const roots = scoped.filter(run => (!process.sessionId || run.sessionId === process.sessionId) && typeof run.details.parentRunId !== "string");
+  const roots = scoped.filter(run => (!process.sessionId || run.sessionId === process.sessionId) && typeof run.details.parentRunId !== "string"
+    && (scope.own ? scope.own.has(run.runId) : !scope.claimed?.has(run.runId)));
   const allowed = new Set(roots.map(run => run.runId));
   for (let i = 0; i < scoped.length; i++) {
     let changed = false;
