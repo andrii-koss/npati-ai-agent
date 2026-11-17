@@ -215,6 +215,14 @@ export class CodeService {
     return this.detectAndPersist(ctx, companyId, created.project.id);
   }
 
+  /** Whether the project has a file at this path, or one with this name when only a name is given ("index.html"). */
+  async projectHasFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<boolean> {
+    if (typeof this.workspace.listFiles !== "function") return false;
+    const wanted = path.replace(/^\.?\//u, "").toLowerCase();
+    const files = (await this.workspace.listFiles(ctx, companyId, projectId)).filter((entry) => entry.type === "file" && !/(^|\/)(node_modules|\.git)\//u.test(entry.path));
+    return files.some((entry) => { const own = entry.path.toLowerCase(); return own === wanted || (!wanted.includes("/") && own.split("/").pop() === wanted); });
+  }
+
   async listProjects(ctx: AuthContext, companyId: string, includeArchived = false): Promise<Project[]> {
     const projects = await this.projects.list(ctx, companyId, includeArchived);
     return projects.filter((project) => project.type === "code_project");

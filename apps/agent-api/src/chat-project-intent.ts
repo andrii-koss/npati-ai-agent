@@ -36,6 +36,13 @@ export interface CoreChatRoute {
   format?: "none" | "draft" | "article" | "table"
 }
 const GUARDED_ROUTING_CHARS = 4_000;
+/**
+ * A request that names a project file ("index.html", "src/app.tsx", "styles.css") asks to work on code. With such a file an
+ * edit decision of the classifier is taken at a lower confidence and a record it only reads does not turn the request into
+ * a memory or company action: "add to index.html the address saved in company memory" went to the memory tools (V6 step 17).
+ */
+export const PROJECT_FILE_REFERENCE = /(?<![\p{L}\p{N}@])(?:[\w.-]+\/)*[\w-]+\.(?:html?|css|scss|sass|less|js|jsx|mjs|cjs|ts|tsx|vue|svelte|astro|json|py|dart|php|rb|go|rs|java|kt|swift|sql|yml|yaml|toml|md)(?![\p{L}\p{N}])/iu;
+export const namesProjectFile = (message: string) => PROJECT_FILE_REFERENCE.test(message.replace(/https?:\/\/\S+/giu, " "));
 const instructions = `Classify the user's primary intent, understanding their language and the entire request. You are a router, not an executor. Return only JSON:
 {"intent":"${Object.keys(examples).join("|")}","confidence":0.99,"schemaChange":false,"entityRead":null,"coreCapability":null,"coreMutation":false,"reply":null,"format":"none","targets":[{"name":"short project name","kind":"website|blog|store|crm|mobile_app|api","framework":"${SUPPORTED_PROJECT_FRAMEWORKS.join("|")}","reason":"concrete rationale","criteria":["requirement informing selection"]}]}
 Targets are required only for CREATE_PROJECT/CREATE_WEBSITE; otherwise use [].
@@ -285,7 +292,8 @@ export function createChatProjectIntentResolver(deps: {
       // A bare "create me a site" is unspecific, so the model rates it 0.6-0.7 although it is sure of the action.
       // When the independent keyword reading agrees it is a creation, that doubt only concerns details.
       const creationConfirmed = ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(intent) && ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent);
-      if (parsed.confidence < (creationConfirmed ? 0.5 : 0.8)) { lowConfidence = { intent, confidence: parsed.confidence, deterministic: deterministic.intent }; throw new Error("low_confidence"); }
+      const fileEdit = ["EDIT_WEBSITE", "EDIT_PROJECT"].includes(intent) && namesProjectFile(message);
+      if (parsed.confidence < (creationConfirmed || fileEdit ? 0.5 : 0.8)) { lowConfidence = { intent, confidence: parsed.confidence, deterministic: deterministic.intent }; throw new Error("low_confidence"); }
       // Work handed to a Company Agent stays with the Company runtime; it is not a native record capability.
       let coreCapability = intent === "CHAT" && parsed.assignsWorkToCompanyAgent !== true && CORE_CHAT_CAPABILITIES.includes(parsed.coreCapability as CoreChatCapability) ? parsed.coreCapability as CoreChatCapability : undefined;
       const creation = intent === "CREATE_WEBSITE" || intent === "CREATE_PROJECT";
@@ -345,7 +353,8 @@ export function createChatProjectIntentResolver(deps: {
       // An edit of the open project that only reads a record ("add the address saved in company memory to index.html")
       // is still that edit: the classifier names the record it reads but states no record mutation. It used to fall
       // to the CHAT guard, so nothing was edited and the user got "could not perform safely" (V6 step 17).
-      const projectEditReadingRecord = Boolean(input.activeProjectId) && ["EDIT_WEBSITE", "EDIT_PROJECT"].includes(intent) && parsed.coreMutation === false;
+      const projectEditReadingRecord = ["EDIT_WEBSITE", "EDIT_PROJECT"].includes(intent)
+        && (Boolean(input.activeProjectId) && parsed.coreMutation === false || fileEdit && parsed.coreMutation !== true);
       const semanticProject = intent !== "CHAT" && (parsed.coreCapability === null || projectEditReadingRecord) && !guardedByName;
       // The router's answer is used only for plain conversation: no record, read, row, delegation, NPATI or web question,
       // and not for writing it classified itself (a weak model may answer a draft it was told to leave to the full turn).
