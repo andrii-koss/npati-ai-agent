@@ -23,6 +23,7 @@ let fail: (error: Error) => void;
 const key = "npati_chat_context:owner";
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ companies: [{ id: "bakery", name: "Bakery" }, { id: "studio", name: "Design Studio" }] }) }));
   localStorage.clear(); sessionStorage.clear(); mocks.userId = "owner";
   mocks.open.mockReset().mockReturnValue(new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
   localStorage.setItem(ACTIVE_COMPANY_ID_KEY, "bakery");
@@ -32,13 +33,14 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); localStorage.clear(); sessionStorage.clear(); vi.unstubAllGlobals(); });
 const render = () => act(async () => root.render(<MemoryRouter><ConversationalChat /></MemoryRouter>));
 const trigger = () => host.querySelector(".composer-context-trigger")!;
-const select = () => host.querySelector<HTMLSelectElement>("select")!;
+const select = () => host.querySelector<HTMLButtonElement>(".company-scope-trigger")!;
+const scope = () => host.querySelector("section")?.dataset.company ?? "none";
 const saveName = () => localStorage.setItem(`${key}:company`, JSON.stringify({ id: "bakery", name: "Bakery" }));
 
 it("shows the saved company name and scope before the delayed open response", async () => {
   saveName(); await render();
   expect(trigger().textContent).toBe("Bakery");
-  expect(select().value).toBe("company:bakery");
+  expect(scope()).toBe("bakery");
   expect(host.querySelector("section")?.dataset.company).toBe("bakery");
   expect(host.querySelector("section")?.dataset.neutral).toBe("false");
   await act(async () => finish({ company: { id: "bakery", name: "Bakery" } }));
@@ -47,7 +49,7 @@ it("shows the saved company name and scope before the delayed open response", as
 });
 it("keeps the company selected while an uncached name loads instead of showing No company", async () => {
   await render();
-  expect(select().value).toBe("company:bakery");
+  expect(scope()).toBe("bakery");
   expect(select().getAttribute("aria-busy")).toBe("true");
   expect(trigger().textContent).not.toContain("chat.noCompany");
   await act(async () => finish({ company: { id: "bakery", name: "Bakery" } }));
@@ -56,20 +58,22 @@ it("keeps the company selected while an uncached name loads instead of showing N
 });
 it("does not restore a pending company after the user chooses No company", async () => {
   saveName(); await render();
-  await act(async () => { select().value = "none"; select().dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => select().click());
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain("All companies");
+  await act(async () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(option => option.textContent === "chat.noCompany")!.click());
   await act(async () => finish({ company: { id: "bakery", name: "Bakery" } }));
-  expect(select().value).toBe("none");
+  expect(scope()).toBe("none");
   expect(trigger().textContent).toBe("chat.noCompany"); // the label is translated; this test renders without a language provider
   expect(localStorage.getItem(`${key}:company`)).toBeNull();
 });
 it("keeps the saved selection on a temporary open failure", async () => {
   saveName(); await render(); await act(async () => fail(new Error("Temporarily unavailable")));
   expect(trigger().textContent).toBe("Bakery");
-  expect(select().value).toBe("company:bakery");
+  expect(scope()).toBe("bakery");
 });
 it("clears a selection when the server confirms the company is unavailable", async () => {
   saveName(); await render(); await act(async () => finish({ company: null }));
-  expect(select().value).toBe("none");
+  expect(scope()).toBe("none");
   expect(localStorage.getItem(ACTIVE_COMPANY_ID_KEY)).toBeNull();
   expect(localStorage.getItem(`${key}:company`)).toBeNull();
 });

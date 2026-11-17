@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Plus, Webhook as WebhookIcon } from "lucide-react";
+import { CompanyScopeSelect } from "../CompanyScopeSelect";
 import { confirmModal } from "../ConfirmDialog";
 import { useTranslation } from "../i18n";
 import { api, type Company } from "./types";
@@ -75,21 +77,21 @@ export function InboundWebhooksSection({ companies }: { companies: Company[] }) 
     <section className="explore-section inbound-webhooks-section" data-testid="inbound-webhooks">
       <div className="section-heading">
         <div>
-          <p className="section-kicker">{copy.kicker}</p>
+          <p className="section-kicker"><WebhookIcon size={16} aria-hidden="true" />{copy.kicker}</p>
           <h2>{copy.heading}</h2>
           <p className="showing-copy">{copy.description}</p>
         </div>
         {companies.length > 0 && (
-          <label className="inbound-webhooks-company">
-            <span>{copy.company}</span>
-            <select value={company?.id ?? ""} onChange={(event) => setCompanyId(event.target.value)} aria-label={copy.company}>
+          <div className="inbound-webhooks-company">
+            <label htmlFor="inbound-webhooks-company">{copy.company}</label>
+            <CompanyScopeSelect id="inbound-webhooks-company" value={company?.id ?? ""} onValueChange={setCompanyId} includeAll={false} aria-label={copy.company}>
               {companies.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
+            </CompanyScopeSelect>
+          </div>
         )}
       </div>
       {notice && <div className="workspace-notice" role="status">{notice}</div>}
-      {webhooks.length === 0 ? <p className="showing-copy">{copy.none}</p> : (
+      {webhooks.length === 0 ? <div className="inbound-webhooks-empty"><WebhookIcon size={22} aria-hidden="true" /><p>{copy.none}</p></div> : (
         <div className="inbound-webhooks-list">
           {webhooks.map((hook) => (
             <article className="provider-card" key={hook.id} data-testid="inbound-webhook">
@@ -111,9 +113,17 @@ export function InboundWebhooksSection({ companies }: { companies: Company[] }) 
       )}
       {company && (
         <form className="inbound-webhooks-form" onSubmit={(event) => void create(event)}>
-          <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={copy.name} aria-label={copy.name} maxLength={200} />
-          <input value={form.promptTemplate} onChange={(event) => setForm({ ...form, promptTemplate: event.target.value })} placeholder={copy.prompt} aria-label={copy.prompt} />
-          <button type="submit" className="button-primary" disabled={!form.name.trim() || !form.promptTemplate.trim()}>{copy.create}</button>
+          <label className="inbound-webhooks-field">
+            <span>{copy.name}</span>
+            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={copy.name} maxLength={200} required />
+          </label>
+          <label className="inbound-webhooks-field">
+            <span>{copy.prompt}</span>
+            <textarea value={form.promptTemplate} onChange={(event) => setForm({ ...form, promptTemplate: event.target.value })} placeholder={copy.prompt} rows={3} required />
+          </label>
+          <div className="inbound-webhooks-form-footer">
+            <button type="submit" className="button-primary" disabled={!form.name.trim() || !form.promptTemplate.trim()}><Plus size={16} aria-hidden="true" />{copy.create}</button>
+          </div>
         </form>
       )}
     </section>

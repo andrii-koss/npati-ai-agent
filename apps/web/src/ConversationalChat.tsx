@@ -3,6 +3,7 @@ import { useCardChangeDraft } from "./chat-card-draft";
 import { chatOpenData, isChatPage } from "./chat-open";
 import { useTranslation } from "./i18n";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import type { AgentReply } from "@npati/shared";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useContext, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -503,21 +504,14 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
 
   const switcher = (
     <div className="composer-context-switcher" title={activeCompanyName || "Active context"} onPointerEnter={() => void ensureCompanyList()} onFocusCapture={() => void ensureCompanyList()}>
-      <div className="composer-context-trigger" aria-hidden="true">
-        <span className="composer-context-text">
-          {activeCompanyName || (selectValue !== "none" ? <span aria-hidden="true" style={{ display: "inline-block", width: 96, height: 12, borderRadius: 4, background: "var(--surface-muted, #f1f5f9)" }} /> : t("chat.noCompany"))}
-        </span>
-        <svg className="composer-context-icon" viewBox="0 0 10 6" width="10" height="6" fill="none">
-          <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <select
+      <CompanyScopeSelect
         aria-label="Active context"
         aria-busy={selectValue !== "none" && !activeCompanyName}
         value={selectValue}
         disabled={switching}
-        onChange={(e) => void choose(e.target.value)}
-        className="composer-context-select"
+        onValueChange={(value) => void choose(value)}
+        includeAll={false}
+        className="composer-context-trigger"
       >
         <option value="none">{t("chat.noCompany")}</option>
         {selectValue !== "none" && !activeCompanyName && <option value={selectValue}>Loading company…</option>}
@@ -526,7 +520,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
               {c.name}
             </option>
           ))}
-      </select>
+      </CompanyScopeSelect>
     </div>
   );
 

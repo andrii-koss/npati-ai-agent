@@ -31,6 +31,34 @@
 .company-scope-trigger > svg { flex-shrink: 0; }
 .company-scope-trigger:disabled { opacity: .5; cursor: default; }
 .company-scope-trigger:focus-visible { outline: 2px solid #ed292e; outline-offset: 3px; }
+.composer-context-switcher .company-scope-trigger.composer-context-trigger {
+  flex: 0 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto;
+  padding: 3px 6px !important;
+  gap: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.3;
+  pointer-events: auto;
+}
+.composer-context-switcher .company-scope-trigger > span { max-width: 105px; color: inherit; font: inherit; }
+.composer-context-switcher .company-scope-trigger > svg { width: 10px; height: 10px; color: #64748b; }
+.composer-context-switcher:hover .company-scope-trigger { color: var(--npati-red, #e11d2e); background: #e11d2e0a; }
+.composer-context-switcher.is-compact .company-scope-trigger > span,
+.onboarding-live-composer.has-compact-context .company-scope-trigger > span { display: none; }
+.composer-context-switcher.is-compact .company-scope-trigger.composer-context-trigger,
+.onboarding-live-composer.has-compact-context .company-scope-trigger.composer-context-trigger { width: 28px !important; height: 28px; padding: 0 !important; justify-content: center; }
+@media (max-width: 640px) {
+  .composer-context-switcher .company-scope-trigger.composer-context-trigger { font-size: 12.5px; }
+}
 .company-strip-control-row .company-scope-trigger {
   flex: 1 1 auto !important;
   width: 100% !important;

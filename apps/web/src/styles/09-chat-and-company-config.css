@@ -794,11 +794,33 @@
 }
 
 /* Inbound webhooks on the Integrations page (V6 step 12). */
-.inbound-webhooks-section .section-heading { align-items: flex-end; gap: 16px; flex-wrap: wrap; }
-.inbound-webhooks-company { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.inbound-webhooks-section { padding: 24px; border: 1px solid #e9e9ec; border-radius: 20px; background: #fff; box-shadow: 0 4px 18px #00000005; }
+.inbound-webhooks-section .section-heading { align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.inbound-webhooks-section .section-heading > div:first-child { flex: 1 1 400px; }
+.inbound-webhooks-section .section-kicker { display: flex; align-items: center; gap: 8px; color: #df262d; }
+.inbound-webhooks-section .showing-copy { max-width: 720px; line-height: 1.65; }
+.inbound-webhooks-company { display: flex; flex: 0 1 280px; min-width: 0; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 600; color: #171717; }
+.inbound-webhooks-company .company-scope-trigger.company-scope-trigger { flex: 0 0 auto !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; height: 44px; border-radius: 10px; }
+.inbound-webhooks-company .company-scope-trigger > span { color: inherit; font: inherit; }
+.inbound-webhooks-empty { display: flex; align-items: center; gap: 12px; margin-top: 20px; padding: 20px; border: 1px dashed #e3e3e7; border-radius: 12px; background: #fafafb; color: #65656f; font-size: 14px; }
+.inbound-webhooks-empty > svg { flex-shrink: 0; color: #df262d; }
+.inbound-webhooks-empty p { margin: 0; line-height: 1.6; }
 .inbound-webhooks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 12px; }
 .inbound-webhooks-list .provider-card-footer { flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
 .inbound-webhook-url { display: block; overflow-wrap: anywhere; font-size: 12px; padding: 8px 10px; border-radius: 8px; background: var(--surface-muted, #f4f4f5); margin: 8px 0; }
-.inbound-webhooks-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.inbound-webhooks-form input { flex: 1 1 220px; min-width: 0; }
+.inbound-webhooks-form { display: grid; gap: 18px; margin-top: 24px; padding-top: 24px; border-top: 1px solid #eeeef0; }
+.inbound-webhooks-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: #171717; font-size: 13px; font-weight: 600; }
+.inbound-webhooks-field > span { color: inherit; }
+.inbound-webhooks-field :is(input, textarea) { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; padding: 12px 14px; border: 1px solid #dedee3; border-radius: 10px; background: #fff; color: #171717; font: inherit; font-size: 14px; font-weight: 400; line-height: 1.5; box-shadow: 0 1px 2px #00000003; transition: border-color .15s, box-shadow .15s; }
+.inbound-webhooks-field textarea { min-height: 104px; resize: vertical; }
+.inbound-webhooks-field :is(input, textarea)::placeholder { color: #8a8a92; }
+.inbound-webhooks-field :is(input, textarea):focus { outline: none; border-color: #e13b42; box-shadow: 0 0 0 3px #e13b4214; }
+.inbound-webhooks-form-footer { display: flex; justify-content: flex-end; }
+.inbound-webhooks-form-footer .button-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border-radius: 10px; }
+@media (max-width: 640px) {
+  .inbound-webhooks-section { padding: 18px; }
+  .inbound-webhooks-company { flex-basis: 100%; }
+  .inbound-webhooks-list { grid-template-columns: minmax(0, 1fr); }
+  .inbound-webhooks-form-footer .button-primary { width: 100%; }
+}
 .automation-action-btn.stop-btn { color: #b42318; border-color: #f2b8b5; }

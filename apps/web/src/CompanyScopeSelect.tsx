@@ -17,7 +17,7 @@ function optionText(node: ReactNode): string {
 }
 
 /** Shared company scope picker; option values and scope callbacks belong to each page. */
-export function CompanyScopeSelect({ children, value, onValueChange, includeAll = true, entity = "company", className, style, id, disabled, title, "aria-label": ariaLabel, "aria-labelledby": labelledBy }: Props) {
+export function CompanyScopeSelect({ children, value, onValueChange, includeAll = true, entity = "company", className, style, id, disabled, title, "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-busy": busy }: Props) {
   const { language } = useTranslation();
   const isUk = language === "uk";
   const uid = useId();
@@ -39,7 +39,7 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
   }
   const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   const selected = options.find((option) => option.value === value);
-  const companyCount = options.filter((option) => option.value && !["all", "__all__", "personal"].includes(option.value)).length;
+  const companyCount = options.filter((option) => option.value && !["all", "__all__", "personal", "none"].includes(option.value)).length;
   const heading = entity === "business" ? (isUk ? "Виберіть бізнес" : "Select business") : (isUk ? "Виберіть компанію" : "Select company");
   const searchLabel = entity === "business" ? (isUk ? "Пошук бізнесів" : "Search businesses") : (isUk ? "Пошук компаній" : "Search companies");
   const countLabel = entity === "business" ? (isUk ? "бізнесів" : "businesses") : (isUk ? "компаній" : "companies");
@@ -64,9 +64,10 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
       const above = rect.top - 16;
       const upward = below < 300 && above > below;
       const height = Math.min(488, upward ? above : below);
+      const panelHeight = Math.min(height, panel.current?.getBoundingClientRect().height || height);
       setPosition({
         left: Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12)),
-        top: upward ? Math.max(12, rect.top - height - 6) : rect.bottom + 6,
+        top: upward ? Math.max(12, rect.top - panelHeight - 6) : rect.bottom + 6,
         maxHeight: Math.max(140, height),
       });
     };
@@ -88,7 +89,7 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", escape);
     };
-  }, [open]);
+  }, [open, query, options.length]);
 
   useEffect(() => {
     if (open && active >= 0) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: "nearest" });
@@ -97,7 +98,7 @@ export function CompanyScopeSelect({ children, value, onValueChange, includeAll 
   return <>
     <button ref={trigger} type="button" id={id} disabled={disabled}
       className={`company-scope-trigger ${className || ""}`} style={style}
-      title={title || selected?.label} aria-label={ariaLabel} aria-labelledby={labelledBy}
+      title={title || selected?.label} aria-label={ariaLabel} aria-labelledby={labelledBy} aria-busy={busy}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? `${uid}-panel` : undefined}
       onClick={() => { setQuery(""); setActive(-1); setOpen(!open); }}
       onKeyDown={(event) => {
