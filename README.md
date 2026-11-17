@@ -21,7 +21,9 @@ verified, partial, or not implemented; see [Capabilities](docs/CAPABILITIES.md).
 
 Some UI surfaces and integrations are partial, and some catalogued capabilities are
 reserved but not implemented. The capability document and inspector make that distinction
-explicit.
+explicit. What the live V6 audit proved, and what stays blocked or untested (for example
+Android APK builds, messenger delivery, isolation between two user accounts), is listed in
+[Release readiness](docs/RELEASE_READINESS.md#v6-tested-scope-2026-11-17-product-commit-29ed8cb8).
 
 ## Requirements
 
