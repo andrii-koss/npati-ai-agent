@@ -47,6 +47,8 @@ export function useChatDevelopment(options: {
   // Opening a project from Settings first moves to its own chat; a message sent meanwhile would be cut off by that move.
   const [openingProjectChat, setOpeningProjectChat] = useState(false);
   const previousStatuses = useRef(new Map<string, string>());
+  const pendingReload = useRef(false);
+  const followUps = useRef<number[]>([]);
   const retry = useRef<{ payload: string; requestId: string } | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const planning = useRef(false);
@@ -160,8 +162,10 @@ export function useChatDevelopment(options: {
   // Any project of this chat that finishes brings in its saved reply and card. Watching only the chat's current project
   // missed a second project: when it finished, the current project switched back to the earlier card's, so the reply
   // appeared only after a reload (V6 step 04).
+  // The statuses are recorded while the chat is busy too: a chat reopened during a background run was busy from the
+  // start, never saw the run as running, and so never noticed it finish; its answer appeared only after a reload (V6 step 18).
   useEffect(() => {
-    if (options.busy || !options.conversationId) return;
+    if (!options.conversationId) return;
     let finished = false;
     for (const process of processes.filter(p => p.conversationId === options.conversationId)) {
       const signature = process.status + ":" + process.updatedAt;
@@ -169,8 +173,18 @@ export function useChatDevelopment(options: {
       previousStatuses.current.set(process.id, signature);
       if (previous && previous !== signature && !developmentIsActive(process)) finished = true;
     }
-    if (finished) callbacks.current.onConversation(options.conversationId);
+    if (finished) pendingReload.current = true;
+    if (options.busy || !pendingReload.current) return;
+    pendingReload.current = false;
+    const conversationId = options.conversationId;
+    callbacks.current.onConversation(conversationId);
+    // The run's answer is saved after its final steps (Preview, checks): the process reads "completed" seconds before the
+    // reply exists, so a reopened chat read the messages too early and never showed it (V6 step 18). Read twice more.
+    for (const delay of [4_000, 12_000]) followUps.current.push(window.setTimeout(() => {
+      if (callbacks.current.conversationId === conversationId) callbacks.current.onConversation(conversationId);
+    }, delay));
   }, [processes, options.conversationId, options.busy]);
+  useEffect(() => () => { followUps.current.forEach((timer) => window.clearTimeout(timer)); followUps.current = []; }, [options.conversationId]);
   async function submit(message: string): Promise<boolean> {
     const restore = requestsDevelopmentRestore(message);
     let targets: DevelopmentTarget[] = [];

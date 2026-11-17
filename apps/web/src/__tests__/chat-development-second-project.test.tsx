@@ -32,3 +32,29 @@ it("reloads the chat when a second project of the same chat finishes", async () 
   await act(async () => { mocks.push!([site, game("completed", "2026-11-12T09:02:00Z")]); });
   expect(onConversation).toHaveBeenCalledWith("chat");
 });
+
+// Live V6 step 18: the tab was closed during an edit and the chat opened again while the agent still worked. The chat
+// was busy from the start, never recorded the run as running, and its answer appeared only after a reload.
+it("reloads a chat reopened during a run once that run finishes, though the chat was busy when it opened", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  mocks.api.mockImplementation(async () => ({ processes: [site, game("running", "2026-11-12T09:01:00Z")] }));
+  const onConversation = vi.fn();
+  let busy = true;
+  function Harness() { useChatDevelopment({ companyId: "company", conversationId: "chat", latestProjectId: "game", busy, onConversation, onError: vi.fn(), onAccepted: vi.fn(), onSession: vi.fn() }); return null; }
+  const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  await act(async () => root!.render(<I18nProvider><MemoryRouter><Harness /></MemoryRouter></I18nProvider>));
+  await act(async () => { await Promise.resolve(); });
+  onConversation.mockClear();
+  // The run finishes while the chat still counts as busy, then the chat stops being busy.
+  await act(async () => { mocks.push!([site, game("completed", "2026-11-12T09:02:00Z")]); });
+  expect(onConversation).not.toHaveBeenCalled();
+  busy = false;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await act(async () => root!.render(<I18nProvider><MemoryRouter><Harness /></MemoryRouter></I18nProvider>));
+    expect(onConversation).toHaveBeenCalledWith("chat");
+    // The answer is saved after the run's final steps: the chat reads the messages twice more.
+    await act(async () => { vi.advanceTimersByTime(12_000); });
+    expect(onConversation).toHaveBeenCalledTimes(3);
+  } finally { vi.useRealTimers(); }
+});
