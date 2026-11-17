@@ -139,6 +139,12 @@ const BACKEND_PREVIEW_FAILED: Record<string, (reason: string) => string> = {
   en: reason => `⚠️ The server did not start in Preview: ${reason}. The code and changes are saved; start Preview again or ask the agent to fix the start.`,
 };
 
+const WEBSITE_PREVIEW_FAILED: Record<string, (reason: string) => string> = {
+  uk: reason => `⚠️ Preview сайту не запустився: ${reason}. Зміни у файлах збережено; запустіть Preview знову або попросіть агента виправити запуск.`,
+  ru: reason => `⚠️ Preview сайта не запустился: ${reason}. Изменения в файлах сохранены; запустите Preview снова или попросите агента исправить запуск.`,
+  en: reason => `⚠️ The site Preview did not start: ${reason}. The file changes are saved; start Preview again or ask the agent to fix the start.`,
+};
+
 export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: unknown, ports: {
   getProject(ctx: AuthContext, companyId: string, projectId: string): Promise<Project>;
   prepareStaticPreview?(ctx: AuthContext, companyId: string, projectId: string): Promise<Project | null>;
@@ -205,6 +211,12 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   } catch (error) {
     await emitCodingActivity(input, { ...activity, status: input.sink?.signal.aborted ? "cancelled" : "failed", error: error instanceof Error ? error.message : "Preview failed" });
     await ports.markFailed(input.ctx, companyId, projectId);
-    throw error;
+    if (input.sink?.signal.aborted) throw error;
+    // The run still ends failed with the Preview error as its reason, but the reply keeps the finished edit: it was only
+    // "Preview server did not become HTTP-ready", in English, for a Ukrainian request whose file change was saved (V6 step 17).
+    const reason = error instanceof Error ? error.message : String(error);
+    const notice = (WEBSITE_PREVIEW_FAILED[input.responseLanguage ?? ""] ?? WEBSITE_PREVIEW_FAILED.en!)(reason);
+    const message = typeof run.message === "string" && run.message.trim() ? run.message.trimEnd() + "\n\n" + notice : notice;
+    return { ...run, status: "failed", reason, message, websitePreview: { status: "failed", error: reason } };
   }
 }

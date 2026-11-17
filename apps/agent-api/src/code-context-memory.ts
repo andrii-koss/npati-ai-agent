@@ -98,6 +98,25 @@ function bounded(header: string, lines: readonly string[], limit: number, entrie
   };
 }
 
+/**
+ * Orders stored entries by how many words of the request they share, most relevant first, recency kept among equals.
+ * The run used to pass the whole request as one ILIKE substring, so an entry matched only when it contained the
+ * request verbatim and the agent never saw Business Memory (V6 step 17). Nothing is dropped here; the block's own
+ * entry and size bounds still apply.
+ */
+export function rankMemoriesForQuery<T extends CompanyMemoryEntry>(entries: readonly T[], query: string): T[] {
+  // A word is matched by its first five letters, so "адресою" finds "адреса" and "bakery's" finds "bakery".
+  const stems = [...new Set((query.toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).map((word) => word.slice(0, 5)))];
+  if (stems.length === 0) return [...entries];
+  const score = (entry: T) => {
+    const text = `${entry.title ?? ""} ${entry.content}`.toLocaleLowerCase();
+    return stems.filter((stem) => text.includes(stem)).length;
+  };
+  return entries.map((entry, index) => ({ entry, index, score: score(entry) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.entry);
+}
+
 export function buildCompanyMemoryBlock(
   entries: readonly CompanyMemoryEntry[],
   limit = MAX_COMPANY_MEMORY_CHARS,

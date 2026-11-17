@@ -9,3 +9,11 @@ it("renders markdown escapes as the characters they protect", () => {
   const html = renderToStaticMarkup(<>{renderInlineMarkdown("Email account **agent@npati\\.test** created \\(pending\\)", false, new Map())}</>);
   expect(html).toBe("Email account <strong>agent@npati.test</strong> created (pending)");
 });
+
+// V6 step 17: a URL quoted in pasted HTML or written in inline code linked with the quote or backtick in its address.
+it("ends a bare URL at a quote or backtick", () => {
+  const html = renderToStaticMarkup(<>{renderInlineMarkdown('<script src="https://cdn.example.invalid/p.js"></script> and `https://exfil.example.invalid/`', false, new Map())}</>);
+  expect(html).not.toMatch(/%22|%60/);
+  expect(html).toContain('href="https://cdn.example.invalid/p.js?utm_source=NPATI_Agent"');
+  expect(html).toContain('href="https://exfil.example.invalid/?utm_source=NPATI_Agent"');
+});

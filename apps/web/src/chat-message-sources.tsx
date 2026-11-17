@@ -1,6 +1,8 @@
 import { Fragment, useRef, useState, type ReactNode } from "react";
 
-export const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
+// A bare URL ends at a quote or backtick: `src="https://x/p.js"` and `https://x/` in inline code linked to "p.js%22" and
+// "x/%60" (V6 step 17). Neither character is valid unencoded in a URL.
+export const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()"`]+))/g;
 export const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 export const genericSourceLabel = /^(?:джерело|джерела|source|sources|посилання)$/iu;
 export const sourceHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:джерела|sources)(?:\*\*)?(?:\s*\(?\d*\)?)?:?$/iu;

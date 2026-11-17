@@ -22,7 +22,7 @@ import { registerCodeBackgroundRunRoutes } from "./code-background-run-routes";
 import { finishCodeChatWebsite, hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
 import { registerCodeCliRunRoutes } from "./code-cli-run-routes";
 import { createCodeCommandRegistry } from "./code-command-registry";
-import { buildCompanyMemoryBlock, buildProjectContextBlock } from "./code-context-memory";
+import { buildCompanyMemoryBlock, buildProjectContextBlock, rankMemoriesForQuery } from "./code-context-memory";
 import { CodeDataErasureService } from "./code-data-erasure";
 import { createCodeHooksService } from "./code-hooks";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
@@ -478,7 +478,8 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
         let companyMemory: string | null = null;
         try {
           const company = await workspaceStore.getCompany(ctx, companyId);
-          const memories = company.businessId ? await workspaceStore.listMemory(ctx, company.businessId, query, 25).catch(() => []) : [];
+          // The request is not a substring of any entry: read the Business's entries and rank them by shared words.
+          const memories = company.businessId ? rankMemoriesForQuery(await workspaceStore.listMemory(ctx, company.businessId, "", 100).catch(() => []), query ?? "") : [];
           // One entry per stored line: a single entry is cut at 400 characters and lost the later facts.
           const facts = (company.companyInstructions ?? "").split("\n").map((line) => line.trim()).filter(Boolean)
             // A model sometimes stores every fact on one line: such a line is split into its sentences.

@@ -342,7 +342,11 @@ export function createChatProjectIntentResolver(deps: {
       // A company mentioned as the location of a new site is not a company mutation. A complete semantic
       // project decision can override this broad keyword guard. Named record protections and incomplete
       // classifier output retain the conservative CHAT fallback.
-      const semanticProject = intent !== "CHAT" && parsed.coreCapability === null && !guardedByName;
+      // An edit of the open project that only reads a record ("add the address saved in company memory to index.html")
+      // is still that edit: the classifier names the record it reads but states no record mutation. It used to fall
+      // to the CHAT guard, so nothing was edited and the user got "could not perform safely" (V6 step 17).
+      const projectEditReadingRecord = Boolean(input.activeProjectId) && ["EDIT_WEBSITE", "EDIT_PROJECT"].includes(intent) && parsed.coreMutation === false;
+      const semanticProject = intent !== "CHAT" && (parsed.coreCapability === null || projectEditReadingRecord) && !guardedByName;
       // The router's answer is used only for plain conversation: no record, read, row, delegation, NPATI or web question,
       // and not for writing it classified itself (a weak model may answer a draft it was told to leave to the full turn).
       // It sees a bounded history window, so it may answer only while that window is the whole conversation: an earlier
