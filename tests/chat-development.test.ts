@@ -73,6 +73,19 @@ describe("durable coding activity", () => {
     expect((await f.service.listForChat(owner, chat)).some(process => process.id === first)).toBe(true);
   });
 
+  // V6 step 18: the API was killed seconds after a chat edit started; no step was recorded, and the chat showed only the
+  // request with no outcome. The run belongs to the chat from its start.
+  it("shows a run the chat asked for even before any of its steps was recorded", async () => {
+    const f = await fixture();
+    const { project } = await f.projects.create(owner, f.company.id, { name: "Crash site", type: "website" }, "crash-site");
+    const chat = (await f.store.createNeutralConversation(owner, "Crash chat")).id;
+    const processId = await f.service.ensureChatProcess(owner, { companyId: f.company.id, projectId: project.id, conversationId: chat, sessionId: "session-crash" });
+    await f.store.createCodeRunState({ runId: "code-run-crash-1", workspaceId: owner.workspaceId, companyId: f.company.id, projectId: project.id, sessionId: "session-crash", owner: "runner", leaseMs: 60_000, now: new Date() });
+    const shown = (await f.service.listForChat(owner, chat)).find(process => process.id === processId)!;
+    expect(shown.runId).toBe("code-run-crash-1");
+    expect(shown.status).toBe("running");
+  });
+
   it("discovers a live inbox run behind another chat's idle binding without reading its replay", async () => {
     const f = await fixture();
     await f.start("Create a Next.js website");

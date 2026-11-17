@@ -1,3 +1,4 @@
+import { runInterruptedNotice } from "./run-interrupted-notice";
 import { createProjectImplementationPrompt } from "./project-creation-prompt";
 import { briefCreationAssumptions } from "./code-creation-assumptions";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
@@ -25,7 +26,9 @@ import { readIntentHistory } from "./chat-project-intent";
 const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
 type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string;
   /** A chat that edits a project made elsewhere: it shows only the runs it started (V6 step 17). */
-  chatScoped?: boolean };
+  chatScoped?: boolean;
+  /** When this chat last asked for a run of the project: its runs from then on are this chat's (V6 step 18). */
+  chatRunsSince?: string };
 /** A dev server is a working Preview too; only a production start needs a verified build. */
 const previewBuildUsable = (status: string | null | undefined) => status === "ready" || status === "development";
 const STALE_PROCESS_MS = 30 * 60_000;
@@ -162,7 +165,14 @@ export class ChatDevelopmentService {
       const detailed = includeTrace && (!detailsFor || detailsFor(stored));
       // A chat-scoped process shows the runs it started; any other process leaves out runs another chat started.
       const claimed = new Set([...scopedRuns].filter(([id]) => id !== stored.id).flatMap(([, ids]) => [...ids]));
-      const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored, (stored as Entry).chatScoped ? { own: scopedRuns.get(stored.id) ?? new Set() } : { claimed });
+      // A run this chat asked for belongs to it from its start, before any step is recorded: a run stopped by an API crash
+      // in its first seconds recorded none and the chat showed only the request, with no outcome (V6 step 18).
+      const own = new Set(scopedRuns.get(stored.id) ?? []);
+      const since = (stored as Entry).chatRunsSince ? Date.parse((stored as Entry).chatRunsSince!) : NaN;
+      if ((stored as Entry).chatScoped && Number.isFinite(since)) for (const run of runs.get(stored.companyId) ?? []) {
+        if (run.projectId === stored.projectId && run.sessionId === stored.sessionId && (executionTimestamp(run.startedAt) ?? 0) >= since - 5_000 && !claimed.has(run.runId)) own.add(run.runId);
+      }
+      const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored, (stored as Entry).chatScoped ? { own } : { claimed });
       const latestRun = traceRuns.roots.sort((a, b) => (executionTimestamp(b.startedAt) ?? 0) - (executionTimestamp(a.startedAt) ?? 0))[0];
       // An inbox can start a new run while its persisted binding is still idle. Discover it from the already
       // loaded lease summaries, without hydrating every unrelated project's replay, inbox and conversation.
@@ -223,7 +233,16 @@ export class ChatDevelopmentService {
           && Date.now() - Date.parse(previewEvent.at) < 120_000;
         const status: DevelopmentProcess["status"] = expired && !live ? "interrupted" : live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
           : latest.status === "completed" && publishingPreview ? "running" : latest.status === "completed" && !previewReady && (previewExpected || previewEvent) ? "failed" : latest.status;
-        return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined };
+        // A run a restart interrupted, and the chat has no answer after it: say so, in the chat's language, with the next
+        // step. The reopened chat showed only "Error · 0:00" (V6 step 18, API killed during an edit).
+        const startedAt = executionTimestamp(latest.startedAt) ?? 0;
+        const answered = chatHistory.some((message) => message.role === "assistant" && Date.parse(message.createdAt) >= startedAt);
+        const interruptedNotice = status === "interrupted" && detailed && stored.conversationId && !answered
+          ? [{ id: "interrupted:" + latest.runId, role: "assistant" as const, content: runInterruptedNotice(runLanguages[latest.runId]),
+            createdAt: new Date(Math.max(startedAt, ...merged.filter((event) => event.runId === latest.runId).map((event) => Date.parse(event.at) || 0)) + 1).toISOString() }]
+          : [];
+        return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined,
+          ...(interruptedNotice.length ? { conversationMessages: [...(item.conversationMessages ?? []), ...interruptedNotice] } : {}) };
       }
       // Pre-session setup has no durable lease. Do not keep an orphaned setup spinner forever.
       if (developmentIsActive(item) && Date.now() - Date.parse(item.updatedAt) > 300_000) return { ...item, status: "interrupted" as const, detail: "The API process stopped before the session started." };
@@ -649,14 +668,14 @@ export class ChatDevelopmentService {
     return this.serialize(ctx, async () => {
       const existing = (await this.entries(ctx)).find(p => p.companyId === input.companyId && p.projectId === input.projectId && p.conversationId === input.conversationId);
       if (existing) {
-        if (existing.sessionId !== input.sessionId) await this.patch(ctx, existing.id, { sessionId: input.sessionId });
+        await this.patch(ctx, existing.id, { sessionId: input.sessionId, ...(existing.chatScoped ? { chatRunsSince: new Date().toISOString() } : {}) });
         return existing.id;
       }
       const project = await this.d.projects.get(ctx, input.companyId, input.projectId);
       const now = new Date().toISOString();
       const entry: Entry = {
         id: randomUUID(), requestId: randomUUID(), companyId: input.companyId, projectId: input.projectId, conversationId: input.conversationId, parentConversationId: input.conversationId,
-        sessionId: input.sessionId, name: project.name, framework: project.framework ?? "", chatScoped: true,
+        sessionId: input.sessionId, name: project.name, framework: project.framework ?? "", chatScoped: true, chatRunsSince: now,
         status: project.previewUrl && previewBuildUsable(project.lastBuildStatus) ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle",
         hidden: true, createdAt: now, updatedAt: now,
       };
