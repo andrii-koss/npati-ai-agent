@@ -43,6 +43,8 @@ const readComposition = (): string =>
     "app.ts",
     "code-route-runs.ts",
     "chat-stream-routes.ts",
+    // V6 step 19: the stream start-error mapping (rate limit / queue refusal answers) moved out of chat-stream-routes.ts.
+    "chat-stream-start-error.ts",
     "code-queue-status-routes.ts",
     "automation-executor-wiring.ts",
     "code-route-wiring.ts",

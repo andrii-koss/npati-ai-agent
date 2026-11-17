@@ -1,0 +1,37 @@
+import { createChatActions } from "./chat-actions";
+import type { ChatOrchestrationDeps } from "./chat-orchestration";
+export interface ChatTurnDeps {
+    admissionFor: ChatOrchestrationDeps["admissionFor"];
+    agent: ChatOrchestrationDeps["agent"];
+    aiEngine: ChatOrchestrationDeps["aiEngine"];
+    aiPreferences: ChatOrchestrationDeps["aiPreferences"];
+    apiKeysRepo: ChatOrchestrationDeps["apiKeysRepo"];
+    automationsRepo: ChatOrchestrationDeps["automationsRepo"];
+    availableCoreChatTools: ReturnType<typeof createChatActions>["availableCoreChatTools"];
+    browserCredentials: ChatOrchestrationDeps["browserCredentials"];
+    chatFiles: ChatOrchestrationDeps["chatFiles"];
+    completeCreatedBusinessGoal: ReturnType<typeof createChatActions>["completeCreatedBusinessGoal"];
+    completeCreatedBusinessMemory: ReturnType<typeof createChatActions>["completeCreatedBusinessMemory"];
+    config: ChatOrchestrationDeps["config"];
+    contentLibrary: ChatOrchestrationDeps["contentLibrary"];
+    coreChatRoutingDecision: ReturnType<typeof createChatActions>["coreChatRoutingDecision"];
+    emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
+    integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
+    executeCompanyChatAction: ReturnType<typeof createChatActions>["executeCompanyChatAction"];
+    executeCompositeBusinessCompanyCreation: ReturnType<typeof createChatActions>["executeCompositeBusinessCompanyCreation"];
+    executeCompositeCompanyDeletion: ReturnType<typeof createChatActions>["executeCompositeCompanyDeletion"];
+    executeCoreChatTool: ReturnType<typeof createChatActions>["executeCoreChatTool"];
+    executeEmailChatAction: ReturnType<typeof createChatActions>["executeEmailChatAction"];
+    executeWorkspaceChatAction: ReturnType<typeof createChatActions>["executeWorkspaceChatAction"];
+    getAIContext: ChatOrchestrationDeps["getAIContext"];
+    log: ChatOrchestrationDeps["log"];
+    logToolModelStep: ReturnType<typeof createChatActions>["logToolModelStep"];
+    logToolSelectionConfiguration: ReturnType<typeof createChatActions>["logToolSelectionConfiguration"];
+    logToolSelectionTrace: ReturnType<typeof createChatActions>["logToolSelectionTrace"];
+    memoryDocuments: ChatOrchestrationDeps["memoryDocuments"];
+    persistBusinessLogo: ChatOrchestrationDeps["persistBusinessLogo"];
+    researchBundle: ChatOrchestrationDeps["researchBundle"];
+    webResearch: ChatOrchestrationDeps["webResearch"];
+    workspaceStore: ChatOrchestrationDeps["workspaceStore"];
+    marketplace?: ChatOrchestrationDeps["marketplace"];
+}

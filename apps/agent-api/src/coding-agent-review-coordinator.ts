@@ -1,61 +1,14 @@
-import type { ChatMessage } from "@npati/omniroute-adapter";import type { AuthContext, CodeSession } from "@npati/workspace";import { sha256Hex, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";import {  VERIFICATION_APPROVAL_REQUIRED,  VERIFICATION_REPAIR_EXHAUSTED,  VERIFICATION_UNAVAILABLE,  createVerificationLoop,  verificationChecks,  formatRepairInstruction,  type VerificationCheckReport,  type VerificationLoop,  type VerificationReport,} from "./code-verification-loop";import type { TestIntegrityVerdict } from "./code-test-integrity-guard";import type { ScopeGuardResult } from "./code-scope-guard";
-import {
-  planVerification,
-  verificationFingerprint,  VERIFICATION_PLAN_VERSION,
-  type VerificationPlan,
-} from "./code-verification-plan";
+import { ReviewCoordinatorHost } from "./coding-agent-review-host";
+export { ReviewCoordinatorHost } from "./coding-agent-review-host";
+import { sha256Hex, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";import { VERIFICATION_APPROVAL_REQUIRED, VERIFICATION_REPAIR_EXHAUSTED, VERIFICATION_UNAVAILABLE, createVerificationLoop, verificationChecks, formatRepairInstruction, type VerificationCheckReport, type VerificationLoop, type VerificationReport } from "./code-verification-loop";import type { TestIntegrityVerdict } from "./code-test-integrity-guard";import type { ScopeGuardResult } from "./code-scope-guard";
+import { planVerification, verificationFingerprint, VERIFICATION_PLAN_VERSION, type VerificationPlan } from "./code-verification-plan";
 import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-review-risk";
 import { withInRunRepair } from "./code-session-run-executor";
 import { buildSelfReviewSummary, buildVerificationSummary, verificationEvidenceForReview } from "./code-review-summary";
-import {
-  createSelfReview,
-  selfReviewDeliveryNotice, selfReviewUnresolvedNotice,
-  selfReviewStopMessage,
-  type SelfReviewState,
-  type SelfReviewVerdict,
-} from "./code-self-review";
-import {
-  type CodingAgentStopReason,
-  type CodingAgentRunStatus,
-  type CodeRunActivityEvent,
-  type CodingAgentRunnerPorts,
-  type CodingAgentRunInput,
-  type CodingAgentRunSummary,
-  type CodingAgentRunResult,
-  DEFAULT_VERIFICATION_TOOLS,
-  bounded,
-  emitCodingActivity,
-} from "./coding-agent-runner-contracts";
-import type { CodingAgentReviewPhases } from "./coding-agent-review-phases";
+import { createSelfReview, selfReviewDeliveryNotice, selfReviewUnresolvedNotice, selfReviewStopMessage, type SelfReviewState, type SelfReviewVerdict } from "./code-self-review";
+import { type CodingAgentStopReason, type CodingAgentRunResult, DEFAULT_VERIFICATION_TOOLS, bounded, emitCodingActivity } from "./coding-agent-runner-contracts";
+
 import { SelfReviewSourceContext } from "./code-self-review-source-context";
-
-import type { CodeAgentLimits } from "./code-agent-config";
-
-export interface ReviewCoordinatorHost {
-  ports: CodingAgentRunnerPorts;
-  limits: CodeAgentLimits;
-  reviewPhases: CodingAgentReviewPhases;
-  selfReviewDiffChars: number;
-  input: CodingAgentRunInput;
-  ctx: AuthContext;
-  session: CodeSession;
-  companyId: string;
-  projectId: string;
-  sessionId: string;
-  turnId: string;
-  stepTurnKey: (index: number) => string;
-  toolSteps: number[];
-  capabilityScopeFields: Record<string, unknown>;
-  summary: CodingAgentRunSummary;
-  messages: ChatMessage[];
-  record: (event: CodeRunActivityEvent) => Promise<void>;
-  release: (reason: string) => Promise<void>;
-  stop: (
-    status: Exclude<CodingAgentRunStatus, "waiting_for_user">,
-    reason: CodingAgentStopReason,
-    message: string,
-  ) => Promise<CodingAgentRunResult>;
-}
 
 /**
  * How many verification results one run may remember. A run edits a handful of revisions; the cap exists so a

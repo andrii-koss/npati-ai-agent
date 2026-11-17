@@ -1,74 +1,48 @@
-import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
+import { chatStreamRuntimeError } from "./chat-stream-runtime-error";
+import { chatStreamClarification, chatStreamConversation } from "./chat-stream-clarification";
+import { chatHasConnectedProvider } from "./chat-stream-provider-check";
+import type { ChatStreamBody } from "./chat-stream-route-types";
+import { chatStreamStartError } from "./chat-stream-start-error";
+import { streamCompanyRun } from "./chat-stream-company-run";
+import { rowTaskCapabilities, takesRowCapabilityPath } from "./chat-project-data-capabilities";
 import { runChatProjectBatch } from "./chat-project-batch";
 import { conversationProjectIds, projectBatchIntent, resolveConversationProjectTarget } from "./chat-conversation-project-target";
 import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreationReply } from "./chat-project-creation";
 import { selectCompanyForWebsite } from "./company-run-notice-i18n";
 import { companyOnboardingCopy, continueCompanyOnboarding } from "./chat-company-onboarding";
-import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
-import { ProjectNameAmbiguityError, projectAlreadyCreatedInChat } from "./same-name-project-i18n";
-import type { FastifyBaseLogger, FastifyInstance } from "fastify";
-import type { AppConfig } from "./app";
-import { AuthenticationError, assertChatKeyScope } from "./auth";
-import { prepareChatAttachments, ChatAttachmentInput } from "./chat-attachments";
-import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
-import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
-import { browserScreenshotAttachments } from "./chat-browser-screenshots";
+import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
+import { projectAlreadyCreatedInChat } from "./same-name-project-i18n";
+import type { FastifyInstance } from "fastify";
+import { assertChatKeyScope } from "./auth";
+import { prepareChatAttachments } from "./chat-attachments";
+import { isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { runCancellationSignal } from "./workspace-chat-signals";
 import { localizedProjectClarification } from "./project-clarification-i18n";
 import { EDIT_INTENTS, answeredProjectChoice, editChoiceAction, isWhichProjectQuestion, pickEditProject, whichProjectQuestion } from "./chat-edit-project-target";
 import { explicitlyRequestsWebResearch, isChatSpreadsheetTurn, isSpreadsheetEditRequest } from "./chat-text-directives";
-import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, nativeMobileConversationContext, projectConversationContext, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets, refreshChatPreviewSession } from "./code-chat-website";
 import { namesExternalPage, resolveChatCodeIntent } from "./code-intent-routing";
-import { createCodeRunAdmission } from "./code-run-admission";
-import { CodeRunQueue, CodeRunRefusedError, resolveCodeRunQueueLimits } from "./code-run-queue";
-import { CodeRunRateLimitedError } from "./code-run-rate-limit";
-import { CodeService } from "./code-service";
-import { CodeSessionInboxService } from "./code-session-inbox";
+import { CodeRunQueue } from "./code-run-queue";
 import { CodingAgentRunResult } from "./coding-agent-runner";
 import { CompanyChatActions, isReadOnlyCompanySwitch } from "./company-chat-actions";
-import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
-import { createCoreServices } from "./core-services";
-import { ActiveSessionRegistry } from "./distributed-session-registry";
-import { ChatStreamLeaseError, bindChatStreamUserStop, reserveChatStream } from "./chat-stream-lease";
+import { bindChatStreamUserStop, reserveChatStream } from "./chat-stream-lease";
 import { EmailChatActions } from "./email-chat-actions";
-import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
-import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
+import { PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
+import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { publicCodeChatReply, getLatestChatProjectCard, saveChatProjectCard, readChatActiveContext, persistChatResultContext, focusedChatEntity, executeChatEntityRead } from "./project-chat-cards";
 import { confirmedProjectDeletion, isProjectDeleteRequest, requestsDeletion, noWebsiteToChangeMessage, projectDeleteQuestion, projectDeletedMessage, projectDeleteTarget } from "./chat-project-delete";
-import { ProjectOrchestrationError, ProjectOrchestrator, extractCleanProjectName } from "./project-orchestrator";
-import { ProjectPreviewService } from "./project-preview-service";
-import { ProjectSandboxService } from "./project-sandbox-service";
-import { ProjectService } from "./project-service";
-import { AdmissionError } from "./resilience-admission-queue";
-import { SecurityPolicyViolation } from "./security-guardrails";
-import { StorageRateLimitError } from "./storage-protection";
+import { extractCleanProjectName } from "./project-orchestrator";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
-import { isWebsiteReferenceEdit, ContextValidationError, PROJECT_CARD_DATA_VERSION, ProjectCardData, canonicalFrameworkName, isDesktopProjectFramework, codeIntentIsReadOnly, defaultHybridRouter, extractFramework, isGameRequest } from "@npati/shared";
-import { ResearchProgressEvent, ResearchProgressListener } from "@npati/web-research";
-import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
-import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
-import type { CodeSessionRunExecutor } from "./code-session-run-executor";
+import { isWebsiteReferenceEdit, PROJECT_CARD_DATA_VERSION, ProjectCardData, canonicalFrameworkName, isDesktopProjectFramework, codeIntentIsReadOnly, defaultHybridRouter, extractFramework, isGameRequest } from "@npati/shared";
+import { ResearchProgressEvent } from "@npati/web-research";
+import { CodeSession, WorkspaceAccessError } from "@npati/workspace";
 import { codeModeDecision, readIntentHistory } from "./chat-project-intent";
 import { chatPreflightReads } from "./chat-preflight-reads";
 export type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 import type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamRouteDeps): void {
   const { activeChatStreams, activeContextResolver, activeSessionRegistry, agent, aiPreferences, codePreferences, authProvider, codeBackgroundRuns, codeRunAdmission, codeRunCancellation, codeRunQueueLimits, codeService, codeSessionInbox, codeSessionRunExecutor, companyRuntime, featureFlagService, getAIContext, marketplace, notifyMessagingConnections, persistAutomaticCompanyMemory, projectOrchestrator, projectPreviewService, projectSandbox, projectService, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
-  app.post<{ Body: {
-    message?: string;
-    streamId?:string;
-    conversationId?: string;
-    attachments?: ChatAttachmentInput[];
-    contextType?: "none" | "business" | "company" | "project";
-    businessId?: string;
-    companyId?: string;
-    projectId?: string;
-    noMemory?: boolean;
-    ephemeral?: boolean;
-    /** "code": the user chose project work on the selected project, so no classifier call is made. */
-    mode?: "chat" | "code";
-  } }>("/chat/stream", async (request, reply) => {
+  app.post<{ Body: ChatStreamBody }>("/chat/stream", async (request, reply) => {
     let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
     const streamController = new AbortController();
     let streamId: string | undefined;
@@ -83,44 +57,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       streamId=request.body.streamId?.trim();
       if(streamId&&!/^[A-Za-z0-9._:-]{8,100}$/.test(streamId))return reply.code(400).send({error:{code:"INVALID_STREAM_ID",message:"Invalid chat stream identifier."}});
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
-      let hasConnectedProviders = true;
-      try {
-        const connected = await marketplace.marketplace({ tab: "connected", limit: 1 });
-        hasConnectedProviders = connected.overview.connectedProviders > 0;
-      } catch (err) {
-        request.log.warn({ err }, "Marketplace check failed, checking AI preferences fallback");
-        const prefs = await aiPreferences.get(auth).catch(() => null);
-        hasConnectedProviders = Boolean(prefs?.addedModels?.length);
-      }
+      const hasConnectedProviders = await chatHasConnectedProvider(deps, auth, request.log);
       if (!hasConnectedProviders) {
         return reply.code(409).send({ error: { code: "AI_PROVIDER_REQUIRED", message: "Connect an AI provider to start using NPATI Agent." } });
       }
       let message = request.body.message?.trim() ?? "";
       if (!message && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
       reply.raw.once("close", abortPreflight);
-      clarify = async (question) => {
-        reply.hijack();
-        reply.raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", "connection": "keep-alive", "x-accel-buffering": "no" });
-        let sequence = 0;
-        const write = (event: "progress" | "delta" | "result", data: unknown) => {
-          if (reply.raw.destroyed) return;
-          sequence += 1;
-          reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-        };
-        let conversationId: string | undefined;
-        if (memoryPolicy.writeAllowed) {
-          const conversation = request.body.conversationId
-            ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-            : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
-          if (!request.body.conversationId) write("progress", { type: "conversation_started", conversationId: conversation.id });
-          await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
-          await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", question);
-          conversationId = conversation.id;
-        }
-        write("delta", { delta: question });
-        write("result", { message: question, suggestedActions: [], conversationId });
-        reply.raw.end();
-      };
+      clarify = chatStreamClarification(workspaceStore, auth, reply, request.body, () => message, memoryPolicy);
       releaseStream = await reserveChatStream({ owner: auth, streamId, controller: streamController, activeStreams: activeChatStreams, registry: activeSessionRegistry });
       streamController.signal.throwIfAborted();
       const overview = await workspaceStore.overview(auth);
@@ -133,13 +77,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       // The neutral conversation this turn is saved in; undefined when memory writes are off.
       // A new conversation is announced at once: a reply stopped before its result would otherwise leave the client without
       // the id, and the next message would open yet another conversation.
-      const chatConversation = async () => {
-        if (!memoryPolicy.writeAllowed) return undefined;
-        if (request.body.conversationId) return (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation;
-        const created = await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
-        await send("progress", { type: "conversation_started", conversationId: created.id });
-        return created;
-      };
+      const chatConversation = () => chatStreamConversation(workspaceStore, auth, request.body, message, memoryPolicy.writeAllowed, send);
       const preflightStore = chatPreflightReads(workspaceStore);
       const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await readChatActiveContext(preflightStore, auth, request.body.conversationId, requestedContext.businessId) : null;
@@ -714,7 +652,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         return;
       }
 
-
       /** Work addressed to a company agent by name ("have Coach Ana delegate to Leo ...") is run by the Company Runtime,
        * not answered by the neutral chat model playing those agents. */
       const addressesCompanyAgent = async (company?: { id: string }) => {
@@ -824,45 +761,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name }, undefined, semantic?.coreRoute);
             await send("result", { ...result, activeContext: resolved.context });
           } else {
-          const delegationProjectId = delegatesWork ? resolved.project?.id ?? requestedContext.projectId
-            ?? (conversationCard?.companyId === company.id ? conversationCard.projectId ?? conversationCard.id : undefined) : undefined;
-          const delegationProject = delegationProjectId ? await workspaceStore.getProject(auth, company.id, delegationProjectId).catch(() => undefined) : undefined;
-          const conversation = await chatConversation();
-          if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
-          progress({ type: "final_generation_started" });
-          const runResult = await companyRuntime.execute(
-            auth,
-            resolved.company!.id,
-            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id}, conversationId: conversation?.id, projectId: delegationProject?.id },
-            (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`,
-            streamController.signal,
-          );
-          if(runResult.run.errorCode==="SECURITY_GUARDRAIL_BLOCKED"){
-            send("error",{error:{code:runResult.run.errorCode,message:runResult.run.errorMessage}});
-          }else{
-            progress({ type: "final_generation_completed" });
-            const automaticMemory = await persistAutomaticCompanyMemory(
-              auth,
-              resolved.company!.id,
-              runResult.run.id,
-              message,
-              runResult.run.status,
-              memoryPolicy.noMemoryActive,
-            );
-            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message, runResult.run.errorCode)
-              + await browserScreenshotAttachments({ store: workspaceStore, auth, companyId: resolved.company!.id, runId: runResult.run.id, conversationId: conversation?.id, browser: deps.browserTool, chatFiles: deps.chatFiles, log: app.log });
-            if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
-            for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
-            await send("result", {
-              message: responseMessage,
-              suggestedActions: [],
-              conversationId: conversation?.id,
-              activeContext: resolved.context,
-              companyRunId: runResult.run.id,
-              telemetry: companyRunTelemetryHeaders(runResult),
-              automaticMemory,
-            });
-          }
+          await streamCompanyRun(deps, { auth, company, message, chatConversation, progress, memoryPolicy, signal: streamController.signal,
+            idempotencyKey: request.headers["idempotency-key"] as string | undefined, log: app.log, activeContext: resolved.context, send,
+            delegationProjectId: delegatesWork ? resolved.project?.id ?? requestedContext.projectId
+              ?? (conversationCard?.companyId === company.id ? conversationCard.projectId ?? conversationCard.id : undefined) : undefined });
           }
         } else {
           const result = await runBusinessMessage(
@@ -881,71 +783,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           await send("result", { ...result, activeContext: resolved.context });
         }
       } catch (error) {
-        request.log.error(error);
-        const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError || error instanceof ProjectOrchestrationError;
-        const route = expected ? undefined : await getAIContext(auth).then((ai) => ai.model).catch(() => undefined);
-        // A voice message usually comes without text: the person's language is then read from their earlier messages,
-        // so the failure is not in English for a Ukrainian chat (V6 step 14).
-        const languageSource = request.body.message?.trim() ? request.body.message : request.body.conversationId
-          ? await workspaceStore.getNeutralConversation(auth, request.body.conversationId).then((c) => c.messages.filter((m) => m.role === "user" && m.content.trim() && !/^(?:🎤|📷|📄)/u.test(m.content)).slice(-3).map((m) => m.content).join("\n")).catch(() => "")
-          : "";
-        const detail = expected ? error.message : publicChatError(error, route, languageSource ?? "");
-        progress({ type: "final_generation_failed", error: detail });
-        send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
+        await chatStreamRuntimeError(deps, error, auth, request.body, request.log, progress, send);
       } finally {
 
         clearInterval(heartbeat);
         reply.raw.end();
       }
     } catch (error) {
-      if (error instanceof ChatStreamLeaseError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: error.status === 503 } });
-      if (streamController.signal.aborted) {
-        if (!reply.sent && !reply.raw.destroyed) return reply.code(499).send({ error: { code: "CHAT_CANCELLED", message: "Chat request cancelled.", retryable: false } });
-        return;
-      }
-      if (error instanceof AuthenticationError) {
-        return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
-      }
-
-      if (error instanceof CodeRunRateLimitedError) {
-        request.log.warn({ code: error.code, scope: error.scope }, "code_run_rate_limited");
-        return reply
-          .header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))))
-          .code(429)
-          .send({
-            error: {
-              code: "CODE_RUN_RATE_LIMITED",
-              message: error.message,
-              scope: error.scope,
-              limit: error.limit,
-              used: error.used,
-              retryable: true,
-            },
-          });
-      }
-
-      if (error instanceof CodeRunRefusedError) {
-        request.log.warn({ code: error.code }, "code_run_queue_refused");
-        return reply
-          .header("retry-after", String(Math.max(1, Math.ceil(codeRunQueueLimits.queueTimeoutMs / 1000))))
-          .code(429)
-          .send({ error: { code: error.code === "queue_cancelled" ? "CODE_RUN_QUEUE_CANCELLED" : "CODE_RUN_QUEUE_FULL", message: error.message, retryable: true } });
-      }
-      if (error instanceof ProjectNameAmbiguityError && clarify && !reply.sent) return clarify(error.question);
-      if (error instanceof ContextValidationError) {
-        return reply.code(400).send({ error: { code: "INVALID_CONTEXT", message: error.message } });
-      }
-      if (error instanceof WorkspaceAccessError) {
-        return reply.code(403).send({ error: { code: error.code, message: error.message } });
-      }
-      if (error instanceof WorkspaceNotFoundError) {
-        return reply.code(404).send({ error: { code: (error as any).code ?? "WORKSPACE_NOT_FOUND", message: error.message } });
-      }
-      if (!reply.sent) {
-        request.log.error(error);
-        const errorMessage = error instanceof Error ? error.message : "Could not start the chat stream.";
-        return reply.code(500).send({ error: { code: "STREAM_UNAVAILABLE", message: errorMessage } });
-      }
+      return chatStreamStartError(error, request, reply, streamController.signal, codeRunQueueLimits.queueTimeoutMs, clarify);
     } finally {
       reply.raw.off("close", abortPreflight);
       reservedCodeRunSlot?.lease.release();

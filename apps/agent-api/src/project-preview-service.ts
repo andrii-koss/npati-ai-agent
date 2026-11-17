@@ -1,3 +1,7 @@
+import { parseExactHttpOrigin } from "./project-preview-origin";
+export { parseExactHttpOrigin } from "./project-preview-origin";
+import { PreviewTokenPayload, ActivePreviewSession, PreviewOriginRegistrar } from "./project-preview-session-types";
+export { PreviewTokenPayload, ActivePreviewSession, PreviewOriginRegistrar } from "./project-preview-session-types";
 import { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue, previewSameSite, isIsolatedPreviewHost } from "./project-preview-cookies";
 export { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue } from "./project-preview-cookies";
 import { validateStaticProjectResources } from "./static-project-validation";
@@ -20,31 +24,6 @@ export function resolvePreviewSecret(secret?: string, env: NodeJS.ProcessEnv = p
   if (secret || env.NPATI_PREVIEW_SECRET) return (secret || env.NPATI_PREVIEW_SECRET)!;
   if (env.NPATI_ENCRYPTION_KEY) return createHmac("sha256", env.NPATI_ENCRYPTION_KEY).update("npati/project-preview/v1").digest("hex");
   return randomBytes(32).toString("hex");
-}
-
-export interface PreviewTokenPayload {
-  workspaceId?: string;
-  userId: string;
-  companyId: string;
-  projectId: string;
-  sandboxId: string;
-  expiresAt: number;
-}
-export interface ActivePreviewSession {
-  projectId: string;
-  companyId: string;
-  sandboxId: string;
-  processId: string;
-  port: number;
-  framework: string;
-  command: string;
-  restartCount: number;
-  maxRestarts: number;
-  status: "starting" | "running" | "restarting" | "failed" | "stopped";
-  lastError?: string;
-  startedAt: string;
-  workspaceId: string;
-  userId: string;
 }
 const sandboxInfrastructureErrors = new Set(["sandbox_image_not_found", "docker_cli_missing", "docker_daemon_unavailable", "docker_socket_permission_denied", "sandbox_network_not_found", "sandbox_container_start_failed", "sandbox_workspace_permission_denied", "sandbox_storage_full", "runner_unavailable"]);
 export class PreviewError extends Error {
@@ -71,21 +50,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-export type PreviewOriginRegistrar = (ctx: AuthContext, companyId: string, projectId: string, origin: string) => Promise<void>;
-export function parseExactHttpOrigin(raw?: string | null): string | null {
-  if (!raw || typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!trimmed || trimmed.includes("*")) return null;
-  try {
-    const url = new URL(trimmed);
-    if (!["http:", "https:"].includes(url.protocol)) return null;
-    if (url.origin !== trimmed) return null;
-    return url.origin;
-  } catch {
-    return null;
-  }
 }
 export class ProjectPreviewService {
   private readonly secret: string;

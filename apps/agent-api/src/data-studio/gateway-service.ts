@@ -1,11 +1,12 @@
+import { sameOriginAsHost } from "./gateway-origin";
 import { randomUUID } from "node:crypto";
 import { assertSandboxProjectApiUrl } from "../project-api-runtime-config";
 import { Pool, type PoolClient } from "pg";
 import { CryptoVault, type AuthContext, type WorkspaceStore } from "@npati/workspace";
-import { DataStudioError, bindFilter, quoteIdentifier, validateIdentifier } from "./identifier";
+import { DataStudioError, quoteIdentifier, validateIdentifier } from "./identifier";
 import type { DataBackendRepository } from "./repository";
 import type { DatabaseProvisioner } from "./provisioner";
-import type { DataBackend, DataBackendEnvironment, DataEnvironmentName } from "./types";
+import type { DataBackend, DataEnvironmentName } from "./types";
 import { ProjectApiKeyManager } from "./api-key-manager";
 import { ProjectApiRateLimiter } from "./rate-limiter";
 import { generateOpenApiSpec, generateProjectTypeScriptTypes } from "./openapi-generator";
@@ -13,12 +14,7 @@ import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH, ensureProjectSdkFile } 
 import type { ProjectAuthService } from "./auth-service";
 import type { ProjectWorkspace } from "../project-workspace";
 import type { DataProvider, SchemaSnapshot } from "./data-provider";
-import type {
-  ProjectApiKeyType,
-  ProjectApiRequestLog,
-  ProjectApiUsage,
-  ProjectApiInspectResult,
-} from "@npati/shared";
+import type { ProjectApiRequestLog, ProjectApiUsage, ProjectApiInspectResult } from "@npati/shared";
 export * from "./gateway-types";
 export {
   MAX_FILTER_CLAUSES,
@@ -26,25 +22,9 @@ export {
   MAX_SELECT_FIELDS,
   MAX_RELATION_INCLUDES,
 } from "./gateway-query";
-import {
-  type GatewayAuthResult,
-  type GatewayListOptions,
-} from "./gateway-types";
-import {
-  assertQueryBounds,
-  buildFilterClauses,
-  buildOrderClauses,
-  expandRelations,
-} from "./gateway-query";
-import {
-  extractApiCollections,
-  buildApiEndpoints,
-} from "./gateway-inspection";
-
-function sameOriginAsHost(origin: string, host: string | undefined): boolean {
-  if (!host) return false;
-  try { return new URL(origin).host === host; } catch { return false; }
-}
+import { type GatewayAuthResult, type GatewayListOptions } from "./gateway-types";
+import { assertQueryBounds, buildFilterClauses, buildOrderClauses, expandRelations } from "./gateway-query";
+import { extractApiCollections, buildApiEndpoints } from "./gateway-inspection";
 
 export class ProjectApiGatewayService {
   private readonly rateLimiter = new ProjectApiRateLimiter();  private readonly recentLogs: ProjectApiRequestLog[] = [];
@@ -232,7 +212,6 @@ export class ProjectApiGatewayService {
     if (origin && keyType === "secret") {
       throw new DataStudioError(403, "gateway", "Secret keys are server-side only", false, "SECRET_KEY_IN_BROWSER");
     }
-
 
     // 3. Rate limiting
     const rateLimitConfig = (envRecord.providerConfig.rateLimit as { maxRequestsPerMinute?: number }) || {};

@@ -1,3 +1,4 @@
+import { demoWebsites } from "./workspace-demo-websites";
 import { isInformationalOrCapabilityQuery } from "./company-chat-actions";
 import { requestsBusinessGoal } from "./chat-intent-helpers";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -83,26 +84,6 @@ const memoryTypes = new Set<MemoryInput["type"]>(["business_fact", "audience", "
 const contentTypes = new Set<ContentType>(["article", "seo_blueprint", "social_post", "brief", "strategy", "other"]);
 const runModes = new Set<CompanyRunMode>(["auto", "single", "pipeline", "fusion"]);
 const websiteStatuses = new Set(["pending", "paused"]);
-const demoWebsites: BrowserCampaignTargetInput[] = [
-  {
-    siteName: "WordPress Playground (isolated demo)",
-    registrationUrl: "https://playground.wordpress.net/?storage=browser&url=/wp-admin/post-new.php",
-    publishUrl: "https://playground.wordpress.net/?storage=browser&url=/wp-admin/post-new.php",
-    articleTitle: "NPATI browser automation test",
-    articleBody: "This draft verifies that the browser agent can create and publish an article in an isolated WordPress Playground session.",
-    priority: 10,
-    status: "paused",
-  },
-  {
-    siteName: "RealWorld Conduit (public demo)",
-    registrationUrl: "https://realworld.svelte.dev/register",
-    publishUrl: "https://realworld.svelte.dev/editor",
-    articleTitle: "NPATI browser automation test",
-    articleBody: "A test article created by the NPATI browser automation in the public RealWorld demo application.",
-    priority: 20,
-    status: "paused",
-  },
-];
 
 import { actionSignals, resourceSignals, mutationSignals, referenceSignals, profileFieldTerms, profileEntitySignal, conversationScopedRemember, memoryVerbSignal, researchVerbSignal, automationReadSignals, websiteResourceSignals, runCancellationSignal } from "./workspace-chat-signals";
 

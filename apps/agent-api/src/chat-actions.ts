@@ -1,92 +1,42 @@
+import { ChatActionDeps } from "./chat-action-deps";
+export { ChatActionDeps } from "./chat-action-deps";
 import { GOAL_ACTION_TOOL } from "./goal-action-native";
 import { selectBusinessCompactionFacts } from "./business-compaction-memory";
 import { assertNamedBusinessTarget } from "./named-business-target";
 import { WORKSPACE_ACTION_TOOL, EMAIL_ACTION_TOOL } from "./chat-productivity-tools";
 
-import type { FastifyBaseLogger } from "fastify";
-import type { AppConfig } from "./app";
-import { createAuditServices } from "./audit-services";
 import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 import { computeNextCronDate } from "./automation-scheduler";
-import { automationRunEndStatus, CompanyAutomationsRepository } from "./automations-repository";
-import { BrowserCredentialsRepository } from "./browser-credentials-repository";
+import { automationRunEndStatus } from "./automations-repository";
+
 import { BusinessActionHandler } from "./business-action-handler";
 import { requestCreatesCompany } from "./chat-business-company-link";
 import { BUSINESS_PROFILE_TOOL, executeBusinessProfileDeletion, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
-import { summarizeBusinessProfileChat } from "./business-profile-response";
-import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
-import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
-import { attachResearchSources } from "./chat-public-errors";
-import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
-import { addColumnDirectiveFromMarkdown, forbidsNewWebResearch, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
-import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
+
+import { isCompositeBusinessCompanyCreation, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea } from "./chat-intent-helpers";
+
+import { StructuredChatPlan } from "./chat-task-plan";
+import { forbidsNewWebResearch, explicitlyRequestsWebResearch } from "./chat-text-directives";
+import { CORE_CHAT_TOOLS, ChatToolExecutionResult } from "./chat-tool-orchestrator";
 import type { CoreChatRoute } from "./chat-project-intent";
 import { coreRouteOwns, decideCoreChatRouting } from "./chat-core-routing";
-import { createCodeRunAdmission } from "./code-run-admission";
+
 import { CompanyChatActions } from "./company-chat-actions";
-import { CompanyChatLanguage, chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
+import { CompanyChatLanguage, companyChatCopy, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, onlyRequestedCompanyDeletion } from "./company-delete-i18n";
 import { reconcilePlannedCompanyArgs } from "./company-plan-reconciliation";
 import { verifyPlannedCompany } from "./company-plan-verification";
-import { CompanyRunQueueProducer } from "./company-run-queue";
-import { CompanyDelegationRuntime } from "./company-runtime";
+
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
-import { ContentLibraryStore } from "./content-library-store";
-import { ContextCompactor } from "./context-compactor";
-import { createCoreServices } from "./core-services";
-import { createDataBackendServices } from "./data-backend-services";
-import { extractDocumentText } from "./document-extractor";
-import { EmailAttachmentStorage } from "./email-attachment-storage";
+
 import { EMAIL_READ_ACTIONS, EmailChatActions } from "./email-chat-actions";
-import { EmailInboxRepository } from "./email-inbox-repository";
-import { EmailInboxWorker } from "./email-worker";
-import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
-import { memoryDocumentPrompt } from "./memory-documents";
-import { pendingCompanyDelete } from "./pending-company-delete";
-import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
-import { SecurityPolicyEngine } from "./security-guardrails";
-import { SpreadsheetModifier } from "./spreadsheet-modifier";
+
 import { WORKSPACE_READ_ACTIONS, WorkspaceChatActions } from "./workspace-chat-actions";
 import { ContextBuilder } from "@npati/agent";
-import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
+import { AIEngine, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
 import { defaultSkillRegistry } from "@npati/skills";
-import { ResearchOutcome, ResearchProgressListener } from "@npati/web-research";
+import { ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, Business } from "@npati/workspace";
-import type { AgentAIContext } from "@npati/agent";
-import { applyChatTelemetryHeaders } from "./chat-telemetry";
-import type { ChatOrchestrationDeps } from "./chat-orchestration";
-
-export interface ChatActionDeps {
-  log: ChatOrchestrationDeps["log"];
-  admissionFor: ChatOrchestrationDeps["admissionFor"];
-  agent: ChatOrchestrationDeps["agent"];
-  aiEngine: ChatOrchestrationDeps["aiEngine"];
-  aiPreferences: ChatOrchestrationDeps["aiPreferences"];
-  apiKeysRepo: ChatOrchestrationDeps["apiKeysRepo"];
-  auditRepo: ChatOrchestrationDeps["auditRepo"];
-  automationsRepo: ChatOrchestrationDeps["automationsRepo"];
-  browserCredentials: ChatOrchestrationDeps["browserCredentials"];
-  chatFiles: ChatOrchestrationDeps["chatFiles"];
-  companyRunQueue: ChatOrchestrationDeps["companyRunQueue"];
-  companyRuntime: ChatOrchestrationDeps["companyRuntime"];
-  contentLibrary: ChatOrchestrationDeps["contentLibrary"];
-  dataBackendService: ChatOrchestrationDeps["dataBackendService"]; removeCompanyProjects?: ChatOrchestrationDeps["removeCompanyProjects"];
-  emailAttachmentStorage: ChatOrchestrationDeps["emailAttachmentStorage"];
-  emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
-  integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
-  emailInboxWorker: ChatOrchestrationDeps["emailInboxWorker"];
-  fileRepository: ChatOrchestrationDeps["fileRepository"];
-  getAIContext: ChatOrchestrationDeps["getAIContext"];
-  guardrailPolicies: ChatOrchestrationDeps["guardrailPolicies"];
-  hub: ChatOrchestrationDeps["hub"];
-  knowledgeRepo: ChatOrchestrationDeps["knowledgeRepo"];
-  objectStorage: ChatOrchestrationDeps["objectStorage"];
-  persistBusinessLogo: ChatOrchestrationDeps["persistBusinessLogo"];
-  runAutomation: ChatOrchestrationDeps["runAutomation"];
-  scopedMemory: ChatOrchestrationDeps["scopedMemory"];
-  webResearch: ChatOrchestrationDeps["webResearch"];
-  workspaceStore: ChatOrchestrationDeps["workspaceStore"];
-}
 
 export function createChatActions(deps: ChatActionDeps) {
   const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore, removeCompanyProjects } = deps;

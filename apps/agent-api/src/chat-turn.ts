@@ -1,3 +1,5 @@
+import { ChatTurnDeps } from "./chat-turn-deps";
+export { ChatTurnDeps } from "./chat-turn-deps";
 import { createHash } from "node:crypto";
 import { cacheFriendlyPrompt, stripDecorativeEmoji } from "@npati/agent";
 
@@ -5,13 +7,13 @@ import { BusinessActionHandler, goalContextBusinesses, goalScopeNote, unloadedRe
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { inferenceImagesForRequest } from "./chat-image-purpose";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
-import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
+import { conversationTitle, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsCompositeCompanyDeletionIntent, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
 import { attachResearchSources, unreachablePageMessage, webResearchFailedMessage } from "./chat-public-errors";
-import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
+import { businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
 import { addColumnDirectiveFromMarkdown, forbidsNewWebResearch, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
-import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
+import { CHAT_TOOL_SELECTION_INSTRUCTION, runChatToolLoop } from "./chat-tool-orchestrator";
 import { CompanyChatActions } from "./company-chat-actions";
-import { CompanyChatLanguage, chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
+import { chatLanguageInstruction, resolveConversationLanguage } from "./company-chat-i18n";
 import { ContextCompactor } from "./context-compactor";
 import { extractDocumentText } from "./document-extractor";
 import { EMAIL_READ_ACTIONS, EmailChatActions } from "./email-chat-actions";
@@ -21,56 +23,20 @@ import { pendingCompanyDelete } from "./pending-company-delete";
 import { SecurityPolicyEngine } from "./security-guardrails";
 import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { WORKSPACE_READ_ACTIONS, WorkspaceChatActions } from "./workspace-chat-actions";
-import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
+import { AIEngine, ChatContentPart, ChatRequest } from "@npati/omniroute-adapter";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
 import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
 import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
 import { projectCapabilityUnavailableMessage, visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business, type Project } from "@npati/workspace";
-import { createChatActions } from "./chat-actions";
+
 import { readChatActiveContext, chatEntityReferencesPrompt } from "./project-chat-cards";
-import type { ChatOrchestrationDeps } from "./chat-orchestration";
+
 import type { CoreChatRoute } from "./chat-project-intent";
 import { coreRouteOwns } from "./chat-core-routing";
 import { linkTurnCompanyAndBusiness } from "./chat-business-company-link";
 import { scopeBusinessPageLinks } from "./business-page-links"; import { businessMemoryNote, currentBusinessRecordsNote } from "./business-memory-context";
 import { defaultSkillRegistry } from "@npati/skills";
-
-export interface ChatTurnDeps {
-  admissionFor: ChatOrchestrationDeps["admissionFor"];
-  agent: ChatOrchestrationDeps["agent"];
-  aiEngine: ChatOrchestrationDeps["aiEngine"];
-  aiPreferences: ChatOrchestrationDeps["aiPreferences"];
-  apiKeysRepo: ChatOrchestrationDeps["apiKeysRepo"];
-  automationsRepo: ChatOrchestrationDeps["automationsRepo"];
-  availableCoreChatTools: ReturnType<typeof createChatActions>["availableCoreChatTools"];
-  browserCredentials: ChatOrchestrationDeps["browserCredentials"];
-  chatFiles: ChatOrchestrationDeps["chatFiles"];
-  completeCreatedBusinessGoal: ReturnType<typeof createChatActions>["completeCreatedBusinessGoal"];
-  completeCreatedBusinessMemory: ReturnType<typeof createChatActions>["completeCreatedBusinessMemory"];
-  config: ChatOrchestrationDeps["config"];
-  contentLibrary: ChatOrchestrationDeps["contentLibrary"];
-  coreChatRoutingDecision: ReturnType<typeof createChatActions>["coreChatRoutingDecision"];
-  emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
-  integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
-  executeCompanyChatAction: ReturnType<typeof createChatActions>["executeCompanyChatAction"];
-  executeCompositeBusinessCompanyCreation: ReturnType<typeof createChatActions>["executeCompositeBusinessCompanyCreation"];
-  executeCompositeCompanyDeletion: ReturnType<typeof createChatActions>["executeCompositeCompanyDeletion"];
-  executeCoreChatTool: ReturnType<typeof createChatActions>["executeCoreChatTool"];
-  executeEmailChatAction: ReturnType<typeof createChatActions>["executeEmailChatAction"];
-  executeWorkspaceChatAction: ReturnType<typeof createChatActions>["executeWorkspaceChatAction"];
-  getAIContext: ChatOrchestrationDeps["getAIContext"];
-  log: ChatOrchestrationDeps["log"];
-  logToolModelStep: ReturnType<typeof createChatActions>["logToolModelStep"];
-  logToolSelectionConfiguration: ReturnType<typeof createChatActions>["logToolSelectionConfiguration"];
-  logToolSelectionTrace: ReturnType<typeof createChatActions>["logToolSelectionTrace"];
-  memoryDocuments: ChatOrchestrationDeps["memoryDocuments"];
-  persistBusinessLogo: ChatOrchestrationDeps["persistBusinessLogo"];
-  researchBundle: ChatOrchestrationDeps["researchBundle"];
-  webResearch: ChatOrchestrationDeps["webResearch"];
-  workspaceStore: ChatOrchestrationDeps["workspaceStore"];
-  marketplace?: ChatOrchestrationDeps["marketplace"];
-}
 
 export function createChatTurn(deps: ChatTurnDeps) {
   const { admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, automationsRepo, availableCoreChatTools, browserCredentials, chatFiles, completeCreatedBusinessGoal, completeCreatedBusinessMemory, config, contentLibrary, coreChatRoutingDecision, emailInboxRepo, executeCompanyChatAction, executeCompositeBusinessCompanyCreation, executeCompositeCompanyDeletion, executeCoreChatTool, executeEmailChatAction, executeWorkspaceChatAction, getAIContext, integrationsRepo, log, logToolModelStep, logToolSelectionConfiguration, logToolSelectionTrace, memoryDocuments, persistBusinessLogo, researchBundle, webResearch, workspaceStore } = deps;

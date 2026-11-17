@@ -58,3 +58,20 @@ export interface ChatStreamRouteDeps {
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
 }
+
+export interface ChatStreamBody {
+    message?: string;
+    streamId?:string;
+    conversationId?: string;
+    attachments?: ChatAttachmentInput[];
+    contextType?: "none" | "business" | "company" | "project";
+    businessId?: string;
+    companyId?: string;
+    projectId?: string;
+    noMemory?: boolean;
+    ephemeral?: boolean;
+    /** "code": the user chose project work on the selected project, so no classifier call is made. */
+    mode?: "chat" | "code";
+  }
+
+export type ChatStreamSend = (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => Promise<void>;

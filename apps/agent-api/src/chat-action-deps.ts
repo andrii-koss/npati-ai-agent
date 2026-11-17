@@ -1,0 +1,33 @@
+import type { ChatOrchestrationDeps } from "./chat-orchestration";
+export interface ChatActionDeps {
+    log: ChatOrchestrationDeps["log"];
+    admissionFor: ChatOrchestrationDeps["admissionFor"];
+    agent: ChatOrchestrationDeps["agent"];
+    aiEngine: ChatOrchestrationDeps["aiEngine"];
+    aiPreferences: ChatOrchestrationDeps["aiPreferences"];
+    apiKeysRepo: ChatOrchestrationDeps["apiKeysRepo"];
+    auditRepo: ChatOrchestrationDeps["auditRepo"];
+    automationsRepo: ChatOrchestrationDeps["automationsRepo"];
+    browserCredentials: ChatOrchestrationDeps["browserCredentials"];
+    chatFiles: ChatOrchestrationDeps["chatFiles"];
+    companyRunQueue: ChatOrchestrationDeps["companyRunQueue"];
+    companyRuntime: ChatOrchestrationDeps["companyRuntime"];
+    contentLibrary: ChatOrchestrationDeps["contentLibrary"];
+    dataBackendService: ChatOrchestrationDeps["dataBackendService"];
+    removeCompanyProjects?: ChatOrchestrationDeps["removeCompanyProjects"];
+    emailAttachmentStorage: ChatOrchestrationDeps["emailAttachmentStorage"];
+    emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
+    integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
+    emailInboxWorker: ChatOrchestrationDeps["emailInboxWorker"];
+    fileRepository: ChatOrchestrationDeps["fileRepository"];
+    getAIContext: ChatOrchestrationDeps["getAIContext"];
+    guardrailPolicies: ChatOrchestrationDeps["guardrailPolicies"];
+    hub: ChatOrchestrationDeps["hub"];
+    knowledgeRepo: ChatOrchestrationDeps["knowledgeRepo"];
+    objectStorage: ChatOrchestrationDeps["objectStorage"];
+    persistBusinessLogo: ChatOrchestrationDeps["persistBusinessLogo"];
+    runAutomation: ChatOrchestrationDeps["runAutomation"];
+    scopedMemory: ChatOrchestrationDeps["scopedMemory"];
+    webResearch: ChatOrchestrationDeps["webResearch"];
+    workspaceStore: ChatOrchestrationDeps["workspaceStore"];
+}

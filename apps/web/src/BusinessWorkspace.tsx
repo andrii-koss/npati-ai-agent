@@ -1,38 +1,35 @@
+import { ChatContextSwitcherContext, BusinessSwitcher, expandDeleteConfirmationReply } from "./business-chat-context";
+export { ChatContextSwitcherContext, BusinessSwitcher } from "./business-chat-context";
+import { useChatSpeech } from "./use-chat-speech";
+import { chatTimelinePresentation } from "./chat-timeline-presentation";
 import { getStoredAuthToken } from "./AuthContext";
 import { textIn } from "./i18n";
 import { useTranslation } from "./i18n";
 import { developmentIsActive, type AgentReply, type ProjectCardData } from "@npati/shared";
 import { defaultHybridRouter } from "@npati/shared/hybrid-router";
-import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { createPortal } from "react-dom";
-import { ChatMessageContent, projectChatText, stripInternalChatActions } from "./ChatMessageContent";
-import { UserPromptMessage } from "./UserPromptMessage";
+import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { stripInternalChatActions } from "./ChatMessageContent";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
-import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
-import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
-import { SPEECH_VOICES } from "./speech-voices";
-import { persistedModeLabel } from "./code-workspace/actions";
-import { ChatThinking, useChatThinking, ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
+import { type ChatAttachmentInput } from "./ChatAttachments";
+import { ChatThinking, useChatThinking, ResearchProgressPanel } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
-import { projectConversationUrl, developmentPreviewAnchor } from "./chat-development-view";
+import { projectConversationUrl } from "./chat-development-view";
 import { chatCardLabels } from "./chat-card-i18n";
 import { useChatResearchProgress } from "./use-chat-research-progress";
 import { useChatOpeningPosition } from "./use-chat-opening-position";
-import { chatTimeline, mergeConversationMessages, nearChatBottom, normalizeActivity } from "./chat-timeline";
-import { processDuration } from "./AgentExecutionTrace";
+import { mergeConversationMessages, nearChatBottom } from "./chat-timeline";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
-import { BusinessChatComposer, ChatWorkModeSwitch } from "./business-workspace-composer";
+import { BusinessChatComposer } from "./business-workspace-composer";
 import { chatOpenData } from "./chat-open";
 import { registerChatTurn } from "./chat-activity";
 import { ChatMessageRow, useChatRowActions } from "./chat-message-row";
-import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
-import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
-import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
+import { api, useWorkspace } from "./business-workspace-shared";
+import { FloatingNotice, Message } from "./business-workspace-cards";
 import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
 import { ChatFileViewerProvider } from "./ChatFileViewer";
 import { ChatPreviewPanelProvider } from "./ChatPreviewPanel";
@@ -42,38 +39,8 @@ export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
 
-export const ChatContextSwitcherContext = createContext<ReactNode>(null);
-
-export function BusinessSwitcher() {
-  const { overview, loading, switchBusiness } = useWorkspace();
-  if (loading) return null;
-  if (!overview?.businesses.length) return <Link className="business-switcher setup" to="/business">Set up business</Link>;
-  return (
-    <label className="business-switcher">
-      <span>Current business</span>
-      <select value={overview.currentBusiness?.id ?? ""} onChange={(event) => void switchBusiness(event.target.value)}>
-        {overview.businesses.map((business) => <option key={business.id} value={business.id}>{business.name}</option>)}
-      </select>
-    </label>
-  );
-}
-
-
-
 // Earlier messages load before the top is reached, so the view never stops at the very top while they arrive.
 const EARLIER_MESSAGES_THRESHOLD_PX = 600;
-
-function expandDeleteConfirmationReply(message: string, history: Message[]): string {
-  if (!/^(?:так|так,|підтверджую|да|да,|подтверждаю|yes|yes,|confirm)$/iu.test(message.trim())) return message;
-  const previous = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
-  const command = /(?:Для підтвердження напишіть|Для подтверждения напишите|To confirm, write):\s*\*\*([^*]+)\*\*/iu.exec(previous)?.[1]?.trim();
-  return command || message;
-}
-
-function isWebsiteAnalysisRequest(message: string) {
-  return /https?:\/\/|www\.|\b(?:website|webpage|site|scan|crawl)\b|сайт|вебсторінк|проскануй/iu.test(message);
-}
-
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { t, language } = useTranslation();
@@ -198,65 +165,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, [development.project?.projectId, development.project?.status, selected]);
   // Open Previews of this chat survive a card moving to the newest reply; another chat starts with none.
   const openPreviews = useMemo(() => new Set<string>(), [selected]);
-  const [ttsVoice, setTtsVoice] = useState(() => {
-    try {
-      return localStorage.getItem("npati_chat_tts_voice") || "alloy";
-    } catch {
-      return "alloy";
-    }
-  });
-  const [isGeneratingSpeech, setIsGeneratingSpeech] = useState(false);
-
-  const handleModeChange = (mode: "none" | "private" | "tts") => {
-    setChatMode(mode);
-  };
-
-  const handleTtsVoiceChange = (voice: string) => {
-    setTtsVoice(voice);
-    try {
-      localStorage.setItem("npati_chat_tts_voice", voice);
-    } catch {}
-  };
-
-  async function generateSpeechForInput(): Promise<void> {
-    const text = input.trim();
-    if (!text || isGeneratingSpeech) return;
-    setIsGeneratingSpeech(true);
-    try {
-      const token = getStoredAuthToken();
-      const response = await fetch("/api/audio/speech", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ input: text, format: "mp3", voice: ttsVoice }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: { message?: string } | string } | null;
-        throw new Error(typeof payload?.error === "string" ? payload.error : payload?.error?.message ?? `TTS failed (${response.status})`);
-      }
-      const blob = await response.blob();
-      const buffer = await blob.arrayBuffer();
-      let binary = "";
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]!);
-      }
-      const base64Data = btoa(binary);
-      const audioAttachment: ChatAttachmentInput = {
-        name: `speech-${ttsVoice}.mp3`,
-        mimeType: "audio/mpeg",
-        kind: "audio",
-        dataBase64: base64Data,
-      };
-      setAttachments((prev) => [...prev.filter((a) => a.name !== audioAttachment.name), audioAttachment]);
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Text-to-speech failed.");
-    } finally {
-      setIsGeneratingSpeech(false);
-    }
-  }
+  const handleModeChange = (mode: "none" | "private" | "tts") => setChatMode(mode);
+  const { ttsVoice, isGeneratingSpeech, handleTtsVoiceChange, generateSpeechForInput } = useChatSpeech(input, setAttachments, setNotice);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const activeTurnRef = useRef<HTMLElement>(null);
@@ -771,52 +681,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
-  const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
+  const { displayMessages, timeline, agentWorking, previewBusyFor, deletedProcessOf, lastCardEntry, runTotal, previewAnchor, projectPreview, bottomCard } = chatTimelinePresentation({ messages, development, selected, sending, codeInbox, earlierMessages, entryProjectCard, setSelectedProject });
   rowStateRef.current = { displayMessages, activeTurn };
-  const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project, earlierMessages > 0, development.conversationProcesses);
-  // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
-  const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
-  // Only the project the agent is changing loses its Open block meanwhile. Every project's block vanished while one
-  // site's database run waited 15 minutes for a confirmation (V6 step 14). When the changed project is not known yet
-  // (a request just sent), all blocks wait as before.
-  const workingProjectId = agentWorking ? (development.activeProject && developmentIsActive(development.activeProject) ? development.activeProject.projectId
-    : development.project && developmentIsActive(development.project) ? development.project.projectId : undefined) : undefined;
-  const previewBusyFor = (card: { projectId?: string | null; id: string } | null | undefined) => agentWorking && (!workingProjectId || !card || (card.projectId ?? card.id) === workingProjectId);
-  // Resolve the card once, then anchor it to the closing reply below.
-  // A project deleted later has nothing to open: its replies say it was deleted instead of offering its old block.
-  const deletedProcessOf = (card: { projectId?: string | null; id: string } | null | undefined) => card
-    ? development.conversationProcesses.find(process => process.projectDeleted && process.projectId === (card.projectId ?? card.id)) : undefined;
-  const timelineCards = timeline.flatMap((entry, timelineIndex) => {
-    if (entry.kind !== "message") return [];
-    const card = development.card(displayMessages, entry.index);
-    return card && !deletedProcessOf(card) ? [{ card, timelineIndex }] : [];
-  });
-  const timelineCard = timelineCards.at(-1)?.card;
-  const lastCardEntry = timelineCards.at(-1)?.timelineIndex ?? -1;
-  const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
-    id: development.project.projectId,
-    projectId: development.project.projectId,
-    companyId: development.project.companyId,
-    name: development.project.name,
-    status: development.project.status,
-    framework: development.project.framework,
-    previewUrl: development.project.previewUrl,
-    kind: "code_project" as const
-  } : null);
-  // The whole run's time belongs under the reply that closes it, not under an unrelated later answer.
-  const runActivity = development.project && !agentWorking ? normalizeActivity(development.project.progress) : [];
-  const runEndedAt = Math.max(0, ...runActivity.map(item => (Date.parse(item.at) || 0) + (item.durationMs ?? 0)));
-  const latestReplyAt = Date.parse(displayMessages.at(-1)?.createdAt ?? "") || 0;
-  const runTotal = runEndedAt && Math.abs(latestReplyAt - runEndedAt) < 120_000 ? processDuration(runActivity) : undefined;
-  const bottomCard = timelineCard ?? fallbackCard;
-  // A run older than the loaded part of a long chat has its reply further up: its block waits there, not under the
-  // first loaded reply (V6 step 14).
-  const firstLoadedAt = Date.parse(displayMessages[0]?.createdAt ?? "") || 0;
-  const runStartedAt = Date.parse((development.project?.runId && development.project.runStartedAts?.[development.project.runId]) || development.project?.createdAt || "") || 0;
-  const previewAnchor = earlierMessages > 0 && runStartedAt && runStartedAt < firstLoadedAt ? -1 : developmentPreviewAnchor(timeline, development.project);
-  const projectPreview = bottomCard && !agentWorking ? (
-      <ChatProjectPreviewCard card={bottomCard} showPreviewTrigger onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
-  ) : null;
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
     <ChatPreviewPanelProvider busy={agentWorking} conversationId={selected}>

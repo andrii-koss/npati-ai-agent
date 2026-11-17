@@ -1,8 +1,8 @@
-import {
-  classifyTerminalCommand,
-  normalizeTerminalCommand,
-  type TerminalRiskLevel,
-} from "./terminal-command-policy";
+import { ShellSegment, ParsedShellCommand, stripQuotes, parseShellCommand } from "./code-shell-parser";
+export { ShellSegment, ParsedShellCommand, parseShellCommand } from "./code-shell-parser";
+import { GitWriteOperation, GitWriteAttemptHint, normalizeGitRef, detectGitWriteAttempts } from "./code-git-write-attempts";
+export { GitWriteOperation, GitWriteAttemptHint, detectGitWriteAttempts } from "./code-git-write-attempts";
+import { classifyTerminalCommand, type TerminalRiskLevel } from "./terminal-command-policy";
 import { detectPackageManager, type PackageManager } from "./code-deps-policy";
 import { DEFAULT_INSTALL_ALLOWLIST } from "./egress-allowlist";
 import { detectMigrationAction, type MigrationActionHint } from "./code-migration-safety";
@@ -23,23 +23,6 @@ import { detectMigrationAction, type MigrationActionHint } from "./code-migratio
  */
 
 export type CodeShellRisk = TerminalRiskLevel | "hard_deny";
-
-export interface ShellSegment {
-  argv: string[];
-  /** The operator that preceded this segment (`&&`, `||`, `;`, `|`, `&`). */
-  operator?: string;
-  raw: string;
-}
-
-export interface ParsedShellCommand {
-  segments: ShellSegment[];
-  usesSubshell: boolean;
-  usesBackticks: boolean;
-  usesHeredoc: boolean;
-  usesVariables: boolean;
-  redirectsToOutside: boolean;
-  parseError?: string;
-}
 
 export interface ShellClassification {
   risk: CodeShellRisk;
@@ -270,12 +253,6 @@ export function detectDepsHint(command: string): DepsHint | undefined {
   return { manager, action, fromUrl };
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return trimmed.slice(1, -1);
-  return trimmed;
-}
-
 const PROJECT_PATH = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/;
 const COMMAND_OPTION = /^--?[A-Za-z][A-Za-z-]*(?:=[A-Za-z0-9_.:-]+)?$/;
 const COMMAND_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -306,81 +283,6 @@ export function projectFrameworkCommand(executable: string, args: readonly strin
     if (paths.length && paths.every((value) => PROJECT_PATH.test(value) && !value.split("/").includes("..") && !/(?:^|\/)\.(?:git|env|ssh|aws)(?:\/|$)/i.test(value))) return "controlled";
   }
   return null;
-}
-
-/** A real tokeniser for a shell command line: operators, quoting and escaping are handled. */
-export function parseShellCommand(command: string): ParsedShellCommand {
-  const segments: ShellSegment[] = [];
-  const parsed: ParsedShellCommand = {
-    segments, usesSubshell: false, usesBackticks: false, usesHeredoc: false, usesVariables: false,
-    redirectsToOutside: false,
-  };
-  if (typeof command !== "string" || !command.trim()) {
-    return { ...parsed, parseError: "empty_command" };
-  }
-  parsed.usesSubshell = /\$\(/.test(command);
-  parsed.usesBackticks = /`[^`]*`/.test(command);
-  parsed.usesHeredoc = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/.test(command);
-  parsed.usesVariables = /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(command);
-  parsed.redirectsToOutside = /(?:^|[\s;&|])>>?\s*(?:\/(?!workspace|tmp|dev\/null|proc\/self))/.test(command);
-
-  let current = "";
-  let quote: '"' | "'" | null = null;
-  let pendingOperator: string | undefined;
-  const push = () => {
-    const raw = current.trim();
-    if (raw) segments.push({ argv: tokenise(raw), operator: pendingOperator, raw });
-    current = "";
-    pendingOperator = undefined;
-  };
-  for (let index = 0; index < command.length; index += 1) {
-    const char = command[index]!;
-    if (quote) {
-      current += char;
-      if (char === quote && command[index - 1] !== "\\") quote = null;
-      continue;
-    }
-    if (char === "'" || char === "\"") { quote = char; current += char; continue; }
-    const two = command.slice(index, index + 2);
-    if (two === "&&" || two === "||" || two === ">>" || two === "2>") {
-      if (two === ">>" || two === "2>") { current += two; index += 1; continue; }
-      push();
-      pendingOperator = two;
-      index += 1;
-      continue;
-    }
-    if (char === "|" || char === ";" || char === "&") {
-      if (char === "|" && command[index + 1] === "|") { push(); pendingOperator = "||"; index += 1; continue; }
-      push();
-      pendingOperator = char;
-      continue;
-    }
-    current += char;
-  }
-  if (quote) parsed.parseError = "unterminated_quote";
-  push();
-  if (!segments.length) parsed.parseError = parsed.parseError ?? "no_segments";
-  return parsed;
-}
-
-function tokenise(raw: string): string[] {
-  const argv: string[] = [];
-  let token = "";
-  let quote: '"' | "'" | null = null;
-  for (let index = 0; index < raw.length; index += 1) {
-    const char = raw[index]!;
-    if (quote) {
-      if (char === quote && raw[index - 1] !== "\\") { quote = null; continue; }
-      token += char;
-      continue;
-    }
-    if (char === "'" || char === "\"") { quote = char; continue; }
-    if (char === "\\" && raw[index + 1]) { token += raw[index + 1]; index += 1; continue; }
-    if (/\s/.test(char)) { if (token) { argv.push(token); token = ""; } continue; }
-    token += char;
-  }
-  if (token) argv.push(token);
-  return argv;
 }
 
 function hasRecursiveForce(argv: string[]): boolean {
@@ -496,88 +398,6 @@ const GIT_GLOBAL_OPTIONS_OK = new Set(["--no-pager", "--literal-pathspecs", "--n
 const TAG_LIST_OPTIONS = /^(?:--list|-l|--contains.*|--merged.*|--no-merged.*|--points-at.*|--sort=.*|-n\d*)$/;
 const REMOTE_READ_OPTIONS = /^(?:-v|--verbose|show|get-url)$/;
 const CONFIG_READ_OPTIONS = /^(?:--get|--get-all|--get-regexp|--list|-l)$/;
-
-/**
- * C5a (D9): the git write a shell command performs, as far as it can be told from the command line.
- *
- * This is the one parser both layers share: `classifyShellCommand` uses it to decide whether a force
- * push targets a protected branch, and `code-policy-engine.ts` uses it to ask the **company**
- * protected-branch policy (`evaluateGitWrite`) about every refspec before any mode, rule or approval is
- * consulted. Keeping a single parser is what stops the classifier and the policy from disagreeing about
- * which branch `git push origin HEAD:main` writes to.
- */
-export type GitWriteOperation = "push" | "force_push";
-
-export interface GitWriteAttemptHint {
-  operation: GitWriteOperation;
-  /** The branch the refspec names, or `""` when the command names none (`git push`, `git push --all`). */
-  branch: string;
-}
-
-/** Options that make an update forced. `--force-with-lease` is still a force push. */
-const GIT_FORCE_PUSH_FLAGS = new Set(["-f", "--force", "--force-with-lease", "--force-if-includes"]);
-
-/** Git global options that consume the next token, so the subcommand is not mistaken for their value. */
-const GIT_GLOBAL_OPTIONS_WITH_VALUE = new Set([
-  "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path",
-]);
-
-/** `refs/heads/main`, `+main` and a leading `+` on a refspec all mean the same branch. */
-function normalizeGitRef(value: string): string {
-  return value.trim().replace(/^\+/, "").replace(/^refs\/heads\//, "");
-}
-
-/** `origin main`, `HEAD:main` and `:main` (a remote deletion) all name a remote branch. */
-function normalizeGitRefspec(value: string): { branch: string; forced: boolean } | null {
-  const forced = value.startsWith("+");
-  const refspec = forced ? value.slice(1) : value;
-  const separator = refspec.indexOf(":");
-  const target = separator >= 0 ? refspec.slice(separator + 1) : refspec;
-  const branch = normalizeGitRef(target);
-  return branch ? { branch, forced } : null;
-}
-
-/**
- * Every `git push` found in the command line, with the branch each refspec writes to. A push that names
- * no branch reports `branch: ""` — the branch of `git push` is a property of the checkout, not of the
- * command, so it is deliberately *not* guessed here; the caller keeps the command's normal risk class.
- */
-export function detectGitWriteAttempts(command: string): GitWriteAttemptHint[] {
-  const attempts: GitWriteAttemptHint[] = [];
-  if (typeof command !== "string" || !/\bpush\b/.test(command)) return attempts;
-  for (const segment of parseShellCommand(command).segments) {
-    const argv = segment.argv;
-    let index = 0;
-    // Skip leading assignments and wrappers: `FOO=1 sudo git push origin main`.
-    while (
-      index < argv.length &&
-      (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[index]!) || argv[index] === "sudo" || argv[index] === "env" || argv[index] === "command")
-    ) {
-      index += 1;
-    }
-    if ((argv[index] ?? "").split("/").pop() !== "git") continue;
-    index += 1;
-    while (index < argv.length && argv[index]!.startsWith("-")) {
-      index += GIT_GLOBAL_OPTIONS_WITH_VALUE.has(argv[index]!) ? 2 : 1;
-    }
-    if (argv[index] !== "push") continue;
-    const rest = argv.slice(index + 1);
-    const forced = rest.some(
-      (value) => GIT_FORCE_PUSH_FLAGS.has(value) || value.startsWith("--force-with-lease=") || value.startsWith("--force-if-includes="),
-    );
-    const positionals = rest.filter((value) => !value.startsWith("-"));
-    // `git push <remote> <refspec>...`: the first positional is the remote, the rest are the branches.
-    const refspecs = positionals.slice(1).map(normalizeGitRefspec).filter((value): value is { branch: string; forced: boolean } => value !== null);
-    if (!refspecs.length) {
-      attempts.push({ operation: forced ? "force_push" : "push", branch: "" });
-      continue;
-    }
-    for (const refspec of refspecs) {
-      attempts.push({ operation: forced || refspec.forced ? "force_push" : "push", branch: refspec.branch });
-    }
-  }
-  return attempts;
-}
 
 /** Decides whether a git invocation is provably read-only (whitelist, opt-in per command). */
 export function readOnlyGitSubcommand(args: string[]): { safe: boolean; reason: string } {  const lowered = args.map((value) => value.toLowerCase());
@@ -832,4 +652,4 @@ export function classifyShellRisk(command: string, options: ShellClassifierOptio
   return classifyShellCommand(command, options).risk;
 }
 
-export { stripQuotes };
+export { stripQuotes } from "./code-shell-parser";
