@@ -199,6 +199,7 @@ export const core = {
     "memory": "Geheugen",
     "settings": "Instellingen",
     "signOut": "Afmelden",
+    "signOutAllDevices": "Op alle apparaten afmelden",
     "signOutIncompleteTitle": "Afmelden niet voltooid",
     "signOutIncompleteDesc": "Afmelden bij npati.com is niet gelukt."
   },

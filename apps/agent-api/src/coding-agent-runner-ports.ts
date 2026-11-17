@@ -574,7 +574,7 @@ export interface CodingAgentRunnerPorts {
       companyId: string;
       projectId: string;
       query?: string;
-    }): Promise<{ companyMemory: string | null; projectContext: string | null } | null>;
+    }): Promise<{ companyMemory: string | null; businessMemory?: string | null; projectContext: string | null } | null>;
   };
 
   contextSummaryStore?: {

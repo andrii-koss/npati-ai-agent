@@ -166,13 +166,17 @@ describe("deleting a website from chat", () => {
     expect(asked.body).toContain("Для підтвердження напишіть");
     expect(asked.body).toContain("Fit landing");
     expect(await store.listProjects(context, company.id)).toHaveLength(2);
+    // V6 step 17, owner decision: deleting a site cannot be undone, so it asks even with "act without asking" on.
     await store.setUserSetting(context, "chat.data-auto-allow:" + company.id, { autoAllow: true }, 0);
-    const deleted = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Видали сайт Fit landing — він більше не потрібен." } });
+    const stillAsked = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(stillAsked.body).toContain("Для підтвердження напишіть");
+    expect(await store.listProjects(context, company.id)).toHaveLength(2);
+    const deleted = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", conversationId: (/"conversationId":"([0-9a-f-]{36})"/.exec(stillAsked.body)?.[1]), message: "Так, видали проєкт Fit landing" } });
     expect(deleted.body).toContain("видалено");
     expect((await store.listProjects(context, company.id)).map(item => item.name)).toEqual(["Fit blog"]);
   });
 
-  it("deletes the named site at once when the company lets its agents act without asking", async () => {
+  it("still asks before deleting a named site when the company lets its agents act without asking", async () => {
     const context: AuthContext = { workspaceId: "workspace-site-auto-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
     const store = new InMemoryWorkspaceStore();
     const aiEngine: AIEngine = {
@@ -188,11 +192,16 @@ describe("deleting a website from chat", () => {
     await store.createProject(context, company.id, { name: "Fit landing", type: "website" } as never, "fit-landing-auto");
     await store.createProject(context, company.id, { name: "Fit blog", type: "website" } as never, "fit-blog-auto");
     const blog = (await store.listProjects(context, company.id)).find(item => item.name === "Fit blog")!;
-    // The chat works on the blog and deletes the other site: the site goes at once, and the chat keeps the blog.
-    const answer = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "project", companyId: company.id, projectId: blog.id, message: "Видали сайт Fit landing — він більше не потрібен." } });
-    expect(answer.body).not.toContain("Для підтвердження напишіть");
-    expect(answer.body).toContain("видалено");
-    expect(answer.body).not.toContain('"contextType":"none"');
+    // The chat works on the blog and asks about the other site (V6 step 17, owner decision: the setting no longer deletes
+    // a site at once). The confirmation deletes only that site, and the chat keeps the blog.
+    const payload = { contextType: "project", companyId: company.id, projectId: blog.id };
+    const answer = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(answer.body).toContain("Для підтвердження напишіть");
+    expect(await store.listProjects(context, company.id)).toHaveLength(2);
+    const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, conversationId: /"conversationId":"([0-9a-f-]{36})"/.exec(answer.body)?.[1], message: "Так, видали проєкт Fit landing" } });
+    expect(confirmed.body).toContain("видалено");
+    expect(confirmed.body).not.toContain('"contextType":"none"');
+    expect(confirmed.body).toContain(`"projectId":"${blog.id}"`);
     expect((await store.listProjects(context, company.id)).map(item => item.name)).toEqual(["Fit blog"]);
   });
 });

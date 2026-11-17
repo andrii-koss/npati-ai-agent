@@ -2,7 +2,7 @@ import { chatLanguageInstruction, codingChatResponseInstruction } from "./compan
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { CodeModelProfile } from "./code-model-profiles";
-import { COMPANY_MEMORY_HEADER, PROJECT_CONTEXT_HEADER, renderContextBlocks } from "./code-context-memory";
+import { BUSINESS_MEMORY_HEADER, COMPANY_MEMORY_HEADER, PROJECT_CONTEXT_HEADER, renderContextBlocks } from "./code-context-memory";
 import {
   type CodeRunToolDescriptor,
   type CodeRunSkillProvenance,
@@ -74,6 +74,7 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
       if (loaded) {
         contextBlocks = renderContextBlocks([
           loaded.companyMemory ? { header: COMPANY_MEMORY_HEADER, body: loaded.companyMemory, chars: loaded.companyMemory.length, truncated: false } : null,
+          loaded.businessMemory ? { header: BUSINESS_MEMORY_HEADER, body: loaded.businessMemory, chars: loaded.businessMemory.length, truncated: false } : null,
           loaded.projectContext ? { header: PROJECT_CONTEXT_HEADER, body: loaded.projectContext, chars: loaded.projectContext.length, truncated: false } : null,
         ]) || null;
       }

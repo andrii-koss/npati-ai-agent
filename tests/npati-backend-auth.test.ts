@@ -212,6 +212,29 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     return { app, mockBackend, workspaceStore, authProvider };
   }
 
+  // V6 step 17 (O17-04): "Sign out" answered "Successfully logged out" while the token kept opening the API until it
+  // expired. Now this device's token stops at once, and "everywhere" stops every token issued before it.
+  it("revokes the signed-out token at once, and every earlier token when signing out everywhere", async () => {
+    const { app } = setupApp();
+    const now = Math.floor(Date.now() / 1000);
+    const phone = createMockNpatiJwt({ userId: "user-out", iat: now - 120 }, JWT_SECRET);
+    const laptop = createMockNpatiJwt({ userId: "user-out", iat: now - 60 }, JWT_SECRET);
+    const me = async (token: string) => (await app.inject({ method: "GET", url: "/auth/me", headers: { authorization: `Bearer ${token}` } })).statusCode;
+    expect([await me(phone), await me(laptop)]).toEqual([200, 200]);
+
+    const out = await app.inject({ method: "POST", url: "/auth/logout", headers: { authorization: `Bearer ${laptop}` }, payload: {} });
+    expect(out.json()).toMatchObject({ success: true, revoked: true });
+    expect([await me(laptop), await me(phone)]).toEqual([401, 200]);
+    expect((await app.inject({ method: "GET", url: "/auth/me", headers: { authorization: `Bearer ${laptop}` } })).json().error.code).toBe("TOKEN_REVOKED");
+
+    const everywhere = await app.inject({ method: "POST", url: "/auth/logout", headers: { authorization: `Bearer ${phone}` }, payload: { everywhere: true } });
+    expect(everywhere.json()).toMatchObject({ success: true, revoked: true });
+    const later = createMockNpatiJwt({ userId: "user-out", iat: now + 5 }, JWT_SECRET);
+    expect([await me(phone), await me(later)]).toEqual([401, 200]);
+    // Signing out of a page whose token already stopped working revokes nothing and still succeeds.
+    expect((await app.inject({ method: "POST", url: "/auth/logout", headers: { authorization: `Bearer ${phone}` }, payload: {} })).json()).toMatchObject({ success: true, revoked: false });
+  });
+
   it("reads current name and avatar from the central profile on each authenticated profile request", async () => {
     const { app, mockBackend } = setupApp();
     const token = createMockNpatiJwt({ userId: "user-test" }, JWT_SECRET);

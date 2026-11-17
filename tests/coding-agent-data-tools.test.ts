@@ -135,9 +135,13 @@ describe("Coding Agent extended database operations", () => {
   it("with the company setting on, changes the database without creating a request; with it off, still asks", async () => {
     const { approvals } = approvalFixture();
     const on = await fixture("auto", approvals, async () => true);
-    expect((await on.invoke("code.data.schema.modify", modify)).ok).toBe(true);
+    const rename = { ...modify, operation: { kind: "rename_field", collection: "products", field: "title", next: "name" } };
+    expect((await on.invoke("code.data.schema.modify", rename)).ok).toBe(true);
     expect(approvals.request).not.toHaveBeenCalled();
-    expect(on.projectData.applySchema).toHaveBeenCalledWith(ctx, on.company.id, "selected-site", modify.operation, expect.objectContaining({ approved: true }));
+    expect(on.projectData.applySchema).toHaveBeenCalledWith(ctx, on.company.id, "selected-site", rename.operation, expect.objectContaining({ approved: true }));
+    // V6 step 17, owner decision: deleting a table cannot be undone, so it asks even with the setting on.
+    expect(await on.invoke("code.data.schema.modify", modify)).toMatchObject({ ok: false, error: { code: "approval_required" } });
+    expect(on.projectData.applySchema).toHaveBeenCalledTimes(1);
     const off = await fixture("auto", approvals, async () => false);
     expect(await off.invoke("code.data.schema.modify", modify)).toMatchObject({ ok: false, error: { code: "approval_required" } });
     expect(off.projectData.applySchema).not.toHaveBeenCalled();

@@ -22,7 +22,7 @@ import { registerCodeBackgroundRunRoutes } from "./code-background-run-routes";
 import { finishCodeChatWebsite, hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
 import { registerCodeCliRunRoutes } from "./code-cli-run-routes";
 import { createCodeCommandRegistry } from "./code-command-registry";
-import { buildCompanyMemoryBlock, buildProjectContextBlock, rankMemoriesForQuery } from "./code-context-memory";
+import { buildBusinessMemoryBlock, buildCompanyMemoryBlock, buildProjectContextBlock, rankMemoriesForQuery } from "./code-context-memory";
 import { CodeDataErasureService } from "./code-data-erasure";
 import { createCodeHooksService } from "./code-hooks";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
@@ -476,6 +476,7 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
         // Memory by company id, which is never a Business, so it was always empty and a site got an invented address
         // ("вул. Хлібна, 12" instead of the remembered "вул. Ранкова, 17", V6 step 14).
         let companyMemory: string | null = null;
+        let businessMemory: string | null = null;
         try {
           const company = await workspaceStore.getCompany(ctx, companyId);
           // The request is not a substring of any entry: read the Business's entries and rank them by shared words.
@@ -485,16 +486,17 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
             // A model sometimes stores every fact on one line: such a line is split into its sentences.
             .flatMap((line) => line.length > 400 ? line.split(/(?<=[.!?])\s+/u) : [line])
             .map((content) => ({ content, type: "company_fact" }));
-          companyMemory = buildCompanyMemoryBlock([
-            ...facts,
-            ...memories.map((memory) => ({
-              ...(memory.title ? { title: memory.title } : {}),
-              content: memory.content,
-              ...(memory.type ? { type: memory.type } : {}),
-            })),
-          ])?.body ?? null;
+          // The owner's instructions are trusted rules; Business Memory is data, since it is also filled from conversations
+          // and can carry text from a page, a mail or a pasted document (V6 step 17).
+          companyMemory = buildCompanyMemoryBlock(facts)?.body ?? null;
+          businessMemory = buildBusinessMemoryBlock(memories.map((memory) => ({
+            ...(memory.title ? { title: memory.title } : {}),
+            content: memory.content,
+            ...(memory.type ? { type: memory.type } : {}),
+          })))?.body ?? null;
         } catch {
           companyMemory = null;
+          businessMemory = null;
         }
         let projectContext: string | null = null;
         try {
@@ -516,8 +518,8 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
             projectContext = [projectContext, styles, memory].filter(Boolean).join("\n\n");
           } catch { /* Optional repository hints never block an edit. */ }
         }
-        if (!companyMemory && !projectContext) return null;
-        return { companyMemory, projectContext };
+        if (!companyMemory && !businessMemory && !projectContext) return null;
+        return { companyMemory, businessMemory, projectContext };
       },
     },
 

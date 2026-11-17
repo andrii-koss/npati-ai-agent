@@ -199,6 +199,7 @@ export const core = {
     "memory": "メモリ",
     "settings": "設定",
     "signOut": "サインアウト",
+    "signOutAllDevices": "すべてのデバイスからサインアウト",
     "signOutIncompleteTitle": "サインアウト未完了",
     "signOutIncompleteDesc": "npati.comからサインアウトできませんでした。"
   },

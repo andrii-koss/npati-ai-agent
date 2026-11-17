@@ -206,6 +206,7 @@ export const es: TranslationSchema = {
     memory: "Memoria",
     settings: "Configuración",
     signOut: "Cerrar sesión",
+    signOutAllDevices: "Cerrar sesión en todos los dispositivos",
     signOutIncompleteTitle: "Cierre de sesión incompleto",
     signOutIncompleteDesc: "No se pudo cerrar la sesión en npati.com.",
   },

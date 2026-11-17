@@ -11,6 +11,7 @@ import { APPROVAL_DEFERRED_REASON } from "./code-policy-tools";
 import { detectGitWriteAttempts } from "./code-shell-classifier";
 import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
 import { CredentialMasker } from "./security-guardrails";
+import { isIrreversibleShellCommand } from "./irreversible-actions";
 import {
   MCP_APPROVAL_TTL_MS,
   mcpApprovalPayloadFor,
@@ -243,7 +244,10 @@ export async function evaluatePolicyApproval(
   }
   // The company chose to let its agents act without asking. A git write still asks: its approval is consumed again at the
   // git boundary, and publishing code is the one action the setting does not cover.
+  // A command that destroys files or data a build cannot recreate (rm of sources, DROP TABLE, git reset --hard) still asks
+  // (V6 step 17, owner decision): the setting covers ordinary work, not what cannot be undone.
   if (deps.companyAutoAllow && phase !== "project_rules" && !request.git && !isGitWriteTool(request.tool) && !writesGitFromShell(request.command)
+      && !(request.tool === "code.shell.exec" && isIrreversibleShellCommand(request.command))
       && await deps.companyAutoAllow(request.ctx, request.companyId).catch(() => false)) {
     return { decision: "allow", phase, risk, status: 200, reasons: [...reasons, "approval:company_setting", `approval:action:${approvalActionFor(request)}`] };
   }

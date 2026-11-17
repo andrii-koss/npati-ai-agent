@@ -199,6 +199,7 @@ export const de: TranslationSchema = {
     memory: "Gedächtnis",
     settings: "Einstellungen",
     signOut: "Abmelden",
+    signOutAllDevices: "Auf allen Geräten abmelden",
     signOutIncompleteTitle: "Abmeldung unvollständig",
     signOutIncompleteDesc: "Abmeldung von npati.com fehlgeschlagen.",
   },

@@ -199,6 +199,7 @@ export const core = {
     "memory": "Memória",
     "settings": "Configurações",
     "signOut": "Sair",
+    "signOutAllDevices": "Sair em todos os dispositivos",
     "signOutIncompleteTitle": "Saída incompleta",
     "signOutIncompleteDesc": "Não foi possível sair de npati.com."
   },

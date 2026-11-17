@@ -370,8 +370,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const confirmedMatches = confirmedName ? projects.filter((project) => project.name === confirmedName) : [];
           const target = confirmedName && confirmedMatches.length !== 1 ? undefined : projectDeleteTarget(projects, message, confirmedName, activeProjectId);
           if (target) {
-            // The company lets its agents act without asking: the site the question would name is deleted at once.
-            const deleteNow = Boolean(confirmedName) || await featureFlagService.dataAutoAllow.isOn(auth, target.companyId).catch(() => false);
+            // Deleting a site cannot be undone, so the person confirms it even when the company lets its agents act without
+            // asking (V6 step 17, owner decision); the setting used to delete it at once.
+            const deleteNow = Boolean(confirmedName);
             if (deleteNow) await projectService.delete(auth, target.companyId, target.id);
             const answer = deleteNow ? projectDeletedMessage(message, target.name) : projectDeleteQuestion(message, target);
             const conversation = await chatConversation();
@@ -381,8 +382,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             }
             send("delta", { delta: answer });
             await send("result", { message: answer, suggestedActions: [], conversationId: conversation?.id,
-              // Only deleting the chat's own site clears its context; deleting another site keeps working on this one.
-              activeContext: deleteNow && (!activeProjectId || target.id === activeProjectId) ? { contextType: "none", companyId: null, businessId: null } : resolved.context });
+              // Only deleting the chat's own site clears its context; deleting another site keeps working on this one. A
+              // confirmation names the site, which moves this turn's context onto it, so the chat's own project is restored
+              // from the request (V6 step 17: confirming another site's deletion left the chat with no project).
+              activeContext: deleteNow && request.body.projectId && request.body.companyId && request.body.projectId !== target.id
+                ? { contextType: "project", companyId: request.body.companyId, businessId: null, projectId: request.body.projectId, workspaceId: auth.workspaceId }
+                : deleteNow && (!activeProjectId || target.id === activeProjectId) ? { contextType: "none", companyId: null, businessId: null } : resolved.context });
             clearInterval(heartbeat);
             if (!reply.raw.writableEnded) reply.raw.end();
             return;

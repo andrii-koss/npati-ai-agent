@@ -199,6 +199,7 @@ export const core = {
     "memory": "Bellek",
     "settings": "Ayarlar",
     "signOut": "Oturumu kapat",
+    "signOutAllDevices": "Tüm cihazlarda oturumu kapat",
     "signOutIncompleteTitle": "Oturum tam olarak kapatılamadı",
     "signOutIncompleteDesc": "npati.com oturumu kapatılamadı."
   },

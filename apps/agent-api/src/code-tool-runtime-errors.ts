@@ -1,6 +1,7 @@
 import { CodeToolError as CanonicalCodeToolError } from "./code-tools-path";
 
 export type CodeToolErrorCode =
+  | "disk_space_low"
   | "project_data_error"
   | "image_unsupported_type" | "image_view_unsupported" | "visual_screenshot_unavailable"
   | "process_secret_promotion_denied" | "process_promotion_unavailable" | "process_output_cursor_lost"

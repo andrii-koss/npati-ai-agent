@@ -185,6 +185,8 @@ export interface CodeToolRuntimeOptions {
   /**
    * C5: scoped approval rules (`session` | `project`).
    */
+  /** Stops agent writes and commands while the shared disk is below its reserve (V6 step 17, O17-05). */
+  diskSpace?: { assertRoom(): Promise<void> };
   /** The company setting that lets the agent change project databases without asking each time (off by default). */
   dataAutoAllow?: (ctx: AuthContext, companyId: string) => Promise<boolean>;
   approvalRules?: {

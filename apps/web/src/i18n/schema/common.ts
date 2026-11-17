@@ -135,6 +135,7 @@ export interface UserMenuSchema {
     memory: string;
     settings: string;
     signOut: string;
+    signOutAllDevices: string;
     signOutIncompleteTitle: string;
     signOutIncompleteDesc: string;
 };

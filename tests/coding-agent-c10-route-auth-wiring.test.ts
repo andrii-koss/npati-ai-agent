@@ -137,6 +137,9 @@ describe("security-gate: G1 a failed workspace-store initialization is reported,
   class FailingWorkspaceStore extends InMemoryWorkspaceStore {
     calls = 0;
     constructor(private readonly failures: number | "always") { super(); }
+    // The in-memory store initializes again on every read; the PostgreSQL store reads a setting with one query. The
+    // sign-out check (V6 step 17) reads a setting per request, so it is answered here without counting as a retry.
+    override async getUserSetting(): Promise<null> { return null; }
     override async initialize(): Promise<void> {
       this.calls += 1;
       if (this.failures === "always" || this.calls <= this.failures) {

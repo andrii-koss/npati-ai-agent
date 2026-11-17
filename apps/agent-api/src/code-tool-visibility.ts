@@ -274,6 +274,18 @@ export function finishedRunText(
   if (!call || !toolCallSucceeded(messages, call.id)) return null;
   const summary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : "";
   const prose = assistantText.trim();
-  // Text shorter than the summary is only a progress note ("Build passed. Finishing."), not part of the answer.
-  return [prose.length < summary.length ? "" : prose, summary].filter(Boolean).join("\n\n");
+  // Text shorter than the summary is only a progress note ("Build passed. Finishing."), not part of the answer. Prose that
+  // says the same as the summary in other words is dropped: the chat showed the same answer twice (V6 step 17).
+  return [prose.length < summary.length || restatesSummary(prose, summary) ? "" : prose, summary].filter(Boolean).join("\n\n");
+}
+
+/** True when most words of the shorter text appear in the longer one, i.e. both report the same change. */
+function restatesSummary(prose: string, summary: string): boolean {
+  const words = (text: string) => new Set((text.toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []));
+  const a = words(prose), b = words(summary);
+  if (!a.size || !b.size) return false;
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  let shared = 0;
+  for (const word of small) if (large.has(word)) shared++;
+  return shared / small.size >= 0.7;
 }

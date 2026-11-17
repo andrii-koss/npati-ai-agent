@@ -33,7 +33,8 @@ export interface AuthState {
   beginInstallationConnection(): Promise<InstallationPairing>;
   pollInstallationConnection(deviceCode: string): Promise<boolean>;
   logout(): Promise<void>;
-  signOutEverywhere(): Promise<void>;
+  /** Signs out of NPATI Agent (and npati.com on ai.npati.com); allDevices also revokes the person's other sessions. */
+  signOutEverywhere(allDevices?: boolean): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -140,17 +141,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const renewalInFlight = useRef<Promise<"ok" | "unauthorized" | "temporary"> | null>(null);
   const authCheckInFlight = useRef<Promise<void> | null>(null);
 
-  const logout = useCallback(async (waitForCheck = true) => {
+  const logout = useCallback(async (waitForCheck = true, everywhere = false) => {
     sessionStorage.setItem(SSO_SUPPRESSED_KEY, "1");
     if (waitForCheck) await authCheckInFlight.current?.catch(() => undefined);
     const refreshToken = getStoredRefreshToken();
+    const accessToken = getStoredAuthToken();
     try {
       await fetch("/api/auth/installation/browser-logout", { method: "POST" }).catch(() => null);
-      if (refreshToken) {
+      // The server revokes the token the page holds (and, everywhere, every token of the person), so a copied token
+      // stops working at once instead of when it expires (V6 step 17).
+      if (refreshToken || accessToken) {
         await fetch("/api/auth/logout", {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
+          headers: { "content-type": "application/json", ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
+          body: JSON.stringify({ ...(refreshToken ? { refreshToken } : {}), ...(everywhere ? { everywhere: true } : {}) }),
         }).catch(() => null);
       }
     } finally {
@@ -165,8 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const signOutEverywhere = useCallback(async () => {
-    await logout();
+  const signOutEverywhere = useCallback(async (allDevices = false) => {
+    await logout(true, allDevices);
     if (window.location.hostname === "ai.npati.com") {
       const response = await fetch(`${NPATI_CENTRAL_API_URL}/api/v1/auth/logout`, {
         method: "POST",

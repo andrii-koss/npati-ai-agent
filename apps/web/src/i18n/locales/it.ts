@@ -205,6 +205,7 @@ export const it: TranslationSchema = {
     memory: "Memoria",
     settings: "Impostazioni",
     signOut: "Esci",
+    signOutAllDevices: "Esci da tutti i dispositivi",
     signOutIncompleteTitle: "Disconnessione incompleta",
     signOutIncompleteDesc: "Impossibile disconnettersi da npati.com.",
   },

@@ -199,6 +199,7 @@ export const core = {
     "memory": "메모리",
     "settings": "설정",
     "signOut": "로그아웃",
+    "signOutAllDevices": "모든 기기에서 로그아웃",
     "signOutIncompleteTitle": "로그아웃이 완료되지 않음",
     "signOutIncompleteDesc": "npati.com에서 로그아웃하지 못했습니다."
   },

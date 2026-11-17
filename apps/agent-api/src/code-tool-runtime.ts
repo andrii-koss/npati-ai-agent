@@ -1,3 +1,5 @@
+import { DiskSpaceLowError } from "./disk-space-guard";
+import { isIrreversibleDataTool } from "./irreversible-actions";
 import { compactWriteReceipt } from "./code-write-receipt";
 import { supersededSources } from "./code-tool-superseded-source";
 import { buildUnifiedDiff, diffLineStats } from "./code-tools-diff";
@@ -283,6 +285,14 @@ export class CodeToolRuntime {
         }
       }
       await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, tool.name, args);
+      // A nearly full disk stops new files and commands before they take the room the database needs (V6 step 17).
+      if (this.options.diskSpace && (write || /^code\.(shell\.(exec|exec_async|process\.start)|verify\.run|deps\.(add|install|update))/.test(tool.name))) {
+        try { await this.options.diskSpace.assertRoom(); }
+        catch (error) {
+          if (error instanceof DiskSpaceLowError) throw new CodeToolError("disk_space_low", error.message, 507, "policy", true, tool.name);
+          throw error;
+        }
+      }
       if (tool.name === "code.fs.undo_last_turn" && args.confirm !== true) {
         throw new CodeToolError("invalid_arguments", "code.fs.undo_last_turn requires confirm: true", 400, "validate_arguments", false, tool.name);
       }
@@ -337,7 +347,9 @@ export class CodeToolRuntime {
           if (!this.options.approvals) throw new CodeToolError("approval_unavailable", "Database changes require the approval system", 503, "approval", false, tool.name);
           // The company chose to let the agent change its databases without asking: no request is created, and the
           // audit entry below says which setting allowed it.
-          autoAllowed = !input.approvalId && await this.options.dataAutoAllow?.(ctx, input.companyId).catch(() => false) === true;
+          // Deleting rows, a table or a column still asks: the setting covers ordinary changes (V6 step 17, owner decision).
+          autoAllowed = !input.approvalId && !isIrreversibleDataTool(tool.name, args)
+            && await this.options.dataAutoAllow?.(ctx, input.companyId).catch(() => false) === true;
         }
         if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true && !autoAllowed) {
           const payload = { projectId: input.projectId, sessionId, turnId, tool: tool.name, toolVersion: tool.version, args };

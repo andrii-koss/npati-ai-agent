@@ -53,7 +53,7 @@ describe("shell approval through the production executor and adapter", () => {
     expect(executions).toBe(1);
   });
 
-  it("runs a command the company setting allowed, with the sandbox told it is approved, and still asks for a git push", async () => {
+  it("runs a command the company setting allowed, with the sandbox told it is approved, and still asks for a git push or a deletion", async () => {
     const ctx: AuthContext = { workspaceId: "ws", userId: "owner", permissions: ["workspace:write"] };
     const requested: unknown[] = []; const sandboxCalls: Array<{ command: string; approved?: boolean }> = [];
     const policy = new PolicyEngine({
@@ -70,13 +70,15 @@ describe("shell approval through the production executor and adapter", () => {
       projectSandbox: {}, featureFlagService: {}, secretLeases: {} } as unknown as CreateCodePortsWiringDeps);
     const exec = canonicalShellExecutors({ shellRuntime: ports.codeShellRuntimePort })["code.shell.exec"]!;
     const input = { ctx, companyId: "company", projectId: "project", sessionId: "session", turnId: "turn", toolCallId: "call",
-      tool: { name: "code.shell.exec", version: 1 }, args: { command: "rm temp-check.txt" }, limits: DEFAULT_CODE_AGENT_LIMITS,
+      tool: { name: "code.shell.exec", version: 1 }, args: { command: "touch temp-check.txt" }, limits: DEFAULT_CODE_AGENT_LIMITS,
     } as CodeToolExecutionContext;
     await expect(exec(input)).resolves.toMatchObject({ stdout: "ok" });
-    expect(sandboxCalls).toEqual([{ command: "rm temp-check.txt", approved: true }]);
+    expect(sandboxCalls).toEqual([{ command: "touch temp-check.txt", approved: true }]);
     await expect(exec({ ...input, toolCallId: "push", args: { command: "git push origin main" } })).rejects.toMatchObject({ code: "approval_required" });
+    // V6 step 17, owner decision: deleting a source file cannot be undone, so it asks even with the setting on.
+    await expect(exec({ ...input, toolCallId: "rm", args: { command: "rm temp-check.txt" } })).rejects.toMatchObject({ code: "approval_required" });
     expect(sandboxCalls).toHaveLength(1);
-    expect(requested).toHaveLength(1);
+    expect(requested).toHaveLength(2);
   });
 
   it("lets the sandbox run a command a standing rule allows, and refuses one the rule does not cover", async () => {

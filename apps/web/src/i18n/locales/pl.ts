@@ -199,6 +199,7 @@ export const pl: TranslationSchema = {
     memory: "Pamięć",
     settings: "Ustawienia",
     signOut: "Wyloguj się",
+    signOutAllDevices: "Wyloguj się na wszystkich urządzeniach",
     signOutIncompleteTitle: "Wylogowanie niekompletne",
     signOutIncompleteDesc: "Nie udało się wylogować z npati.com.",
   },

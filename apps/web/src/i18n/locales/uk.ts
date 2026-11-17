@@ -199,6 +199,7 @@ export const uk: TranslationSchema = {
     memory: "Пам'ять",
     settings: "Налаштування",
     signOut: "Вийти",
+    signOutAllDevices: "Вийти на всіх пристроях",
     signOutIncompleteTitle: "Вихід не завершено",
     signOutIncompleteDesc: "Не вдалося вийти з облікового запису npati.com.",
   },

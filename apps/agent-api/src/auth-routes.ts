@@ -261,27 +261,27 @@ export function registerAuthRoutes(
   const handleLogout = async (request: FastifyRequest<{
     Body: {
       refreshToken?: string;
+      everywhere?: boolean;
     };
   }>, reply: FastifyReply) => {
     const refreshToken = request.body?.refreshToken;
-    if (authClient) {
+    // The access token of this request stops working now, not when it expires (V6 step 17: it kept opening the API for
+    // up to 15 minutes after "Sign out" answered "Successfully logged out").
+    let revoked = false;
+    try {
+      revoked = await authProvider.revokeSession?.(request, request.body?.everywhere === true) ?? false;
+    } catch {
+      return reply.code(503).send({ success: false, error: { code: "SIGN_OUT_NOT_SAVED", message: "Sign-out could not be saved. Please try again." } });
+    }
+    if (authClient && refreshToken) {
       try {
         const result = await authClient.logout(refreshToken);
-        return reply.code(200).send({
-          success: true,
-          message: result.message || "Logged out successfully.",
-        });
+        return reply.code(200).send({ success: true, revoked, message: result.message || "Logged out successfully." });
       } catch {
-        return reply.code(200).send({
-          success: true,
-          message: "Logged out.",
-        });
+        return reply.code(200).send({ success: true, revoked, message: "Logged out." });
       }
     }
-    return reply.code(200).send({
-      success: true,
-      message: "Logged out.",
-    });
+    return reply.code(200).send({ success: true, revoked, message: "Logged out." });
   };
 
   const handleMe = async (request: FastifyRequest, reply: FastifyReply) => {

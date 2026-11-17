@@ -5,6 +5,7 @@ import type { NpatiAuthClient, NpatiUser } from "@npati/hub-connector";
 
 import { ApiKeysRepository } from "./api-keys-repository";
 import { OidcDashboardGate, ScopedRemoteAccessTokenManager, type OidcVerificationConfig } from "./security-guardrails-and-tokens";
+import { SessionRevocations } from "./session-revocation";
 
 export class AuthenticationError extends Error {
   readonly status: number;
@@ -27,6 +28,8 @@ export function assertChatKeyScope(auth: AuthContext): void {
 
 export interface AuthProvider {
   authenticate(request: FastifyRequest): Promise<AuthContext>;
+  /** Signs out the request's session token, or every token of the person with `everywhere` (V6 step 17). */
+  revokeSession?(request: FastifyRequest, everywhere: boolean): Promise<boolean>;
 }
 
 export class LocalDevAuthProvider implements AuthProvider {
@@ -102,6 +105,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   private readonly jwtSecret?: string;
   private readonly authClient?: NpatiAuthClient;
   private readonly workspaceStore?: WorkspaceStore;
+  private readonly revocations?: SessionRevocations;
   private readonly devFallback: LocalDevAuthProvider;
   private readonly allowDevFallback: boolean;
   private readonly apiKeysRepository?: ApiKeysRepository;
@@ -120,6 +124,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
     this.jwtSecret = options.jwtSecret || process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET;
     this.authClient = options.authClient;
     this.workspaceStore = options.workspaceStore;
+    this.revocations = options.workspaceStore ? new SessionRevocations(options.workspaceStore) : undefined;
     this.allowDevFallback = options.allowDevFallback ?? false;
     this.apiKeysRepository = options.apiKeysRepository;
     this.remoteTokensManager = options.remoteTokensManager ?? new ScopedRemoteAccessTokenManager();
@@ -367,11 +372,31 @@ export class NpatiBackendAuthProvider implements AuthProvider {
       };
 
       await this.ensureWorkspaceInitialized(authContext);
+      // Sign-outs are stored in the workspace; one that could not be initialized holds none, and reading it would retry the
+      // initialization outside its own retry budget (security gate G1).
+      if (this.isWorkspaceInitialized(workspaceId) && await this.revocations?.isRevoked(authContext, token, (payload as { iat?: number }).iat)) {
+        throw new AuthenticationError("This session was signed out", 401, "TOKEN_REVOKED");
+      }
       return authContext;
     } catch (error) {
       if (error instanceof AuthenticationError) throw error;
       throw new AuthenticationError("Authentication is temporarily unavailable", 503, "AUTH_BACKEND_UNAVAILABLE");
     }
+  }
+
+  /**
+   * Signs out the token of this request (or, with `everywhere`, every token of the person issued so far). Returns false
+   * when the request carries no valid session token, which a sign-out of an already expired page is.
+   */
+  async revokeSession(request: FastifyRequest, everywhere: boolean): Promise<boolean> {
+    const header = request.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    if (!token || !this.revocations || token.startsWith("npati_live_") || token.startsWith("rat_")) return false;
+    let context: AuthContext;
+    try { context = await this.authenticate(request); } catch { return false; }
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { exp?: number };
+    await this.revocations.revoke(context, token, Number(payload.exp) || Math.floor(Date.now() / 1000) + 3600, everywhere);
+    return true;
   }
 
   async verifyToken(token: string): Promise<NpatiJwtPayload> {

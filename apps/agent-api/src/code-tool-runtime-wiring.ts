@@ -40,6 +40,8 @@ import { CodeApprovalPort } from "./code-workspace-checkpoint";
 import { createCodeToolWiring } from "./code-tool-wiring";
 import { AuthContext } from "@npati/workspace";
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
+import { isIrreversibleDataTool } from "./irreversible-actions";
+import { DiskSpaceGuard } from "./disk-space-guard";
 
 export interface CodeToolRuntimeWiringDeps {
   agentDataStudioService?: AgentDataStudioService;
@@ -215,6 +217,7 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
     approvals: codeApprovalPort,
 
     approvalRules: { findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query) },
+    diskSpace: new DiskSpaceGuard(),
     dataAutoAllow: async (ctx, companyId) => featureFlagService.dataAutoAllow?.isOn(ctx, companyId) ?? false,
 
     approvalDecision: approvalsRepo ? {
@@ -226,6 +229,8 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
         const read = async () => {
           const report = await approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null);
           if (report?.status !== "pending" || !action.startsWith("code.data.")) return report;
+          // A deletion of rows, a table or a column keeps waiting for the person (V6 step 17, owner decision).
+          if (isIrreversibleDataTool(report.toolName, (report.inputPayload as { args?: unknown } | undefined)?.args)) return report;
           if (await featureFlagService.dataAutoAllow?.isOn(ctx, companyId).catch(() => false) !== true) return report;
           return await approvalsRepo!.decide(ctx, companyId, approvalId, "approved", "Allowed by the company setting: agents change this company's databases without asking.").catch(() => report);
         };

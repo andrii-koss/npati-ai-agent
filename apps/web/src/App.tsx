@@ -143,6 +143,19 @@ export function ChatUserMenu() {
             >
               {t("userMenu.signOut")} <span aria-hidden="true">&rarr;</span>
             </button>
+            <button
+              type="button"
+              className="chat-user-signout chat-user-signout-all"
+              onClick={() => {
+                closeMenu();
+                void signOutEverywhere(true).catch((cause) => alertModal({
+                  title: t("userMenu.signOutIncompleteTitle"),
+                  message: cause instanceof Error ? cause.message : t("userMenu.signOutIncompleteDesc"),
+                }));
+              }}
+            >
+              {t("userMenu.signOutAllDevices")} <span aria-hidden="true">&rarr;</span>
+            </button>
           </nav>
         </aside>
       )}

@@ -199,6 +199,7 @@ export const core = {
     "memory": "记忆",
     "settings": "设置",
     "signOut": "退出登录",
+    "signOutAllDevices": "在所有设备上退出登录",
     "signOutIncompleteTitle": "退出未完成",
     "signOutIncompleteDesc": "无法退出 npati.com。"
   },
