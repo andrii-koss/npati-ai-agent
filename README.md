@@ -32,13 +32,19 @@ A team of AI agents for your company, with memory, goals, automations, email and
   </tr>
   <tr>
     <td align="center"><a href="#databases-and-data-studio">Databases</a></td>
+    <td align="center"><a href="#one-database-for-many-projects">Shared database</a></td>
     <td align="center"><a href="#companies-and-ai-agents">Companies and agents</a></td>
-    <td align="center"><a href="#business-goals-and-memory">Goals and memory</a></td>
-    <td align="center"><a href="#content">Content</a></td>
+    <td align="center"><a href="#company-page">Company page</a></td>
   </tr>
   <tr>
+    <td align="center"><a href="#business-profile">Business profile</a></td>
+    <td align="center"><a href="#business-goals-and-memory">Goals and memory</a></td>
+    <td align="center"><a href="#content">Content</a></td>
     <td align="center"><a href="#automations">Automations</a></td>
+  </tr>
+  <tr>
     <td align="center"><a href="#email-and-ai-inbox">Email and inbox</a></td>
+    <td align="center"><a href="#ai-inbox">AI inbox</a></td>
     <td align="center"><a href="#integrations-and-telegram">Integrations</a></td>
     <td align="center"><a href="#ai-providers-and-models">AI providers</a></td>
   </tr>
@@ -156,9 +162,13 @@ Your site can show live data from its database: add a product, and it appears in
 
 <img src="docs/media/screenshots/data-studio.png" width="860" alt="Data Studio with tables and rows"/>
 
-<br/><br/>
+</div>
 
-### One database for many projects
+---
+
+<div align="center">
+
+## One database for many projects
 
 Attach several projects of a company to one database: a few websites, a mobile app and a chat or blog<br/>
 all read and write the same data. Each database has a dev and a prod copy, so you test changes first.
@@ -180,9 +190,13 @@ The main agent splits a task and hands parts to the right specialist. An agent o
 
 <sub>Company settings and the agent team.</sub>
 
-<br/><br/>
+</div>
 
-### Company page
+---
+
+<div align="center">
+
+## Company page
 
 Every company has its own page with details and instructions that belong only to that company:<br/>
 website, industry, description, products and services, languages, brand tone and company instructions.<br/>
@@ -191,9 +205,13 @@ to the company knowledge. The AI reads all of this, understands the company and 
 
 <img src="docs/media/company-2.gif" width="860" alt="Company page with details, instructions, memory and knowledge"/>
 
-<br/><br/>
+</div>
 
-### Business profile
+---
+
+<div align="center">
+
+## Business profile
 
 Describe your business idea on the Business page: name, logo, stage (from idea to scaling), industry and niche,<br/>
 country and market, business model, products or services and target audience.<br/>
@@ -260,9 +278,13 @@ spam detection and a block list for unwanted senders.
 
 <sub>Company mailboxes.</sub>
 
-<br/><br/>
+</div>
 
-### AI inbox
+---
+
+<div align="center">
+
+## AI inbox
 
 See every email the AI has answered and follow each conversation as it happens: status, priority and thread history.<br/>
 Reply to any email yourself, send or edit the AI draft, or press Take Over to handle a thread by hand and Return to AI later.<br/>
