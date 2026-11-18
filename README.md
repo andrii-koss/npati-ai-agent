@@ -156,6 +156,15 @@ Your site can show live data from its database: add a product, and it appears in
 
 <img src="docs/media/screenshots/data-studio.png" width="860" alt="Data Studio with tables and rows"/>
 
+<br/><br/>
+
+### One database for many projects
+
+Attach several projects of a company to one database: a few websites, a mobile app and a chat or blog<br/>
+all read and write the same data. Each database has a dev and a prod copy, so you test changes first.
+
+<img src="docs/media/screenshots/data-studio-company.png" width="860" alt="One database with several connected projects"/>
+
 </div>
 
 ---
