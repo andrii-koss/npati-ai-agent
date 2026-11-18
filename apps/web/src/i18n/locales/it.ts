@@ -274,7 +274,7 @@ export const it: TranslationSchema = {
     chatEmptyTitle: "Su cosa vorresti lavorare oggi?",
     chatEmptySubtitle:
       "Chiedi qualunque cosa a NPATI Agent o sviluppa nuove idee.",
-    footerPrefix: "Open-source NPATI Agent · Creato da",
+    footerPrefix: "Source-available NPATI Agent · Creato da",
     footerLink: "NPATI",
     actions: {
       buildWebsite: { title: "Creare un sito web", desc: "Crea siti e landing page con il relativo codice e Live Preview." },

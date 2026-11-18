@@ -266,7 +266,7 @@ export const core = {
     "createAccount": "Criar conta",
     "chatEmptyTitle": "No que vamos trabalhar?",
     "chatEmptySubtitle": "Pergunte qualquer coisa ao NPATI Agent ou explore ideias.",
-    "footerPrefix": "NPATI Agent de código aberto · Criado por",
+    "footerPrefix": "Source-available NPATI Agent · Criado por",
     "footerLink": "NPATI",
     "actions": {
       buildWebsite: { title: "Criar um site", desc: "Crie sites e páginas de destino com código e Live Preview." },

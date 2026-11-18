@@ -266,7 +266,7 @@ export const core = {
     "createAccount": "创建账户",
     "chatEmptyTitle": "我们要做些什么？",
     "chatEmptySubtitle": "向 NPATI Agent 提问，或一起构思创意。",
-    "footerPrefix": "开源 NPATI Agent · 开发者",
+    "footerPrefix": "Source-available NPATI Agent · 开发者",
     "footerLink": "NPATI",
     "actions": {
       buildWebsite: { title: "创建网站", desc: "创建网站和落地页，生成代码并通过 Live Preview 预览。" },

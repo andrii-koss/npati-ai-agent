@@ -230,7 +230,7 @@ export const pl: TranslationSchema = {
     createAccount: "Utwórz konto",
     chatEmptyTitle: "Nad czym chcesz popracować?",
     chatEmptySubtitle: "Zapytaj NPATI Agent o cokolwiek lub rozwijaj nowe pomysły.",
-    footerPrefix: "Open-source NPATI Agent · Stworzone przez",
+    footerPrefix: "Source-available NPATI Agent · Stworzone przez",
     footerLink: "NPATI",
     actions: {
       buildWebsite: { title: "Utwórz stronę internetową", desc: "Twórz strony i landing page z kodem oraz podglądem w Live Preview." },

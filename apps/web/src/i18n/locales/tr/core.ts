@@ -266,7 +266,7 @@ export const core = {
     "createAccount": "Hesap oluştur",
     "chatEmptyTitle": "Ne üzerinde çalışalım?",
     "chatEmptySubtitle": "NPATI Agent'a istediğinizi sorun veya fikirler geliştirin.",
-    "footerPrefix": "Açık kaynaklı NPATI Agent · Geliştiren",
+    "footerPrefix": "Source-available NPATI Agent · Geliştiren",
     "footerLink": "NPATI",
     "actions": {
       buildWebsite: { title: "Web sitesi oluştur", desc: "Kod ve Live Preview ile web siteleri ve açılış sayfaları oluşturun." },
