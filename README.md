@@ -173,15 +173,25 @@ The main agent splits a task and hands parts to the right specialist. An agent o
 
 <br/><br/>
 
-<img src="docs/media/company-2.gif" width="860" alt="Delegating work to an agent"/>
+### Company page
 
-<sub>Handing a task to an agent of the team.</sub>
+Every company has its own page with details and instructions that belong only to that company:<br/>
+website, industry, description, products and services, languages, brand tone and company instructions.<br/>
+Add durable facts and rules to the company memory and upload documents (PDF, DOCX, XLSX, CSV and more)<br/>
+to the company knowledge. The AI reads all of this, understands the company and answers in its context.
+
+<img src="docs/media/company-2.gif" width="860" alt="Company page with details, instructions, memory and knowledge"/>
 
 <br/><br/>
 
-<img src="docs/media/business.gif" width="860" alt="Business profile"/>
+### Business profile
 
-<sub>The business profile the agent uses in every answer.</sub>
+Describe your business idea on the Business page: name, logo, stage (from idea to scaling), industry and niche,<br/>
+country and market, business model, products or services and target audience.<br/>
+Link a goal and memory facts to the business. When the idea is ready, turn it into a company with one click:<br/>
+the profile, goals and confirmed memory move into the new company.
+
+<img src="docs/media/business.gif" width="860" alt="Business profile"/>
 
 </div>
 
@@ -243,9 +253,13 @@ spam detection and a block list for unwanted senders.
 
 <br/><br/>
 
-<img src="docs/media/inbox.gif" width="860" alt="AI inbox"/>
+### AI inbox
 
-<sub>The AI inbox with draft replies you approve.</sub>
+See every email the AI has answered and follow each conversation as it happens: status, priority and thread history.<br/>
+Reply to any email yourself, send or edit the AI draft, or press Take Over to handle a thread by hand and Return to AI later.<br/>
+Mark important customers as VIP, see the customer profile with past conversations, archive threads and mark spam.
+
+<img src="docs/media/inbox.gif" width="860" alt="AI inbox"/>
 
 </div>
 
