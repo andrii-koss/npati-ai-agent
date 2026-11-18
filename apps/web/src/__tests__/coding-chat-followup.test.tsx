@@ -151,7 +151,7 @@ it("keeps Preview outside user messages before and after reloading persisted cha
   loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});
   root=createRoot(host);
   await act(async()=>{root!.render(<MemoryRouter initialEntries={["/c/reload-chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="reload-chat" /></I18nProvider></MemoryRouter>);});
-  // History shows at once and is not held for its steps (03c6795e, docs/performance/2026-11-12-chat-double-flash-audit.md);
+  // History shows at once and is not held for its steps (03c6795e, docs/audit/performance/2026-11-12-chat-double-flash-audit.md);
   // even before the steps arrive the project card and Preview stay out of the user's message.
   expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
   expect(host.querySelector("article.user .project-chat-card")).toBeNull();

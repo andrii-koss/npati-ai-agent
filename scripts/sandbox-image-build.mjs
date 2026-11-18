@@ -97,6 +97,6 @@ if (update) {
 
 // The Dockerfile ARG defaults must stay honest placeholders; report them so the doc stays accurate.
 const nodeDockerfile = readFileSync(dockerfileFor("node"), "utf8");
-if (!/sha256:0{64}/.test(nodeDockerfile)) warn("docker/sandbox/Dockerfile.node no longer carries a placeholder digest; update docs/coding-agent/sandbox-images.md");
+if (!/sha256:0{64}/.test(nodeDockerfile)) warn("docker/sandbox/Dockerfile.node no longer carries a placeholder digest; update docs/audit/coding-agent/sandbox-images.md");
 if (!commandExists("docker")) warn("docker disappeared from PATH; state is inconsistent");
 log(`build step finished for ${targets.length} image(s)`);

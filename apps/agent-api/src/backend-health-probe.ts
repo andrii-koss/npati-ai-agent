@@ -1,5 +1,5 @@
 /* Core backend health probing helpers.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { ServiceHealth } from "@npati/shared";
 

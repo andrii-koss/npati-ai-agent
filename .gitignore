@@ -31,9 +31,9 @@ scripts/e2e-sandbox-check.cjs
 scripts/coding-run-metrics.mjs
 scripts/coding-tool-bench.mjs
 scripts/measure-coding-scenarios.mjs
-docs/NPATI_Code_E2E_Test/
+docs/audit/NPATI_Code_E2E_Test/
 docs/audit/
-docs/coding-agent/e2e-testing/
+docs/audit/coding-agent/e2e-testing/
 tests/coding-agent-step1-tool-calls.test.ts
 tests/coding-agent-step3-omniroute-context.test.ts
 .vscode/

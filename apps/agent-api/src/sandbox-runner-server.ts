@@ -168,7 +168,7 @@ const provider = new DockerSandboxProvider({
   proxyImage: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",
   // R1 (section A, item 4): the R1 start values, and they are now *settings* rather than an undocumented
   // override — the former 1 vCPU / 1536m / 1536 MiB / 128 pids defaults are recorded in
-  // `docs/coding-agent/security-gate-report.md` § R1-A. `NPATI_SANDBOX_MEMORY_MB` wins over the Docker-string
+  // `docs/audit/coding-agent/security-gate-report.md` § R1-A. `NPATI_SANDBOX_MEMORY_MB` wins over the Docker-string
   // form so one number can drive both the flag and the aggregate Company quota.
   cpu: process.env.NPATI_SANDBOX_CPU ?? String(sandboxResourceLimits.cpu),
   memory: process.env.NPATI_SANDBOX_MEMORY ?? sandboxMemoryArg(sandboxResourceLimits.memoryMb),

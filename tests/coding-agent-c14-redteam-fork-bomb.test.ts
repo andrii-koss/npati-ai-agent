@@ -8,7 +8,7 @@ import { buildSandboxCreateArgs, DockerSandboxProvider } from "../apps/agent-api
 import type { SandboxScope } from "../apps/agent-api/src/sandbox-provider";
 
 /**
- * C14 red-team — fork bombs (G1 coverage item 2a of `docs/coding-agent/PLAN.md`: "fork bomb").
+ * C14 red-team — fork bombs (G1 coverage item 2a of `docs/audit/coding-agent/PLAN.md`: "fork bomb").
  *
  * The rule existed (`code-shell-classifier.ts`, `{ id: "fork_bomb", … }` in `HARD_DENY_RULES`) and no test
  * touched it: `grep fork_bomb tests/` returned nothing, so "a fork bomb is hard-denied" was a claim about a

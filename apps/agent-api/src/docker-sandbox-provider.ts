@@ -31,7 +31,7 @@ const defaults: RunnerLimits = {
    * R1 (section A, item 4): the per-sandbox ceilings are the module-level start values of
    * `sandbox-resource-quota.ts` — 2 vCPU / 4096 MB / 10 GiB / 512 pids — and no longer literals local to this
    * file. The change from the previous literals (1 vCPU / 1536m / 1536 MiB / 128 pids) is explicit and is
-   * recorded in `docs/coding-agent/r1a-limits-and-quotas-report.md`; a deployment overrides every one of them
+   * recorded in `docs/audit/coding-agent/r1a-limits-and-quotas-report.md`; a deployment overrides every one of them
    * with `NPATI_SANDBOX_CPU/MEMORY/DISK_BYTES/PIDS`, which the sandbox runner reads.
    *
    * Single-sourced on purpose: the aggregate Company quota multiplies these same values, so a ceiling that

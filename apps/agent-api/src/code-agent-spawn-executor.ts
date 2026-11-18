@@ -28,7 +28,7 @@ import type { CodeActivityEventIdentity } from "./code-run-activity-sink";
  * by the existing `SubagentToolPolicyGuard`, the model profile by the existing `code-model-profiles.ts`, the
  * claim "how many children may be in flight" by `clampCodeSubagentParallelism` in the canonical limits module,
  * and the record of the delegation by the existing C6b Activity sink. A second engine here would be exactly
- * what `docs/coding-agent/00-audit.md:476-477` forbids.
+ * what `docs/audit/coding-agent/00-audit.md:476-477` forbids.
  *
  * The four things this file is responsible for, in the order they happen:
  *

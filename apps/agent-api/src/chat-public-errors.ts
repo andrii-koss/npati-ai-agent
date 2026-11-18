@@ -1,5 +1,5 @@
 /* Client-safe chat and company-run messages.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 import { companyRunNotices } from "./company-run-notice-i18n";

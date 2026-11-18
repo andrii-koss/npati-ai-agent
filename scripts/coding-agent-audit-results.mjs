@@ -45,5 +45,5 @@ if (final) {
   } else out.push("", "No failing assertions in this execution. This does not certify the conditional skips or complete autonomous A-L acceptance.");
 }
 out.push("", "## Remaining acceptance", "", "A–L remain Partial/Untested as detailed in the audit. No live-model coding quality, production crash recovery, automatic CI, production image trust, exhaustive prompt injection/SSRF/resource exhaustion or lossless DB/SSE trace guarantee has been claimed.", "");
-fs.writeFileSync("docs/coding-agent/2026-10-15-verification-results.md", out.join("\n"));
-console.log("Updated docs/coding-agent/2026-10-15-verification-results.md");
+fs.writeFileSync("docs/audit/coding-agent/2026-10-15-verification-results.md", out.join("\n"));
+console.log("Updated docs/audit/coding-agent/2026-10-15-verification-results.md");

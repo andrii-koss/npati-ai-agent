@@ -1,5 +1,5 @@
 /* Source-level contracts: the tests that assert on the *composition* used to read
- * `apps/agent-api/src/app.ts` as text. After step 2 of docs/refactoring/PLAN.md the composition lives in
+ * `apps/agent-api/src/app.ts` as text. After step 2 of docs/audit/refactoring/PLAN.md the composition lives in
  * several modules (app.ts plus the per-domain `*-wiring.ts` / `*-routes.ts` files), so reading app.ts alone
  * both misses the moved code and breaks every time a block moves.
  *

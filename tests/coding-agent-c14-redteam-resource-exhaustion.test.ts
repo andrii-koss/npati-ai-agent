@@ -24,7 +24,7 @@ import { enforceOutputBudget, wrapToolResult } from "../apps/agent-api/src/code-
  *    envelope's output budget, with an explicit truncation marker rather than silent loss;
  *  - a command cannot be arbitrarily long and cannot ask for an arbitrarily long run time.
  *
- * Honest limit (see `docs/coding-agent/security-gate-report.md`): the caps are asserted on the argument line
+ * Honest limit (see `docs/audit/coding-agent/security-gate-report.md`): the caps are asserted on the argument line
  * and on the provider's validation, not by observing a real kernel OOM. A real-container check is part of the
  * manual G1 checklist, not of this hermetic suite.
  */

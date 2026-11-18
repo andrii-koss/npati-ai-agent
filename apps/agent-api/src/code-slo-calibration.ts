@@ -15,7 +15,7 @@
  *  2. **not_measured** — an R1 SLO target the corpus has no source for (sandbox start, queue wait, tool error
  *     rate, recovery rate, provider fallback, run latency, approvals share, quota use, and the production
  *     per-run cost median the R1 cost alert is defined against). Each names **why** and where a real measurement
- *     would have to come from. These keep their R1 reference values in `docs/coding-agent/PLAN.md` and are
+ *     would have to come from. These keep their R1 reference values in `docs/audit/coding-agent/PLAN.md` and are
  *     reported here as unconfirmed; nothing in this module invents a number for them.
  *  3. **proposed** — a threshold derived from a measured statistic with an explicitly stated headroom, or R1's
  *     own reference value **with the effect it has on the measured population** reported beside it. A proposal

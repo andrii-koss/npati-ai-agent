@@ -1,5 +1,5 @@
 /* Chat reply telemetry headers.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { CostTelemetry } from "./cost-telemetry";
 import { AgentReply } from "@npati/shared";

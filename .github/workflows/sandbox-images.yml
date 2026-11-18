@@ -13,7 +13,7 @@ name: Sandbox images
 # without starting, so the weekly rescan never ran and the push trigger only produced a red signal. No job and no
 # step was removed, and the removed triggers are kept verbatim in the RE-ENABLE RECIPE after the `on:` block, so
 # restoring them is one commit. This is an **accepted risk** recorded in
-# `docs/coding-agent/security-gate-report.md` §6: while it holds, the 14-day catalog age policy is enforced only
+# `docs/audit/coding-agent/security-gate-report.md` §6: while it holds, the 14-day catalog age policy is enforced only
 # by the local guard (`npm run audit:sandbox-images`) and by the security gate on the owner's escalated run, not
 # by a scheduled rebuild.
 on:

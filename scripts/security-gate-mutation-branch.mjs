@@ -17,7 +17,7 @@
  * path guard (`normalizeWorkspacePath`), which has **no** injection seam, becomes mutation-testable for the
  * first time.
  *
- * The protocol, per row of `docs/coding-agent/mutation-controls.json`:
+ * The protocol, per row of `docs/audit/coding-agent/mutation-controls.json`:
  *
  *   1. `git worktree add --detach <tmp> HEAD` — an isolated checkout. The user's working tree is never edited,
  *      and the worktree lives outside the repository, so `git status` cannot be dirtied by a crash.
@@ -565,7 +565,7 @@ export function mirrorWorkingTree(root, worktree, log = () => {}) {
  * entry here answers "which gate test or gate step fails without this?", and an ignored path that fails that
  * question stays out.
  *
- * Note the hermeticity finding this list recorded (see `docs/coding-agent/security-gate-report.md`): the
+ * Note the hermeticity finding this list recorded (see `docs/audit/coding-agent/security-gate-report.md`): the
  * mandatory `security-gate` job depends on `data/typosquat`, which `.gitignore` excludes and which `npm ci` does
  * not create. G1 (item 5) closed the dependency rather than the mirror: the gate's own preparation phase
  * (`prepareTyposquatDataset` in `scripts/lib/run-security-gate.mjs`) generates a **missing** dataset before

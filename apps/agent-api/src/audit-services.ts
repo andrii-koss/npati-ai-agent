@@ -1,5 +1,5 @@
 /* Audit and privileged-decision journal wiring, extracted from app.ts
- * (step 2b of docs/refactoring/PLAN.md).
+ * (step 2b of docs/audit/refactoring/PLAN.md).
  *
  * The code is moved verbatim. The only edits are the five closure locals that became
  * parameters: config.databaseUrl -> databaseUrl, config.dataDirectory -> dataDirectory,

@@ -29,7 +29,7 @@ import { readFileLines, wrapToolResult, type CodeReadPort } from "../apps/agent-
  *   4. the untrusted-data output budget (`code-tools-fs.ts`, `wrapToolResult`'s `maxChars`);
  *   5. the sensitive-file read policy (`code-tools-fs.ts`, `readFileLines`'s `sensitivePolicy`).
  *
- * Honest limit (recorded in `docs/coding-agent/security-gate-report.md`): the workspace-relative **path**
+ * Honest limit (recorded in `docs/audit/coding-agent/security-gate-report.md`): the workspace-relative **path**
  * guard (`normalizeWorkspacePath`) has no injection seam — it is a total function whose policy is hard-coded,
  * which is the right design — and the harness these suites are verified with has no module-mocking facility,
  * so that guard is proved by refusal/acceptance pairs and by the containment invariant instead of by a

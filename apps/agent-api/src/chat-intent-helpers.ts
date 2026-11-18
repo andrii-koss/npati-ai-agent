@@ -1,5 +1,5 @@
 /* Chat intent detection and onboarding helpers.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { isCompanyDeleteConfirmed, isCompanyDeleteIntent } from "./company-delete-i18n";

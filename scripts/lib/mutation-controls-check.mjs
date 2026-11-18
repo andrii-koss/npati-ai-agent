@@ -33,7 +33,7 @@ import path from "node:path";
 import { itTitlesIn } from "./attack-catalogue-check.mjs";
 
 /** The matrix's location, relative to the repository root. */
-export const MUTATION_CONTROLS_PATH = "docs/coding-agent/mutation-controls.json";
+export const MUTATION_CONTROLS_PATH = "docs/audit/coding-agent/mutation-controls.json";
 
 /**
  * G1 (item 5): where the gate's fixed suite list lives now that the gate is split into a library and a thin

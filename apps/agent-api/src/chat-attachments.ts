@@ -1,5 +1,5 @@
 /* Chat attachments: input types, decoding and prompt assembly.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { extractDocumentText, inferMimeType } from "./document-extractor";
 import { AIEngine } from "@npati/omniroute-adapter";

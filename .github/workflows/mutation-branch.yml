@@ -6,7 +6,7 @@ name: Mutation branch (decoy)
 # are load-bearing in their own seam; it never runs the gate, so it cannot answer "would `security-gate` fail if
 # this protection were deleted from the source?". `scripts/security-gate-mutation-branch.mjs` answers exactly
 # that: it mirrors the tree under review into an isolated `git worktree`, weakens ONE guard from
-# `docs/coding-agent/mutation-controls.json`, runs the **real** `scripts/run-security-gate.mjs` and requires the
+# `docs/audit/coding-agent/mutation-controls.json`, runs the **real** `scripts/run-security-gate.mjs` and requires the
 # test the matrix names to be among the failures — with a cosmetic mutation (a comment in the guarded file) as
 # the negative control, so "the gate is sensitive" cannot be confused with "the gate fails on any change".
 #
@@ -22,7 +22,7 @@ name: Mutation branch (decoy)
 # every automatic run failed in about 2 seconds without starting, so the weekly proof never ran. This workflow now
 # runs only through `workflow_dispatch`. No job and no step was removed, the removed trigger is kept verbatim in
 # the RE-ENABLE RECIPE below (one commit to restore), and the consequences are recorded as an **accepted risk** in
-# `docs/coding-agent/security-gate-report.md` §6: while it holds, the decoy-branch proof is executed only when a
+# `docs/audit/coding-agent/security-gate-report.md` §6: while it holds, the decoy-branch proof is executed only when a
 # human dispatches it or runs `npm run mutation:branch` locally.
 #
 # The run's honest failure modes are visible in the artifact: exit 1 means the proof FAILED (a decoy was not
@@ -76,7 +76,7 @@ jobs:
       # and which test did (or did not) fail. `error` keeps the repo's contract that a run producing no evidence
       # is a failed job — the same rule the eval and security-gate jobs use. The gate transcripts are uploaded
       # beside the verdict: the verdict names what failed, and the transcript is where the *reason* is
-      # (the first version truncated exactly those lines away, see docs/coding-agent/security-gate-report.md).
+      # (the first version truncated exactly those lines away, see docs/audit/coding-agent/security-gate-report.md).
       - name: Keep the mutation verdict and the gate transcripts as evidence
         if: always()
         uses: actions/upload-artifact@v4

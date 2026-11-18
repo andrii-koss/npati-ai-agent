@@ -1,5 +1,5 @@
 /* Spreadsheet and column directives applied to chat answers.
- * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
+ * Extracted verbatim from app.ts (step 2a of docs/audit/refactoring/PLAN.md).
  */
 import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { extractTargetUrlOrDomain } from "@npati/web-research";

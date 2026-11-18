@@ -273,7 +273,7 @@ export class ProjectSandboxService {
     }
     if (!sandboxId) {
       // A sandbox is a scoped runtime identity, not necessarily a container.
-      // Frozen local decision: docs/website-builder/SHARED_PROJECT_RUNTIME.md.
+      // Frozen local decision: docs/audit/website-builder/SHARED_PROJECT_RUNTIME.md.
       // Shared provider creates/reuses a project directory; never fall back to Docker here.
       const created = await this.provider.createSandbox(scope, { runtime: project.runtime, ...(mount ? { mount } : {}) });
       try { project = await this.store.setProjectSandbox(ctx, project.companyId, project.id, created.id, project.sandboxId ?? null); }

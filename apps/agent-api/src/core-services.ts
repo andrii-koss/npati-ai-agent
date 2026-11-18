@@ -1,4 +1,4 @@
-/* Core platform services, extracted from app.ts (step 2b of docs/refactoring/PLAN.md).
+/* Core platform services, extracted from app.ts (step 2b of docs/audit/refactoring/PLAN.md).
  *
  * Web research and the marketplace, the project-document store, object storage, files,
  * authentication, preferences, memory engines and the guardrail/approval repositories.

@@ -23,7 +23,7 @@ import { normalizeWorkspacePath } from "../apps/agent-api/src/code-tools-path";
  *    the guard deliberately does not normalise;
  *  - the guard discriminates: a benign sibling archive extracts with exactly its own paths.
  *
- * Honest limits (see `docs/coding-agent/security-gate-report.md`): the extractor's duplicate detection is
+ * Honest limits (see `docs/audit/coding-agent/security-gate-report.md`): the extractor's duplicate detection is
  * **not** Unicode-normalised, so two spellings of one name (NFC and NFD) are accepted as two entries; and the
  * `path.resolve` containment proof is a statement about the guard's output, not about a real filesystem write.
  */

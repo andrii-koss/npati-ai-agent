@@ -2,7 +2,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createHmac, randomUUID } from "node:crypto";
 
-/** Frozen decision: docs/website-builder/SHARED_PROJECT_RUNTIME.md. Transport locality
+/** Frozen decision: docs/audit/website-builder/SHARED_PROJECT_RUNTIME.md. Transport locality
  * and execution architecture are separate; shared must never fall back to Docker. */
 export type ProjectRuntimeMode = "shared" | "isolated";
 export function projectRuntimeMode(env: Record<string, string | undefined> = process.env): ProjectRuntimeMode {

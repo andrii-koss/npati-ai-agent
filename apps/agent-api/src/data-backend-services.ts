@@ -1,5 +1,5 @@
 /* Data-backend, provisioning and project-auth services, extracted from app.ts
- * (step 2b-3 of docs/refactoring/PLAN.md).
+ * (step 2b-3 of docs/audit/refactoring/PLAN.md).
  *
  * Shared vs external Postgres provisioners, the quota/promote/backup services, the Project
  * Auth service and the scheduled backup tick. The code is moved verbatim; the edits are the

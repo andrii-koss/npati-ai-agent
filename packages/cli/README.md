@@ -63,7 +63,7 @@ prompt), `2` a usage or configuration failure (a missing token, a refused `--tok
   returns `null` for a key principal and the session-mode matrix does not apply to it (`permissionsForRole(null) =
   []`). Everything rests on the key's scopes. Giving a key a role would *widen* it, which is the opposite of what a
   scope list means — the boundary and what it would take to change it are in
-  [`docs/coding-agent/ide-protocol.md`](../../docs/coding-agent/ide-protocol.md) § 2.1.
+  [`docs/audit/coding-agent/ide-protocol.md`](../../docs/audit/coding-agent/ide-protocol.md) § 2.1.
 * **The CLI never decides.** `code.run.start` → `workspace:write`, `decide` → `business:manage`, the master flag and
   the run queue are all enforced server-side; a key that is not scoped for a run is refused by the API, not by this
   client.

@@ -54,7 +54,7 @@ import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
  *    either reconnects with `fromSeq` or polls `GET …/background`. Because registration happens before the `202`,
  *    a client that subscribes immediately cannot miss the run's first event.
  *  - **Approvals**: the **existing** `/approvals` list/get/decide routes. This module never decides an approval and
- *    never invents an approval action; see `docs/coding-agent/ide-protocol.md`.
+ *    never invents an approval action; see `docs/audit/coding-agent/ide-protocol.md`.
  *  - **Versioning**: `withApiVersion` on every response and `x-npati-api-version` on the way in, through the shared
  *    C1a helper — the version this route answers with is the same `v1` every other code route answers with.
  *
