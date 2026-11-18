@@ -35,3 +35,23 @@ export function researchEvidenceContext(entries: ConversationResearchEvidence[],
   return "[Research evidence recorded in this conversation, verbatim; newest last. When the user asks about earlier research, "
     + "cite these exact sources and counts instead of the summary, and say what is missing rather than guessing.]\n" + body;
 }
+
+/**
+ * The research of one turn across all its searches. A turn that searched five times kept only the last search: when that
+ * one found nothing, the reply lost the sources its facts came from (Minfin, ATB) and was reported as unsourced
+ * (V6 step 20, zh research). Sources are kept in order without duplicates; "degraded" stays only when nothing was found.
+ */
+export function mergeResearchOutcomes(previous: ResearchOutcome | undefined, next: ResearchOutcome): ResearchOutcome {
+  if (!previous) return next;
+  const sources = [...previous.sources];
+  for (const source of next.sources) if (!sources.some((known) => known.url === source.url)) sources.push(source);
+  const pageCount = previous.pageCount === undefined && next.pageCount === undefined ? undefined : (previous.pageCount ?? 0) + (next.pageCount ?? 0);
+  const degraded = sources.length ? undefined : next.degraded ?? previous.degraded;
+  return {
+    kind: next.kind,
+    context: [previous.context, next.context].filter(Boolean).join("\n\n"),
+    sources,
+    ...(pageCount !== undefined ? { pageCount } : {}),
+    ...(degraded ? { degraded } : {}),
+  };
+}

@@ -50,7 +50,7 @@ import { ContextBuilder } from "@npati/agent";
 import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
 import { defaultSkillRegistry } from "@npati/skills";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
-import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
+import { mergeResearchOutcomes, researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
 import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
 import { visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business } from "@npati/workspace";
@@ -327,8 +327,8 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           if (item.kind === "workspace_action" && item.outcome) nativeWorkspaceResult = item.outcome as NonNullable<typeof nativeWorkspaceResult>;
           if (item.kind === "email_action" && item.outcome) nativeEmailResult = item.outcome as NonNullable<typeof nativeEmailResult>;
           if (item.kind === "research" && item.research) {
-            research = item.research as ResearchOutcome;
-            researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: research });
+            research = mergeResearchOutcomes(research, item.research as ResearchOutcome);
+            researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: item.research as ResearchOutcome });
           }
           if (item.kind === "business_profile" && item.outcome) {
             const outcome = item.outcome as { action: "create" | "update"; businessId: string };

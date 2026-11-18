@@ -25,7 +25,7 @@ import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { WORKSPACE_READ_ACTIONS, WorkspaceChatActions } from "./workspace-chat-actions";
 import { AIEngine, ChatContentPart, ChatRequest } from "@npati/omniroute-adapter";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
-import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
+import { mergeResearchOutcomes, researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
 import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
 import { projectCapabilityUnavailableMessage, visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business, type Project } from "@npati/workspace";
@@ -536,8 +536,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
           if (item.kind === "email_action" && item.outcome) nativeEmailResult = item.outcome as typeof nativeEmailResult;
           if (item.kind === "approval" && item.approval) pendingApprovals.push(item.approval as (typeof pendingApprovals)[number]);
           if (item.kind === "research" && item.research) {
-            research = item.research as ResearchOutcome;
-            researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safeUserRequest), outcome: research });
+            research = mergeResearchOutcomes(research, item.research as ResearchOutcome);
+            researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safeUserRequest), outcome: item.research as ResearchOutcome });
           }
           if (item.kind === "business_profile" && item.outcome) {
             const outcome = item.outcome as { action: "create" | "update"; businessId: string };
