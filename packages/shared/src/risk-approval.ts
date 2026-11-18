@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 const createHash = (...args: Parameters<typeof crypto.createHash>) => crypto.createHash(...args);
 const createHmac = (...args: Parameters<typeof crypto.createHmac>) => crypto.createHmac(...args);
 const randomUUID = (...args: Parameters<typeof crypto.randomUUID>) => crypto.randomUUID(...args);
+const randomBytes = (size: number): Buffer => crypto.randomBytes(size);
 
 import type { CapabilityRisk } from "./capabilities";
 
@@ -31,15 +32,22 @@ export interface TokenVerificationResult {
   reasonCode?: "expired" | "payload_mismatch" | "cross_user" | "already_consumed" | "invalid_signature" | "context_mismatch";
 }
 
-const DEFAULT_SECRET = "npati-approval-secret-vault-key-2026";
+// No built-in key: the source is public. Without an explicit secret, one random key is made on first use and
+// shared by every service in this process (created lazily, so the browser bundle never calls Node crypto).
+let processSecret: string | undefined;
+const defaultSecret = () => (processSecret ??= randomBytes(32).toString("hex"));
 const DEFAULT_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 export class RiskApprovalService {
-  private readonly secret: string;
+  private readonly explicitSecret?: string;
   private readonly consumedTokens = new Set<string>();
 
-  constructor(secret = DEFAULT_SECRET) {
-    this.secret = secret;
+  constructor(secret?: string) {
+    this.explicitSecret = secret;
+  }
+
+  private get secret(): string {
+    return this.explicitSecret ?? defaultSecret();
   }
 
   classifyRisk(toolName: string): RiskLevel {
