@@ -1,7 +1,6 @@
 # NPATI Agent documentation
 
 - `media/`: GIFs and screenshots used in the main README.
-- `audit/`: internal development notes, audits, plans and test reports.
 
 User guide pages (planned):
 

@@ -18,7 +18,7 @@ import { SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
  *    first appearance of each phase name inside `evaluateInternal`, then fails when either comment omits a
  *    declared phase, names something that is not one, or states them in another order than the engine
  *    reaches them. A phase added to the union and forgotten in a comment is therefore a red suite.
- * 2. **The gate's size.** `docs/audit/coding-agent/security-gate-report.md` stated 138 while the fixed list in
+ * 2. **The gate's size.** `security-gate/security-gate-report.md` stated 138 while the fixed list in
  *    `scripts/run-security-gate.mjs` held 144. The document is now read as data, every place it states the
  *    current size (the canonical sentence, the `--list` row, a bold number after an arrow, and the
  *    `suites=`/`present=` pair) must agree with the list, and the list itself is read twice — parsed out of
@@ -46,7 +46,7 @@ const WIRING_PATH = "apps/agent-api/src/code-sandbox-wiring.ts";
  * the shebang and re-exports the library.
  */
 const GATE_SCRIPT_PATH = "scripts/lib/run-security-gate.mjs";
-const REPORT_PATH = "docs/audit/coding-agent/security-gate-report.md";
+const REPORT_PATH = "security-gate/security-gate-report.md";
 
 /** The method whose call sites are the order of execution, and the two comments that describe it. */
 const ENGINE_SIGNATURE = "private async evaluateInternal(request: PolicyRequest): Promise<PolicyResult>";

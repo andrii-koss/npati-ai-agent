@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "G1 item 3 (decoy branch). Each row is ONE deterministic mutation of the repository source that `scripts/security-gate-mutation-branch.mjs` applies inside an isolated `git worktree` and then judges by the exit code of the REAL `scripts/run-security-gate.mjs`. A `decoy` row weakens a named guard and must make the gate red; a `cosmetic` row changes a line that controls nothing and must leave the gate green. The cosmetic row is not decoration: without it, 'the gate is sensitive' would be indistinguishable from 'the gate fails on anything'. `scripts/mutation-controls-check.mjs` (run by the gate before vitest) resolves every row against the real file, the real anchor, the named suite and the named test title, and refuses a matrix that has no cosmetic control.",
+  "controls": [
+    {
+      "id": "branch.fork_bomb_rule_removed",
+      "kind": "decoy",
+      "op": "delete_line",
+      "file": "apps/agent-api/src/code-shell-classifier.ts",
+      "find": "{ id: \"fork_bomb\", pattern:",
+      "replace": null,
+      "expectedGateExit": 1,
+      "expectedFailingSuite": "tests/coding-agent-c14-redteam-fork-bomb.test.ts",
+      "expectedFailingTest": "hard-denies every spelling of a fork bomb, including the multi-line one the rule used to miss",
+      "inMemoryCounterpart": "hard_deny_rule.fork_bomb",
+      "rationale": "Deleting the whole `fork_bomb` entry from the frozen HARD_DENY_RULES table is the smallest edit that removes a guard from the shipped code rather than from a call: the rule object no longer exists, so no option, port or cache can restore it. The C14 red-team suite hard-denies eight spellings of the same command and names the rule in `matched`, so a classifier without the rule degrades the command to `approval` and that suite must fail. The in-memory control `hard_deny_rule.fork_bomb` proves the same guard is load-bearing inside its own seam; this row proves the gate itself reports the loss."
+    },
+    {
+      "id": "branch.workspace_path_traversal_guard",
+      "kind": "decoy",
+      "op": "replace",
+      "file": "apps/agent-api/src/code-tools-path.ts",
+      "find": "if (segment === \"..\") {",
+      "replace": "if (segment === \"..\" && segments[0] === \"..\") {",
+      "expectedGateExit": 1,
+      "expectedFailingSuite": "tests/coding-agent-c14-redteam-path-and-zip-slip.test.ts",
+      "expectedFailingTest": "refuses the same separator and length spellings at the workspace-relative path guard",
+      "inMemoryCounterpart": null,
+      "rationale": "The workspace-relative path guard is a total function with hard-coded policy, so it has no injection seam and the in-memory mutation suite cannot neutralise it (that gap is recorded in the report). Mutating the file on disk needs no seam: the edit only refuses a leading `..` and lets a traversal hide behind a first segment, so `a//../b`, `nested/./../../x` and `src/../x` stop being `path_outside_workspace` and the path suite that pins those spellings must fail. If this row is NOT caught, the honest conclusion is that the path guard is under-covered by the gate — the runner reports that as a finding instead of rounding it up."
+    },
+    {
+      "id": "control.comment_only_in_the_guarded_file",
+      "kind": "cosmetic",
+      "op": "replace",
+      "file": "apps/agent-api/src/code-tools-path.ts",
+      "find": " * C2: path safety for the read-only code tools.",
+      "replace": " * C2: path safety for the read-only code tools (comment-only control).",
+      "expectedGateExit": 0,
+      "expectedFailingSuite": null,
+      "expectedFailingTest": null,
+      "inMemoryCounterpart": null,
+      "rationale": "The negative direction. The edit lands in the SAME file the traversal decoy edits, so the two runs differ in one thing only: whether a guard was weakened. It is a module-doc comment, which no suite reads (the suites import this module's functions; nothing asserts its prose), so a red gate here would mean the gate reacts to a touched file rather than to a removed control — and every 'the gate caught the mutation' claim above would then be worthless."
+    }
+  ]
+}

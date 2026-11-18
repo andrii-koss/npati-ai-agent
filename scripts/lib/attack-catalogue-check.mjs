@@ -1,7 +1,7 @@
 /**
  * C14: the machine-readable attack catalogue and its guard.
  *
- * `docs/audit/coding-agent/PLAN.md` (G1) asks for a red-team set and for proof that it fails when a protection is
+ * `security-gate/PLAN.md` (G1) asks for a red-team set and for proof that it fails when a protection is
  * removed. A list of attack *classes* in prose cannot do that: it cannot rot loudly. This module makes the
  * catalogue an artifact with a contract, in the same shape as `run-security-gate.mjs`'s fixed suite list:
  *
@@ -27,7 +27,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /** The catalogue's location, relative to the repository root. */
-export const ATTACK_CATALOGUE_PATH = "docs/audit/coding-agent/attack-catalogue.json";
+export const ATTACK_CATALOGUE_PATH = "security-gate/attack-catalogue.json";
 
 /** The statuses a row may declare. `measured-limitation` is the honest one: measured, not defended. */
 export const CATALOGUE_STATUSES = ["covered", "measured-limitation"];

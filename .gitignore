@@ -16,6 +16,7 @@ artifacts/
 test-results/
 playwright-report/
 screenshots/
+!docs/media/screenshots/
 videos/
 traces/
 downloads/

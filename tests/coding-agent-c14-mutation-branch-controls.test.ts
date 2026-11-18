@@ -43,7 +43,7 @@ import {
  * of this gate: it is a separate command (`npm run mutation:branch`). What *is* part of the gate is the
  * contract that makes that command honest, and that is what this suite pins:
  *
- *  1. **the matrix resolves** — `docs/audit/coding-agent/mutation-controls.json` against the real files: every anchor
+ *  1. **the matrix resolves** — `security-gate/mutation-controls.json` against the real files: every anchor
  *     occurs exactly once, every declared failing test exists as `it("…")` in a suite the gate really runs, and
  *     the matrix cannot lose its negative direction (a matrix of only decoys cannot tell "sensitive" from
  *     "fails on anything", and the guard refuses it);
@@ -55,7 +55,7 @@ import {
  *     and a decoy that leaves the gate green is `not_caught`. That classification is the only thing standing
  *     between "the suite caught the mutation" and "the sandbox could not run the suite".
  *
- * Honest limits, recorded in `docs/audit/coding-agent/security-gate-report.md`: the gate run itself is not executed
+ * Honest limits, recorded in `security-gate/security-gate-report.md`: the gate run itself is not executed
  * here (it needs git, a full worktree and two full gate runs), so this suite proves the *contract* and the
  * *reader*, not the observation. The observation is the runner's output artifact
  * (`artifacts/security-gate-mutation-branch.json`).
@@ -122,7 +122,7 @@ describe("security-gate: G1 — the branch-mutation matrix resolves against the 
     expect(matrixVerdict.ok).toBe(true);
     expect(matrixVerdict.counts.decoy).toBeGreaterThanOrEqual(1);
     expect(matrixVerdict.counts.cosmetic).toBeGreaterThanOrEqual(1);
-    expect(MUTATION_CONTROLS_PATH).toBe("docs/audit/coding-agent/mutation-controls.json");
+    expect(MUTATION_CONTROLS_PATH).toBe("security-gate/mutation-controls.json");
   });
 
   it("the guard reads the suites from the gate, not from a copy: every declared failing suite is one the gate runs", () => {

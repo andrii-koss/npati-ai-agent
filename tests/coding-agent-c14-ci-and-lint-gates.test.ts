@@ -329,7 +329,7 @@ describe("[C14] [security-gate] the CI workflow's gate structure is intact and i
       ".env.production.example",
       ".github/workflows/**",
       // G1 (D21): the filter is *addressable*, not only globbed. `docs/**` is in it because the gate-size guard
-      // reads the number of suites out of `docs/audit/coding-agent/security-gate-report.md`, so a documentation edit
+      // reads the number of suites out of `security-gate/security-gate-report.md`, so a documentation edit
       // can make a gate suite red — "docs-only changes do not need CI" was true before that guard existed.
       "docs/**",
     ]) {
@@ -540,7 +540,7 @@ describe("[C14] [security-gate] the CI workflow's gate structure is intact and i
  * The owner disabled automated CI because the repository is private and has no paid Actions minutes: every job of
  * the last automatic run failed in about two seconds without starting, so the checks were never evidence. The risk
  * of that decision (nothing blocks a merge or a release any more) is recorded in
- * `docs/audit/coding-agent/security-gate-report.md` §6; what this suite owns is the *configuration* half: automatic
+ * `security-gate/security-gate-report.md` §6; what this suite owns is the *configuration* half: automatic
  * triggers do not come back by accident, the configuration is not deleted, and the disabled triggers are
  * documented precisely enough to be restored in one commit.
  */

@@ -30,7 +30,7 @@ import {
  * `ports.modelProfiles` was declared and read, the flag key had been allowlisted since C1a, the registry was
  * built and unit-tested — and the composition never supplied the port, so `enabledProfileIds` never reached
  * `resolveModelProfile`. A deployment could not enable or exclude one profile, while
- * `docs/audit/coding-agent/current-state.md` claimed the ExecutionSnapshot recorded "with which profile the run
+ * `security-gate/current-state.md` claimed the ExecutionSnapshot recorded "with which profile the run
  * executed" as if that profile were the deployment's choice.
  *
  * Three independent layers, because each catches a different half:
@@ -363,7 +363,7 @@ describe("[C14] [security-gate] the model-profile port is wired in the compositi
   });
 
   it("keeps the current-state note honest about what the snapshot records", () => {
-    const doc = readFileSync(path.join(workspaceRoot, "docs", "audit", "coding-agent", "current-state.md"), "utf8");
+    const doc = readFileSync(path.join(workspaceRoot, "security-gate", "current-state.md"), "utf8");
     // The claim may not go back to asserting the recorded profile is the deployment's without the wiring.
     expect(doc).toContain("C14 correction");
     expect(doc).toContain("code.model_profile.");

@@ -21,9 +21,9 @@ name: CI
 # THIS IS AN ACCEPTED RISK, NOT A FIX. With no automatic trigger the mandatory security gate blocks no merge and
 # no release, `npm run test:known-failures` never runs on a push, and the only thing that executes the gate is the
 # owner's local escalated run — a compensating control that is **manual** and depends on discipline. It is
-# recorded with an owner and an expiry in `docs/audit/coding-agent/security-gate-report.md` §6, and its effect on the G1
+# recorded with an owner and an expiry in `security-gate/security-gate-report.md` §6, and its effect on the G1
 # requirement "a separate mandatory CI job (not skipped, blocks merge/release)" is stated in
-# `docs/audit/coding-agent/current-state.md` rather than left silent.
+# `security-gate/current-state.md` rather than left silent.
 #
 # Two invariants this file must keep (pinned by `tests/coding-agent-c14-ci-and-lint-gates.test.ts`):
 #   1. no step uses `continue-on-error`, so a failure in any step fails its job;
@@ -43,7 +43,7 @@ on:
 #      unverified; its cron is the `(schedule)` block below (the sandbox image rebuild runs at 03:00 the same day);
 #   4. keep the security-gate job unconditional (no path filter, no `if:`) — see invariant 2.
 # G1 (D21): `docs/**` is in the list because the gate-size guard reads the number of suites out of
-# `docs/audit/coding-agent/security-gate-report.md`, so a documentation edit can make a gate suite red. The list also
+# `security-gate/security-gate-report.md`, so a documentation edit can make a gate suite red. The list also
 # names the security-critical surfaces (sandbox provider/runner, tool registry and runtime, policy engine, shell
 # classifier, the agent runner) explicitly beside the `apps/**` glob, so narrowing that glob later cannot silently
 # drop them.
@@ -95,7 +95,7 @@ jobs:
     # C4a/SG-1: mandatory. Security-gate suites must never fail, be skipped or be weakened, so this job
     # has no `continue-on-error` and no path filter — a failure blocks the workflow. Since G1 the workflow runs
     # on manual dispatch only, so "blocks the workflow" is true of a dispatched run and is **not** a merge or
-    # release gate today; see the header and `docs/audit/coding-agent/security-gate-report.md` §6 item 11.
+    # release gate today; see the header and `security-gate/security-gate-report.md` §6 item 11.
     name: Security gate (SG-1)
     runs-on: ubuntu-24.04
     steps:

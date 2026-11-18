@@ -7,7 +7,7 @@ source remains in `vendor/omniroute` for audit and controlled upgrades.
 
 Data Studio (project databases, Project Auth, promote, backups, quotas and
 external databases) has its own operations guide:
-[`docs/audit/data-studio/SELF_HOSTING.md`](../docs/audit/data-studio/SELF_HOSTING.md). It
+[`DATA_STUDIO_SELF_HOSTING.md`](DATA_STUDIO_SELF_HOSTING.md). It
 covers the `data-studio` / `local-sandbox` compose profiles, the snapshot volume,
 every Data Studio environment variable, the promote workflow, backup/restore and
 retention, quotas and troubleshooting codes.

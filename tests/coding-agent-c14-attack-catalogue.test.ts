@@ -14,7 +14,7 @@ import { HARD_DENY_RULES, classifyShellCommand } from "../apps/agent-api/src/cod
 /**
  * C14 — the attack catalogue is an artifact with a contract, not prose.
  *
- * `docs/audit/coding-agent/attack-catalogue.json` names one row per attack class: the class, the suite, the exact
+ * `security-gate/attack-catalogue.json` names one row per attack class: the class, the suite, the exact
  * test title, and *how* the test is shown to be non-vacuous. This suite is the guard that makes those rows
  * un-fabricable, and it proves the guard itself is not vacuous by feeding it fabricated rows:
  *
@@ -90,7 +90,7 @@ describe("security-gate: C14 — the attack catalogue cannot contain a fabricate
     // Ids are unique, and every row carries a written non-vacuity argument (not "n/a").
     expect(new Set(CATALOGUE.classes.map((row) => row.id)).size).toBe(CATALOGUE.classes.length);
     expect(CATALOGUE.classes.every((row) => row.negativeControl.trim().length >= 40)).toBe(true);
-    expect(ATTACK_CATALOGUE_PATH).toBe("docs/audit/coding-agent/attack-catalogue.json");
+    expect(ATTACK_CATALOGUE_PATH).toBe("security-gate/attack-catalogue.json");
   });
 
   it("every hard-deny rule is either exercised by a catalogued row or exempted with a probe that really fires", () => {

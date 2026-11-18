@@ -777,7 +777,7 @@ export const SECURITY_GATE_TESTS = [
   // contract is kept verbatim as a machine-readable RE-ENABLE RECIPE, with the recipe itself used as the mutation
   // input of the non-vacuity proof. The consequence — the gate no longer blocks a merge or a release, so it runs
   // only on the owner's local escalated run — is an accepted risk recorded in
-  // `docs/audit/coding-agent/security-gate-report.md` §6. It also pins the lint guard itself in both directions: it
+  // `security-gate/security-gate-report.md` §6. It also pins the lint guard itself in both directions: it
   // fires on a real violation (a new file with an unrecorded cast, an unlisted `console.log`, an
   // unrecorded `.only`/`.skip`) and produces no false positive on the repository it guards, with its own detector
   // self-test asserted rather than trusted.
@@ -871,7 +871,7 @@ export const SECURITY_GATE_TESTS = [
   // C14 (post-step cleanup): the two descriptions that had drifted on their own. The phase order named by the
   // engine's header comment and by the wiring comment in `app.ts` (both listed eight of the eleven
   // `PolicyPhase` members and omitted three that really run), and the suite count in
-  // `docs/audit/coding-agent/security-gate-report.md` (138 against a fixed list of 144). The guard reads the union
+  // `security-gate/security-gate-report.md` (138 against a fixed list of 144). The guard reads the union
   // type, the `evaluateInternal` body, both comments and the document itself, holds no copy of either fact, and
   // proves both halves non-vacuous on in-memory copies rather than on the files.
   "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
@@ -897,7 +897,7 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c15-mounted-workspace.test.ts",
   "tests/coding-agent-c15-mount-sandbox.test.ts",
   // G1 (item 3, the decoy branch): the matrix of deliberate mutations and the guard that keeps it honest. The
-  // suite proves three things about `docs/audit/coding-agent/mutation-controls.json` and about the runner that consumes
+  // suite proves three things about `security-gate/mutation-controls.json` and about the runner that consumes
   // it (`scripts/security-gate-mutation-branch.mjs`): every row resolves against the real file and the real
   // anchor, a fabricated row is refused with its own issue code, and a gate run that never measured anything is
   // classified `environment` rather than "the mutation was caught". The runner itself is **not** in this list and
