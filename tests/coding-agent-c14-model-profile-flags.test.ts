@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -362,7 +362,8 @@ describe("[C14] [security-gate] the model-profile port is wired in the compositi
     expect(runnerSource.match(/const modelProviderHint/g)).toHaveLength(1);
   });
 
-  it("keeps the current-state note honest about what the snapshot records", () => {
+  // The current-state note is a maintainer document kept off the public repository.
+  it.skipIf(!existsSync(path.join(workspaceRoot, "security-gate", "current-state.md")))("keeps the current-state note honest about what the snapshot records", () => {
     const doc = readFileSync(path.join(workspaceRoot, "security-gate", "current-state.md"), "utf8");
     // The claim may not go back to asserting the recorded profile is the deployment's without the wiring.
     expect(doc).toContain("C14 correction");

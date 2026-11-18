@@ -86,7 +86,7 @@ You need Docker with Compose v2 and Git.
 </div>
 
 ```bash
-git clone --recurse-submodules https://github.com/andrii-koss/npati-ai-agent
+git clone https://github.com/andrii-koss/npati-ai-agent
 cd npati-ai-agent
 cp .env.example .env
 docker compose up --build

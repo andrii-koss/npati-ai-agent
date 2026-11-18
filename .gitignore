@@ -54,3 +54,10 @@ scripts/readme-screenshots.mjs
 scripts/stress/
 scripts/v6-*
 tests/v6-*
+# Maintainer plan, prompts and internal reports of the security gate: kept on disk, not published
+security-gate/PLAN.md
+security-gate/plan-verification-*
+security-gate/current-state.md
+security-gate/security-gate-report.md
+tests/coding-agent-plan-verification.test.ts
+scripts/lib/coding-agent-plan-verification.mjs
