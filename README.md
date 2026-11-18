@@ -88,7 +88,9 @@ docker compose up --build
 
 <div align="center">
 
-Open **http://localhost:3000** and sign in. On Windows Command Prompt use `copy .env.example .env`.<br/>
+Open **http://localhost:3000** and sign in. The chat is at **http://localhost:3000/chat**.<br/>
+To use another port, change `NPATI_WEB_PORT`, `NPATI_WEB_ORIGIN` and `NPATI_AGENT_PUBLIC_DOMAIN` in `.env`. On Windows Command Prompt use `copy .env.example .env`.<br/>
+For a server with a domain, see the [Dokploy guide](docker/DOKPLOY_DEPLOYMENT.md).<br/>
 Before you open the installation to other people, change every password and key in `.env`.
 
 </div>

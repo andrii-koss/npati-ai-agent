@@ -14,9 +14,12 @@ services:
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
       NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:-}
       # Public HTTPS base URL of the Project API (Data Studio). Without it generated sites and
       # apps get no PROJECT_API_URL/PROJECT_PUBLISHABLE_KEY and the SDK is not vendored.
@@ -56,6 +59,7 @@ services:
       NPATI_HUB_BASE_URL: ${NPATI_HUB_BASE_URL:-}
       NPATI_HUB_API_KEY: ${NPATI_HUB_API_KEY:-}
       CRAWL4AI_BASE_URL: http://crawler:11235
+      NPATI_SEARXNG_URL: ${NPATI_SEARXNG_URL:-http://searxng:8080}
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?CRAWL4AI_API_TOKEN is required}
       BROWSER_USE_WORKER_URL: http://browser-use-worker:8765
       NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:?NPATI_BROWSER_INTERNAL_TOKEN is required}
@@ -79,14 +83,16 @@ services:
       NPATI_DATA_BACKUP_TICK_SECONDS: ${NPATI_DATA_BACKUP_TICK_SECONDS:-300}
       NPATI_DATA_BACKUP_DISABLED: ${NPATI_DATA_BACKUP_DISABLED:-}
       NPATI_PROMOTE_DATA_MAX_ROWS: ${NPATI_PROMOTE_DATA_MAX_ROWS:-500}
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
       REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: minio
+      # Domains can attach the API to a shared proxy network. Avoid the generic
+      # "minio" alias there: always address this Compose project's own storage.
+      MINIO_ENDPOINT: ${COMPOSE_PROJECT_NAME:-npati-agent}-minio-internal
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # Non-secret expected root username for startup comparison in Logs.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-npati-admin}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-npati-admin}}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}}
       MINIO_OPERATION_TIMEOUT_MS: ${MINIO_OPERATION_TIMEOUT_MS:-15000}
@@ -98,6 +104,8 @@ services:
       NPATI_STORAGE_RECONCILE_PAGE_SIZE: ${NPATI_STORAGE_RECONCILE_PAGE_SIZE:-250}
     expose:
       - "3001"
+    ports:
+      - "127.0.0.1:${NPATI_AGENT_PUBLISHED_PORT:-3001}:3001"
     volumes:
       - agent-data:/app/data
       - postgres-projects-snapshots:/app/project-snapshots
@@ -111,8 +119,6 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
       crawler:
         condition: service_healthy
@@ -157,33 +163,41 @@ services:
     networks: [npati-agent, npati-sandbox-control]
 
   sandbox-runner:
-    container_name: npati-project-runtime
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
       target: project-runtime
+      args:
+        NPATI_BUILD_COMMIT: ${NPATI_BUILD_COMMIT:-unknown}
+        NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
     restart: unless-stopped
     environment:
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
-      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters}
+      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,repo.packagist.org,pub.dev,www.gstatic.com,fonts.gstatic.com,fonts.googleapis.com}
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
       - project-runtime-workspaces:/projects
       - project-runtime-state:/runtime-state
     expose:
       - "7865"
-    devices:
-      - /dev/net/tun:/dev/net/tun
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
+    # Permit unprivileged namespace setup, without SYS_ADMIN or privileged mode.
     security_opt:
       - no-new-privileges:true
       - seccomp=./docker/sandbox/project-runtime-seccomp.json
       - apparmor=unconfined
+      # Linux 5.15 rejects nested procfs mounts when Docker masks /proc paths.
+      # Project commands get a separate read-only procfs from Bubblewrap.
       - systempaths=unconfined
     cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
     mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
@@ -194,7 +208,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks: [npati-agent, npati-sandbox-control]
+    networks: [npati-sandbox-control, npati-sandbox-egress]
 
   crawler:
     build:
@@ -221,6 +235,26 @@ services:
       timeout: 8s
       retries: 8
       start_period: 45s
+    networks: [npati-agent]
+
+  # Web search for agents: OmniRoute's "searxng-search" provider at http://searxng:8080 (no published port). One query
+  # goes to several engines; NPATI falls back to OmniRoute's duckduckgo-free when it does not answer.
+  searxng:
+    image: searxng/searxng:${SEARXNG_VERSION:-2026.10.30-ffa88e3ba}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${NPATI_SEARXNG_SECRET:?NPATI_SEARXNG_SECRET is required}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./services/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [npati-agent]
 
   browser-use-worker:
@@ -294,22 +328,6 @@ services:
       start_period: 30s
     networks: [npati-agent]
 
-  qdrant:
-    image: docker.io/qdrant/qdrant:v1.15.4
-    pull_policy: always
-    restart: unless-stopped
-    volumes:
-      - qdrant-data:/qdrant/storage
-    expose:
-      - "6333"
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-    networks: [npati-agent]
-
   minio:
     image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}
     restart: unless-stopped
@@ -328,7 +346,10 @@ services:
       timeout: 5s
       retries: 8
       start_period: 15s
-    networks: [npati-agent]
+    networks:
+      npati-agent:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:-npati-agent}-minio-internal
 
   redis:
     image: redis:7-alpine
@@ -389,6 +410,7 @@ networks:
   npati-agent:
   npati-sandbox-control:
     internal: true
+  npati-sandbox-egress:
 
 volumes:
   project-runtime-workspaces:
@@ -401,5 +423,4 @@ volumes:
   postgres-projects-snapshots:
   crawler-state:
   minio-data:
-  qdrant-data:
   browser-use-state:

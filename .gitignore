@@ -41,3 +41,16 @@ tests/coding-agent-step3-omniroute-context.test.ts
 .npati-data/
 compose.step9.override.yml
 compose.step10.override.yml
+# Local test stand and V6 audit harness: kept on disk, not published
+docker-compose.creator.yml
+docker-compose.dokploy-isolated.yml
+docker-compose.fresh-local.yml
+docker-compose.sandbox-isolated.yml
+docker-compose.sandbox-runner.yml
+docker-compose.scale.yml
+scripts/prepare-docker-validation.mjs
+scripts/update-local-async-docker.ps1
+scripts/readme-screenshots.mjs
+scripts/stress/
+scripts/v6-*
+tests/v6-*
