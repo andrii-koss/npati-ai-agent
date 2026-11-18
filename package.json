@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Open Source AI Business Agent",
+  "license": "Elastic-2.0",
+  "author": "Andrii Kostashchuk (https://en.npati.com/)",
   "type": "module",
   "workspaces": [
     "apps/*",

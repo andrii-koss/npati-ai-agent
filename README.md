@@ -1,6 +1,6 @@
 # NPATI Agent
 
-NPATI Agent is an open-source, self-hostable AI workspace for chat, business planning,
+NPATI Agent is a source-available (fair-code), self-hostable AI workspace for chat, business planning,
 company agents, knowledge, memory, web research, and AI-provider routing.
 
 The project is under active development. Capability status is reported honestly as
@@ -112,8 +112,17 @@ Generated test evidence belongs in `artifacts/`, which is gitignored.
 - [Object Storage](docs/OBJECT_STORAGE.md)
 - [Updating OmniRoute](docs/OMNIROUTE_UPDATES.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+
+## License
+
+NPATI Agent is source-available under the [Elastic License 2.0](LICENSE) (ELv2), licensor Andrii Kostashchuk
+(https://en.npati.com/). You may use, change and self-host it, including inside your company. You may not offer
+it to others as a hosted or managed service, disable or work around its license key (installation authorization),
+or remove its licensing notices. Third-party components keep their own licenses.
 
 ## Security
 
 Never commit `.env`, credentials, provider tokens, signing keys, database passwords, or
-NPATI internal service keys. The open-source Agent must be treated as a public client.
+NPATI internal service keys. The self-hosted Agent must be treated as a public client.
