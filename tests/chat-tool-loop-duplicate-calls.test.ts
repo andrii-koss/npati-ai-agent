@@ -38,6 +38,22 @@ it("still runs the same call again in a later step when the model asks for it", 
   expect(executed).toEqual(["call-1", "call-2"]);
 });
 
+// V6 step 20 (V6-D20-06): after a forced goal create succeeded, the model called the same create again in the next
+// step and the Business got two identical goals from one request.
+it("does not repeat an identical create in a later step of the same turn", async () => {
+  let step = 0;
+  const goal = { action: "create", title: "Vender 300 panes antes de fin de diciembre", targetValue: 300 };
+  const ai = { chat: async () => step++ < 2
+    ? { content: "", toolCalls: [{ id: `goal-${step}`, type: "function", function: { name: "npati_goal_action", arguments: JSON.stringify(step === 1 ? goal : { targetValue: 300, title: goal.title, action: "create" }) } }] }
+    : { content: "Objetivo creado" } } as unknown as AIEngine;
+  const executed: string[] = [];
+  const result = await runChatToolLoop({ ai, request: { model: "test/model", messages: [{ role: "user", content: "pon un objetivo: vender 300 panes" }] }, tools: () => CORE_CHAT_TOOLS,
+    execute: async (toolCall) => { executed.push(toolCall.id); return { output: { goalId: "g-1" } }; } });
+  expect(executed).toEqual(["goal-1"]);
+  expect(result.traces.find((trace) => trace.callId === "goal-2")).toMatchObject({ status: "deduplicated", duplicateOf: "goal-1" });
+  expect(result.result.content).toBe("Objetivo creado");
+});
+
 it("streams every tool-loop step so the stream idle timeout bounds a silent provider", async () => {
   const streamed: boolean[] = [];
   let step = 0;

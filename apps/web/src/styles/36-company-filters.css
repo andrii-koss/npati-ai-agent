@@ -187,3 +187,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The composer company control had no visible keyboard focus: the composer rules removed both the outline and the
+   shadow (V6 step 20, V6-D20-05). Same ring as the other company controls. */
+.composer-context-switcher .company-scope-trigger.composer-context-trigger:focus-visible { outline: 2px solid #ed292e; outline-offset: 2px; }

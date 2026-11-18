@@ -100,6 +100,28 @@ describe("projects of one conversation", () => {
       expect(projectOf(stays.body)).toBe(f.todoProject.id);
     } finally { await app.close(); }
   });
+
+  // V6 step 20 (V6-D20-02): the client sends only the company. "Return to the TODO app" asked which of all the company's
+  // projects to change, although this conversation created two of them and the request names one.
+  it("resolves a project of this conversation when the client selects only the company", async () => {
+    const f = await stage4Chat();
+    const { project: unrelated } = await f.store.createProject(auth, f.company.id, { name: "Old landing", type: "code_project", kind: "website" } as never, "old-landing");
+    const ai = { supportsNativeTools: () => true, chat: async () => ({ content: "Готово." }), async *stream() { yield "Готово."; } } as unknown as AIEngine;
+    const app = buildApp({ workspaceStore: f.store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const send = (message: string) => app.inject({ method: "POST", url: "/chat/stream", payload: {
+        message, conversationId: f.conversation.id, contextType: "company", companyId: f.company.id } });
+      const projectOf = (body: string) => body.match(/"activeContext":\{[^}]*"projectId":"([^"]+)"/)?.[1];
+      const toTodo = await send("Повернись до TODO: зміни текст кнопки створення задачі на «Додати задачу».");
+      expect(toTodo.statusCode).toBe(200);
+      expect(projectOf(toTodo.body)).toBe(f.todoProject.id);
+      expect(toTodo.body).not.toContain(unrelated.name);
+      const toGame = await send("У грі додай відображення рахунку.");
+      expect(projectOf(toGame.body)).toBe(f.gameProject.id);
+      const second = await send("у другому зміни колір фону на темно-синій");
+      expect(projectOf(second.body)).toBe(f.gameProject.id);
+    } finally { await app.close(); }
+  });
 });
 
 describe("ordinal and plural references to the chat's projects (V6 step 02)", () => {

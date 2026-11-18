@@ -164,6 +164,10 @@ export async function runChatToolLoop(input: {
   const onGenerationProgress = input.request.onGenerationProgress ?? (() => undefined);
   const traces: ChatToolTrace[] = [];
   const metadata: Record<string, unknown>[] = [];
+  // A create that already succeeded in an earlier step of this turn is not run again when the model repeats it word for
+  // word: one Spanish goal request made two identical goals (V6 step 20, V6-D20-06). Other repeats still run.
+  const createdInTurn = new Map<string, { callId: string; content: string }>();
+  const isCreate = (call: ChatToolCall) => { try { return (JSON.parse(call.function.arguments || "{}") as { action?: unknown }).action === "create"; } catch { return false; } };
   const maxSteps = Math.max(1, input.maxSteps ?? Number.POSITIVE_INFINITY);
   let result: ChatResult = { content: "" };
   let completionReminders = 0;
@@ -272,7 +276,7 @@ export async function runChatToolLoop(input: {
     const executedInTurn = new Map<string, { callId: string; content: string }>();
     for (const call of result.toolCalls) {
       const signature = callSignature(call);
-      const first = executedInTurn.get(signature);
+      const first = executedInTurn.get(signature) ?? (isCreate(call) ? createdInTurn.get(signature) : undefined);
       if (first) {
         const deduplicated: ChatToolTrace = { step, toolName: call.function.name, callId: call.id, status: "deduplicated", duplicateOf: first.callId };
         traces.push(deduplicated);
@@ -293,6 +297,7 @@ export async function runChatToolLoop(input: {
         input.onTrace?.(succeeded);
         const content = toolOutput(executed.output);
         executedInTurn.set(signature, { callId: call.id, content });
+        if (isCreate(call)) createdInTurn.set(signature, { callId: call.id, content });
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content });
         if (executed.stop) return { result: { content: "" }, messages, traces, metadata };
       } catch (error) {

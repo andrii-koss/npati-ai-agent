@@ -140,8 +140,12 @@ export async function resolveConversationProjectTarget(store: WorkspaceStore, re
   log: { info(payload: unknown, message?: string): void };
 }): Promise<ResolvedActiveContext | undefined> {
   const from = input.current.project;
-  if (!input.conversationId || !from || input.intent === "CREATE_WEBSITE" || input.intent === "CREATE_PROJECT") return undefined;
-  const projects = await readConversationProjects(store, auth, input.conversationId, input.history);
+  // A client that selects only the company still works in this conversation's projects of that company: "return to the
+  // cafe site" asked which of every company project to change (V6 step 20, V6-D20-02).
+  const companyId = from ? undefined : input.current.context.contextType === "company" ? input.current.company?.id : undefined;
+  if (!input.conversationId || (!from && !companyId) || input.intent === "CREATE_WEBSITE" || input.intent === "CREATE_PROJECT") return undefined;
+  const projects = (await readConversationProjects(store, auth, input.conversationId, input.history))
+    .filter((project) => !companyId || project.companyId === companyId);
   // "Check both projects" / "change the background in both": a batch over every project of this chat, one project at a time.
   const plural = projectBatchIntent(input.message, input.intent, { allowEdit: true }) ? pluralProjectTargets(input.message, projects) : [];
   if (plural.length && plural.every((project) => project.companyId === plural[0]!.companyId)) {
@@ -151,9 +155,9 @@ export async function resolveConversationProjectTarget(store: WorkspaceStore, re
       return { ...await resolver.resolve(auth, { contextType: "company", companyId: plural[0]!.companyId }), projects: loaded, pluralReference: true };
     }
   }
-  const target = conversationProjectTarget(input.message, from.id, projects);
+  const target = conversationProjectTarget(input.message, from?.id, projects);
   if (!target) return undefined;
-  input.log.info({ fromProjectId: from.id, projectId: target.id }, "chat_conversation_project_target");
+  input.log.info({ fromProjectId: from?.id ?? null, companyId: companyId ?? null, projectId: target.id }, "chat_conversation_project_target");
   return resolver.resolve(auth, { contextType: "project", companyId: target.companyId, projectId: target.id });
 }
 
