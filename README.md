@@ -114,6 +114,7 @@ Generated test evidence belongs in `artifacts/`, which is gitignored.
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Known issues](KNOWN_ISSUES.md)
 
 ## License
 
