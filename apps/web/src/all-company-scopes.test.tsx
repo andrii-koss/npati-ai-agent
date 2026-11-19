@@ -67,6 +67,22 @@ beforeEach(() => {
     else if (url.endsWith("/code/sessions")) data = { sessions: [] };
     else if (url.endsWith("/code/limits")) data = { limits: {} };
     else if (url.includes("/code/monitor/runs")) data = { runs: [], nextCursor: null };
+    else if (url.startsWith("/api/activity/page")) {
+      const params = new URL(url, "http://localhost").searchParams;
+      const scope = params.get("company");
+      const owners = scope ? [scope] : ["alpha", "beta"];
+      const items = owners.map(owner => ({ ...item, id: `${owner}-run`, companyId: owner, task: `Record ${owner}`, requestedMode: "single", status: "completed" }));
+      const selected = items[0];
+      data = params.has("select") ? { records: items.map(run => ({ id: run.id, ownerId: run.companyId })) } : {
+        items, selected, companies: fixture.companies, matchingTotal: items.length, nextCursor: null,
+        counts: { total: items.length, completed: items.length, running: 0, failed: 0 },
+        detail: selected && {
+          runId: selected.id,
+          agent: { run: selected, steps: [], toolAudit: [], backgroundEvents: [] },
+          code: null, snapshot: { snapshot: null, replay: null, trust: null },
+        },
+      };
+    }
     else if (url.includes("/runs?")) data = { runs: [{ ...item, task: `Record ${id}`, requestedMode: "coding", effectiveMode: "coding", status: "completed" }] };
     else if (url.startsWith("/api/email/settings/open") || url.endsWith("/email-accounts")) {
       const companyId = new URL(url, "http://localhost").searchParams.get("company");
@@ -159,6 +175,28 @@ it("loads Inbox conversations, detail and folder totals in one request", async (
   await act(async () => host.querySelectorAll<HTMLElement>(".email-inbox-thread-card").item(1).click());
   expect(requests.slice(1)).toEqual(["/api/companies/beta/email-inbox/threads/beta-item?includeAudit=true"]);
   expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record beta");
+});
+
+it("loads Activity counts and the selected trace together, then selects the whole scope on demand", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input) === "/api/activity/page") await pending;
+    return original(input, init);
+  });
+  await act(async () => root.render(<MemoryRouter><ActivityPage /></MemoryRouter>));
+  expect([...host.querySelectorAll(".activity-stats-grid strong")].map(item => item.textContent)).toEqual(["", "", "", ""]);
+  await act(async () => release());
+  expect(requests).toEqual(["/api/activity/page"]);
+  expect([...host.querySelectorAll(".activity-stats-grid strong")].map(item => item.textContent)).toEqual(["2", "2", "0", "0"]);
+  expect(host.querySelector(".activity-trace-detail")?.textContent).toContain("Record alpha");
+
+  await act(async () => host.querySelector<HTMLInputElement>(".biz-checkbox")!.click());
+  expect(requests).toEqual(["/api/activity/page", "/api/activity/page?select=1"]);
+  const selected = [...host.querySelectorAll<HTMLInputElement>(".activity-run-selection-row .biz-checkbox")];
+  expect(selected).toHaveLength(2);
+  expect(selected.every(input => input.checked)).toBe(true);
 });
 
 it("restores Inbox conversations and the selected body immediately while the refresh is pending", async () => {

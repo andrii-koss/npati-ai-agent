@@ -123,7 +123,7 @@ function revisionOf(record: ProjectCodeTrust | null): number {
   return Number.isFinite(revision) && revision >= 0 ? revision : 0;
 }
 
-function toStatus(record: ProjectCodeTrust | null) {
+export function presentProjectTrust(record: ProjectCodeTrust | null) {
   return {
     trusted: record?.trusted === true,
     revision: revisionOf(record),
@@ -155,7 +155,7 @@ export async function registerCodeProjectTrustRoutes(
         return reply.code(200).send({
           ...withApiVersion({}),
           status: "ok",
-          trust: toStatus(record),
+          trust: presentProjectTrust(record),
         });
       } catch (error) {
         deps.logger?.warn({ projectId, code: resolveErrorCode(error) }, "code_project_trust_read_failed");
@@ -187,7 +187,7 @@ export async function registerCodeProjectTrustRoutes(
         return reply.code(200).send({
           ...withApiVersion({}),
           status: "ok",
-          trust: toStatus(record),
+          trust: presentProjectTrust(record),
         });
       } catch (error) {
         deps.logger?.warn({ projectId, code: resolveErrorCode(error) }, "code_project_trust_mutation_failed");

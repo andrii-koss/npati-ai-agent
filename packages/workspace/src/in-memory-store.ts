@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { contentRunsPerCompany, type ContentLibraryRead } from "./content-library-read";
+import type { ActivityCatalog } from "./activity-catalog";
 import { countMemoryTypes, MEMORY_CATEGORIES, MEMORY_PAGE_SIZE, memoryPageCursor, type MemoryPageData, type MemoryPageQuery } from "./memory-page";
 import { GOALS_PAGE_SIZE, goalPageCursor, type GoalCounts, type GoalPage, type GoalPageQuery } from "./goals-page";
 import { InMemoryConversationResearch } from "./conversation-research-evidence";
@@ -292,6 +293,32 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         id: run.id, companyId: company.id, companyName: company.name, task: run.task, result: run.result, createdAt: run.createdAt,
       }] : []));
     return { runs, overrides: settings?.value ?? null };
+  }
+
+  async readActivityCatalog(context: AuthContext, companyId?: string): Promise<ActivityCatalog> {
+    await this.ensure(context);
+    const companies = [...this.companies.values()]
+      .filter(company => company.workspaceId === context.workspaceId && company.userId === context.userId
+        && (!context.companyId || company.id === context.companyId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .map(({ id, name }) => ({ id, name }));
+    const scopeIds = new Set(companies.filter(company => !companyId || company.id === companyId).map(company => company.id));
+    const projects = [...this.projects.values()]
+      .filter(project => project.workspaceId === context.workspaceId && project.createdBy === context.userId && scopeIds.has(project.companyId))
+      .map(({ id, companyId }) => ({ id, companyId }));
+    const agentRuns = [...this.companyRuns.values()]
+      .filter(run => run.workspaceId === context.workspaceId && run.userId === context.userId && scopeIds.has(run.companyId))
+      .map(({ id, companyId, projectId, task, requestedMode, executionMode, status, omnirouteComboName, totalDurationMs,
+        totalTokens, totalCost, createdAt, completedAt }) => ({
+        id, companyId, projectId, task, requestedMode, executionMode, status, omnirouteComboName, totalDurationMs,
+        totalTokens, totalCost, createdAt, completedAt,
+      }));
+    const codeRuns = [...this.codeRunStates.values()].filter(run => {
+      const project = this.projects.get(run.projectId);
+      return run.workspaceId === context.workspaceId && scopeIds.has(run.companyId)
+        && project?.workspaceId === context.workspaceId && project.companyId === run.companyId && project.createdBy === context.userId;
+    });
+    return { companies, projects, agentRuns, codeRuns };
   }
 
     async setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number) { return setUserSetting(this.companyState(), context, key, value, expectedRevision); }

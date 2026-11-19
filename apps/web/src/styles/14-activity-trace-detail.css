@@ -1,4 +1,15 @@
 
+.activity-run-selection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-run-selection-row .activity-run-item {
+  min-width: 0;
+  flex: 1;
+}
+
 .activity-run-item {
   border: 1px solid var(--npati-gray-100);
   background: #ffffff;

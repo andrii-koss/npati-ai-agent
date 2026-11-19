@@ -10,6 +10,7 @@ import * as collab from "./postgres-collaboration-repositories";
 import { listGoalPage } from "./postgres-goal-repositories";
 import { listMemoryPage } from "./postgres-memory-page";
 import { readContentLibrary } from "./content-library-read";
+import { readActivityCatalog } from "./activity-catalog";
 import type { MemoryPageQuery } from "./memory-page";
 import type { GoalPageQuery } from "./goals-page";
 import { readNeutralMessagePage, readChatSidebarPage } from "./postgres-chat-pages";
@@ -210,6 +211,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async getUserSetting(context: AuthContext, key: string): Promise<StoredUserSetting | null> { return collab.getUserSetting(this.pool, context, key); }
   async readContentLibrary(context: AuthContext, settingsKey: string) { return readContentLibrary(this.pool, context, settingsKey); }
+  async readActivityCatalog(context: AuthContext, companyId?: string) { return readActivityCatalog(this.pool, context, companyId); }
   async setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number): Promise<StoredUserSetting | null> { return collab.setUserSetting(this.pool, context, key, value, expectedRevision); }
   private async ensureIdentity(context: AuthContext) { await support.ensureIdentity(this.pool, context); }
   private async assertMember(context: AuthContext) { return support.assertMember(this.pool, context); }

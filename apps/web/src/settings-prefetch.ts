@@ -8,11 +8,6 @@ import type { WorkspaceOverview } from "./business-workspace-shared";
 type Row = Record<string, unknown>;
 const warming = new Map<string, number>();
 let identity: string | null | undefined;
-function merge(key: string, rows: Row[]) {
-  const previous = readSettingsSnapshot<Row[]>(key) ?? [];
-  const ids = new Set(rows.map(row => row.id));
-  writeSettingsSnapshot(key, [...rows, ...previous.filter(row => !ids.has(row.id))]);
-}
 export function prefetchSettingsPage(href: string) {
   const path = href.split("?")[0];
   const token = getStoredAuthToken();
@@ -38,7 +33,7 @@ export function prefetchSettingsPage(href: string) {
       }
       return;
     }
-    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content" || path === "/settings/email" || path === "/settings/email/inbox") return;
+    if (path !== "/settings/code") return;
     const companies = await listProjectCompanies();
     if (getStoredAuthToken() !== token) return;
     writeCachedCompanies(companies);
@@ -54,12 +49,6 @@ export function prefetchSettingsPage(href: string) {
         const combine = (rows: Row[], old: Row[] = []) => [...rows, ...old.filter(item => !rows.some(row => row.id === item.id))];
         writeSettingsSnapshot("code:all", { projects: combine(pages.flatMap(page => page.projects), previous?.projects), sessions: combine(pages.flatMap(page => page.sessions), previous?.sessions) });
       } });
-    } else if (path === "/settings/activity") {
-      if (readSettingsSnapshot("activity:all")) return;
-      await loadCompanyScopes(ids, async id => {
-        const [normal, code] = await Promise.all([apiFetch<{ runs: Row[] }>(`/companies/${id}/runs?limit=50`), apiFetch<{ runs: Row[]; nextCursor: string | null }>(`/companies/${id}/code/monitor/runs`)]);
-        return { id, items: [...code.runs, ...normal.runs].map(item => ({ ...item, companyId: id })), cursor: code.nextCursor };
-      }, { key: "activity:", isActive: () => getStoredAuthToken() === token, onProgress: pages => merge("activity:all", pages.flatMap(page => page.items)) });
     }
   })().catch(() => undefined);
 }

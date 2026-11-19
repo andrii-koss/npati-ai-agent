@@ -785,7 +785,7 @@ export function buildApp(config: AppConfig = {}) {
     discoverRuntimeMcpCapabilities, featureFlagService, mcpRuntimeCapabilities,
     activeContextResolver, chatFiles, browserTool, projectMediaService, activeChatStreams, companyRuntime, getAIContext, marketplace,
     persistAutomaticCompanyMemory, projectOrchestrator, runBusinessMessage, runNeutralMessage,
-    codeService, projectService, projectTerminalEvents, codeSessionRunExecutor, codeRunAdmission,
+    codeService, projectService, projectTerminalEvents, codeRbacForRun, codeProjectTrust, codeSessionRunExecutor, codeRunAdmission,
     codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, projectBrowserQaService, codeRunCancellation,
     activeSessionRegistry, aiPreferences, codePreferences, codeRunQueueLimits, notifyMessagingConnections,
     automationScheduler, codeReaper, sandboxIdleTimer, sandboxRetentionTimer, lifecycleRetentionTimer, backupTimer,

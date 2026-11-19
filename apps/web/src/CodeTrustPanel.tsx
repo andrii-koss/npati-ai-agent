@@ -25,15 +25,15 @@ function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`/api${path}`, { ...init, headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) } });
 }
 
-interface TrustState {
+export interface TrustState {
   trusted: boolean;
   revision: number;
   trustedBy?: string;
   trustedAt?: string;
 }
 
-export function CodeTrustPanel({ companyId, projectId, isUk }: { companyId: string; projectId: string; isUk: boolean }) {
-  const [state, setState] = useState<TrustState | null>(null);
+export function CodeTrustPanel({ companyId, projectId, isUk, initialState }: { companyId: string; projectId: string; isUk: boolean; initialState?: TrustState | null }) {
+  const [state, setState] = useState<TrustState | null>(initialState ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,8 +58,9 @@ export function CodeTrustPanel({ companyId, projectId, isUk }: { companyId: stri
   }, [base, companyId, projectId, isUk]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (initialState === undefined) void load();
+    else setState(initialState);
+  }, [load, initialState]);
 
   const mutate = async (verb: "grant" | "revoke") => {
     if (!state) return;

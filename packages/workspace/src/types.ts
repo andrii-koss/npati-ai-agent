@@ -260,6 +260,7 @@ export interface WorkspaceStore {
   codeDataLifecycle?: CodeDataLifecycleStore;
   getUserSetting(context: AuthContext, key: string): Promise<UserSetting | null>;
   readContentLibrary(context: AuthContext, settingsKey: string): Promise<import("./content-library-read").ContentLibraryRead>;
+  readActivityCatalog(context: AuthContext, companyId?: string): Promise<import("./activity-catalog").ActivityCatalog>;
   setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number): Promise<UserSetting | null>;
   health(): Promise<"ok" | "unavailable">;
   overview(context: AuthContext): Promise<WorkspaceOverview>;

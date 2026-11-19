@@ -3,14 +3,15 @@ import { monitorCodeRun, type DevelopmentProcessProgressItem as Event } from "@n
 import { getStoredAuthToken } from "./AuthContext";
 import { AgentExecutionTrace } from "./AgentExecutionTrace";
 import type { CompanyRun } from "./activity-types";
-type MonitorData={run:CompanyRun;summary:ReturnType<typeof monitorCodeRun>;events:Event[];page:{nextCursor:string|null;total:number}};
+export type MonitorData={run:CompanyRun;summary:ReturnType<typeof monitorCodeRun>;events:Event[];page:{nextCursor:string|null;total:number}};
 
-export function CodeRunMonitor({companyId,runId,isUk}:{companyId:string;runId:string;isUk:boolean}) {
-  const [data,setData]=useState<MonitorData>();
+export function CodeRunMonitor({companyId,runId,isUk,initialData}:{companyId:string;runId:string;isUk:boolean;initialData?:MonitorData}) {
+  const [data,setData]=useState(initialData);
   const [error,setError]=useState("");
   const [tab,setTab]=useState("timeline"), [agent,setAgent]=useState(""), [status,setStatus]=useState(""), [since,setSince]=useState("");
   const [pages,setPages]=useState(1);
-  useEffect(()=>{setPages(1);setData(undefined);},[companyId,runId]);
+  useEffect(()=>{setPages(1);setData(initialData);},[companyId,runId]);
+  useEffect(()=>{if(pages===1 && initialData) setData(initialData);},[initialData,pages]);
   useEffect(()=>{
     let stopped=false, inFlight=false, timer:ReturnType<typeof setTimeout>;
     const controller=new AbortController();
@@ -32,7 +33,10 @@ export function CodeRunMonitor({companyId,runId,isUk}:{companyId:string;runId:st
       if(!stopped) timer=setTimeout(load,3000);
     };
     const visible=()=>{if(!document.hidden){clearTimeout(timer);void load();}};
-    void load();document.addEventListener("visibilitychange",visible);
+    if (initialData && pages===1) {
+      if (["queued","running","waiting_for_user","preparing","stopping"].includes(initialData.run.status)) timer=setTimeout(load,3000);
+    } else void load();
+    document.addEventListener("visibilitychange",visible);
     return()=>{stopped=true;controller.abort();clearTimeout(timer);document.removeEventListener("visibilitychange",visible);};
   },[companyId,runId,pages]);
   const text=(en:string,uk:string)=>isUk?uk:en;

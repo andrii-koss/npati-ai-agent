@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getStoredAuthToken } from "./AuthContext";
-import { CodeTrustPanel } from "./CodeTrustPanel";
+import { CodeTrustPanel, type TrustState } from "./CodeTrustPanel";
 
 /**
  * C6b: read-only "why did the agent act this way".
@@ -52,6 +52,12 @@ interface ReplayView {
   stepCount: number;
   bestEffort: boolean;
   notice?: string;
+}
+
+export interface RunSnapshotData {
+  snapshot: { status: string; snapshot?: SnapshotView } | null;
+  replay: { status: string; replay?: ReplayView } | null;
+  trust: TrustState | null;
 }
 
 interface FieldRow {
@@ -119,7 +125,7 @@ function snapshotFields(payload: Record<string, unknown>, isUk: boolean): FieldR
   ].map((entry) => ({ ...entry, value: entry.value }));
 }
 
-export function CodeSnapshotPanel({ companyId, runId, isUk }: { companyId: string; runId: string; isUk: boolean }) {
+export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { companyId: string; runId: string; isUk: boolean; initialData?: RunSnapshotData }) {
   const [snapshot, setSnapshot] = useState<SnapshotView | null>(null);
   const [legacy, setLegacy] = useState(false);
   const [replay, setReplay] = useState<ReplayView | null>(null);
@@ -164,8 +170,15 @@ export function CodeSnapshotPanel({ companyId, runId, isUk }: { companyId: strin
   }, [companyId, runId, isUk]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!initialData) {
+      void load();
+      return;
+    }
+    setSnapshot(initialData.snapshot?.snapshot ?? null);
+    setLegacy(initialData.snapshot?.status === "legacy_no_snapshot");
+    setReplay(initialData.replay?.replay ?? null);
+    setNoBundle(initialData.replay?.status !== "bundle");
+  }, [load, initialData]);
 
   const fields = useMemo(() => (snapshot ? snapshotFields(snapshot.payload, isUk) : []), [snapshot, isUk]);
   const missingSources = useMemo(() => fields.filter((field) => field.unreadable).map((field) => field.label), [fields]);
@@ -308,7 +321,7 @@ export function CodeSnapshotPanel({ companyId, runId, isUk }: { companyId: strin
         the trust-gated behaviour could never have been exercised in production.
       */}
       {snapshot?.projectId ? (
-        <CodeTrustPanel companyId={companyId} projectId={snapshot.projectId} isUk={isUk} />
+        <CodeTrustPanel companyId={companyId} projectId={snapshot.projectId} isUk={isUk} initialState={initialData?.trust} />
       ) : null}
     </section>
   );

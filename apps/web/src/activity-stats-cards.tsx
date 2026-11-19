@@ -1,10 +1,10 @@
 import React from "react";
 
 export interface ActivityStatsCardsProps {
-  totalRunsCount: number;
-  completedRunsCount: number;
-  activeRunsCount: number;
-  totalSecurityDecisions: number;
+  totalRunsCount?: number;
+  completedRunsCount?: number;
+  activeRunsCount?: number;
+  totalSecurityDecisions?: number;
   t: (key: string, options?: any) => string;
 }
 

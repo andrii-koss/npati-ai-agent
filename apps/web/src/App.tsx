@@ -629,7 +629,7 @@ export function App() {
   return (
     <I18nProvider>
       <AuthProvider>
-        <WorkspaceProvider deferInitialOverview={route === "/settings/content" || route === "/content" || route === "/settings/email" || route === "/settings/email/inbox" || route === "/inbox" || route === "/email"}>
+        <WorkspaceProvider deferInitialOverview={route === "/settings/content" || route === "/content" || route === "/settings/email" || route === "/settings/email/inbox" || route === "/inbox" || route === "/email" || route === "/settings/activity" || route === "/activity"}>
           <ConfirmDialogContainer />
           <Suspense fallback={<div className="workspace" />}>
           <Routes>

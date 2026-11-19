@@ -1,264 +1,203 @@
-import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
-import { SettingsListMore, useProgressiveSettingsItems } from "./useProgressiveSettingsItems";
-import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { readSettingsSnapshot } from "./settings-page-cache";
+import { ALL_COMPANIES } from "./company-scope";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
-import { listProjectCompanies } from "./website-builder-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
-// C6b: read-only "why did this run act this way" — execution snapshot, snapshot diff and replay status.
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
-import {
-  chooseAvailableCompanyId,
-  readCachedCompanies,
-  writeActiveCompanyId,
-  writeCachedCompanies,
-} from "./active-company";
-
-import type {
-  ToolAuditItem,
-  RunStep,
-  BackgroundRunEvent,
-  CompletionReport,
-  CompanyRun,
-  CompanyItem,
-  RunStatusFilter,
-  ProjectTaskItem,
-  ActiveRunDetails,
-} from "./activity-types";
-import {
-  visibleRunTask,
-  activityRunSummary,
-  getCachedRuns,
-  updateCachedRuns,
-} from "./activity-types";
+import { writeActiveCompanyId, writeCachedCompanies } from "./active-company";
+import { readBulkRecords } from "./bulk-records-api";
+import { RecordCheckbox, RecordSelectionToolbar, useRecordSelection } from "./record-selection";
+import { visibleRunTask, type ActiveRunDetails, type CompanyRun, type RunStatusFilter } from "./activity-types";
+import { activityPageKey, activityParams, cacheActivityPage, readActivityDetail, readActivityPage, readActivitySnapshot,
+  type ActivityDetail, type ActivityFilters, type ActivityPageSummary } from "./activity-page-read";
 import { ActivityTraceDetail } from "./activity-trace-detail";
 import { ActivityStatsCards } from "./activity-stats-cards";
 import { CodeRunMonitor } from "./CodeRunMonitor";
 
+const emptyRuns: CompanyRun[] = [];
+const liveStatuses = new Set(["queued", "planning", "running", "cancelling"]);
+
+function pageRuns(page?: ActivityPageSummary | null) {
+  if (!page) return emptyRuns;
+  const { selected, items } = page;
+  return selected && !items.some(run => run.id === selected.id) ? [selected, ...items] : items;
+}
+
 export function ActivityPage() {
   const { t, language } = useTranslation();
-  const initialCompanies = useMemo(() => readCachedCompanies<CompanyItem>(), []);
-  const initialCompanyId = useMemo(
-    () => new URLSearchParams(window.location.search).get("company") || (new URLSearchParams(window.location.search).get("runId") ? chooseAvailableCompanyId(initialCompanies) : ALL_COMPANIES),
-    [initialCompanies]
-  );
-  const initialRuns = useMemo(() => readSettingsSnapshot<CompanyRun[]>(`activity:${initialCompanyId}`) ?? getCachedRuns(initialCompanyId), [initialCompanyId]);
-
-  const [companies, setCompanies] = useState<CompanyItem[]>(initialCompanies);
-  const companyIdsKey = companies.map(company => company.id).join("\0");
-  const runLoadVersion = useRef(0);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
-  const [runs, setRuns] = useState<CompanyRun[]>(initialRuns);
-  const selectedCompanyRef=useRef(selectedCompanyId);
-  selectedCompanyRef.current=selectedCompanyId;
-  const [codingCursor,setCodingCursor]=useState<string|null>(null);
-  const allCodingCursors = useRef(new Map<string, string | null>());
-  const historyCursor=useRef<{companyId:string;cursor:string|null}|null>(null);
-  const runsRef=useRef(runs);runsRef.current=runs;
-  const queryRunId = new URLSearchParams(window.location.search).get("runId");
-  const [selectedRunId, setSelectedRunId] = useState<string>(() => (queryRunId || initialRuns[0]?.id) ?? "");
-  const [activeRunDetails, setActiveRunDetails] = useState<{
-    run: CompanyRun;
-    steps: RunStep[];
-    toolAudit: ToolAuditItem[];
-    backgroundEvents: BackgroundRunEvent[];
-    completionReport?: CompletionReport;
-  } | null>(null);
-
-  const [loading, setLoading] = useState(() => initialRuns.length === 0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Filter & Search state
+  const query = new URLSearchParams(window.location.search);
+  const queryRunId = query.get("runId");
+  const [selectedCompanyId, setSelectedCompanyId] = useState(query.get("company") || ALL_COMPANIES);
   const [statusFilter, setStatusFilter] = useState<RunStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedSearch(searchQuery.trim()), 180);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const filters: ActivityFilters = { company: selectedCompanyId, status: statusFilter, search: appliedSearch };
+  const scopeKey = activityPageKey(filters);
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const initial = useMemo(() => readActivitySnapshot(filters, queryRunId), []);
+  const [page, setPage] = useState<ActivityPageSummary | undefined>(initial);
+  const [runs, setRuns] = useState(() => pageRuns(initial));
+  const [companies, setCompanies] = useState(initial?.companies ?? []);
+  const [selectedRunId, setSelectedRunId] = useState(initial?.selected?.id ?? "");
+  const [detail, setDetail] = useState<ActivityDetail | null>(() =>
+    readSettingsSnapshot<ActivityDetail>(`activity:detail:${initial?.selected?.id}`) ?? null);
+  const [activeRunDetails, setActiveRunDetails] = useState<ActiveRunDetails | null>(detail?.agent ?? null);
+  const selectedRunRef = useRef(selectedRunId);
+  const runLoadVersion = useRef(0);
+  const detailVersion = useRef(0);
+  const loadedScope = useRef<string | null>(null);
+  const paging = useRef(false);
+  const [readyScope, setReadyScope] = useState<string | null>(null);
+  const [loading, setLoading] = useState(!initial);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"presets" | "trace">("trace");
 
-  useEffect(() => {
-    if (queryRunId) {
-      setSelectedRunId(queryRunId);
-      setViewMode("trace");
-    }
-  }, [queryRunId]);
-
-  // Dispatch state
   const [taskPrompt, setTaskPrompt] = useState("");
   const [runMode, setRunMode] = useState<"auto" | "single" | "pipeline" | "fusion">("auto");
   const [dispatching, setDispatching] = useState(false);
   const [dispatchNotice, setDispatchNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const handleCompanyChange = (companyId: string) => {
+  function selectRun(id: string, next: ActivityDetail | null) {
+    selectedRunRef.current = id;
+    setSelectedRunId(id);
+    setDetail(next);
+    setActiveRunDetails(next?.agent ?? null);
+  }
+
+  function handleCompanyChange(companyId: string) {
+    if (companyId === selectedCompanyId) return;
     setSelectedCompanyId(companyId);
     if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId);
-    allCodingCursors.current.clear();
-    ++runLoadVersion.current;
-    const cachedForNewCompany = readSettingsSnapshot<CompanyRun[]>(`activity:${companyId}`) ?? getCachedRuns(companyId);
-    setRuns([]);setSelectedRunId("");setActiveRunDetails(null);setCodingCursor(null);
-    if (cachedForNewCompany.length > 0) {
-      setRuns(cachedForNewCompany);
-      setSelectedRunId(cachedForNewCompany[0]?.id ?? "");
-    }
-  };
+  }
 
-  // Fetch initial companies list
-  useEffect(() => {
-    listProjectCompanies()
-      .then((list) => {
-        setCompanies(list);
-        writeCachedCompanies(list);
-        if (list.length > 0) {
-          const nextSelectedId = selectedCompanyId === ALL_COMPANIES ? ALL_COMPANIES : chooseAvailableCompanyId(list, { requested: selectedCompanyId });
-          setSelectedCompanyId(nextSelectedId);
-          if (nextSelectedId !== ALL_COMPANIES) writeActiveCompanyId(nextSelectedId);
-        } else {
-          setLoading(false);
-        }
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  // Fetch runs for the selected company
-  const loadRuns = async (companyId: string, isManualRefresh = false) => {
-    if (!companyId || companyId === ALL_COMPANIES && !companies.length) return;
+  const loadRuns = async (manual = false) => {
+    if (currentScope.current !== scopeKey) return;
     const version = ++runLoadVersion.current;
-    const snapshotKey = `activity:${companyId}`;
-    if (isManualRefresh) setRefreshing(true);
-    else if (runs.length === 0) setLoading(true);
+    const owner = getStoredAuthToken();
+    const current = () => version === runLoadVersion.current && currentScope.current === scopeKey && owner === getStoredAuthToken();
+    const switching = loadedScope.current !== scopeKey;
+    const selectedAtStart = selectedRunRef.current;
+    if (manual) setRefreshing(true);
     setError(null);
 
-    const headers: HeadersInit = {};
-    const token = getStoredAuthToken();
-    if (token) headers["authorization"] = `Bearer ${token}`;
-
     try {
-      const scopeIds = companyId === ALL_COMPANIES ? companies.map(company => company.id) : [companyId];
-      const cached = readSettingsSnapshot<CompanyRun[]>(snapshotKey);
-      const publish = (pages: Array<{ items: CompanyRun[] }>) => {
-        if (version !== runLoadVersion.current || selectedCompanyRef.current !== companyId) return;
-        const items = pages.flatMap(page => page.items).sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt));
-        const merged = [...items, ...runsRef.current.filter(run => scopeIds.includes(run.companyId) && run.requestedMode.startsWith("coding") && !items.some(item => item.id === run.id))];
-        runsRef.current = merged; setRuns(merged); writeSettingsSnapshot(snapshotKey, merged.map(activityRunSummary));
-        if (merged.length) { setLoading(false); setSelectedRunId(previous => previous || merged[0]!.id); }
-      };
-      const pages = await loadCompanyScopes(scopeIds, async id => {
-        const [res, coding] = await Promise.all([fetch(`/api/companies/${id}/runs?limit=50`, { headers }), fetch(`/api/companies/${id}/code/monitor/runs`, { headers })]);
-        if (!res.ok || !coding.ok) throw new Error(`HTTP ${!res.ok ? res.status : coding.status}: Failed to load runs`);
-        const data = await res.json() as { runs?: CompanyRun[] };
-        const codeData = await coding.json() as { runs: CompanyRun[]; nextCursor: string | null };
-        const items = [...codeData.runs, ...(data.runs ?? [])].map(item => ({ ...item, companyId: id }));
-        if (queryRunId && companyId !== ALL_COMPANIES && !items.some(run => run.id === queryRunId)) {
-          const linked = await fetch(`/api/companies/${id}/code/monitor/runs/${encodeURIComponent(queryRunId)}?limit=1`, { headers });
-          if (linked.ok) items.unshift({ ...(await linked.json()).run, companyId: id });
-        }
-        return { id, items, cursor: codeData.nextCursor };
-      }, { key: `activity:${queryRunId || ""}`, initial: cached ? scopeIds.map(id => ({ id, items: cached.filter(run => run.companyId === id), cursor: allCodingCursors.current.get(id) ?? null })) : undefined, isActive: () => version === runLoadVersion.current && selectedCompanyRef.current === companyId, onProgress: publish });
-      if (selectedCompanyRef.current !== companyId || version !== runLoadVersion.current) return;
-      const items = pages.flatMap(page => page.items).sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt));
-      pages.forEach(page => updateCachedRuns(page.id, page.items));
-      if (companyId === ALL_COMPANIES) {
-        pages.forEach(page => { if (!allCodingCursors.current.has(page.id)) allCodingCursors.current.set(page.id, page.cursor); });
-        setCodingCursor([...allCodingCursors.current.values()].some(Boolean) ? ALL_COMPANIES : null);
-      } else {
-        if(historyCursor.current?.companyId!==companyId) historyCursor.current={companyId,cursor:pages[0]?.cursor ?? null};
-        setCodingCursor(historyCursor.current.cursor);
+      const result = await readActivityPage(filters, switching ? queryRunId ?? undefined : selectedAtStart || undefined);
+      if (!current()) return;
+      cacheActivityPage(filters, result);
+      setCompanies(result.companies);
+      writeCachedCompanies(result.companies);
+      setPage(result);
+      setRuns(pageRuns(result));
+      if (switching || selectedRunRef.current === selectedAtStart) {
+        ++detailVersion.current;
+        selectRun(result.selected?.id ?? "", result.detail);
       }
-      publish(pages);
-
-      if (items.length > 0) {
-        // If current selection is still in list keep it, otherwise pick first
-        setSelectedRunId((prev) => {
-          if (prev && (items.some((r) => r.id === prev) || runsRef.current.some(r=>r.companyId===companyId && r.id===prev && r.requestedMode.startsWith("coding")))) return prev;
-          return items[0]?.id ?? "";
-        });
-      } else {
-        setSelectedRunId("");
-        setActiveRunDetails(null);
-      }
-    } catch (err) {
-      if (version === runLoadVersion.current) setError(err instanceof Error ? err.message : t("activity.errors.loadRunsFailed"));
+      loadedScope.current = scopeKey;
+      setReadyScope(scopeKey);
+    } catch (cause) {
+      if (current()) setError(cause instanceof Error ? cause.message : t("activity.errors.loadRunsFailed"));
     } finally {
-      if (version === runLoadVersion.current) { setLoading(false); setRefreshing(false); }
+      if (current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
-    if (selectedCompanyId) {
-      loadRuns(selectedCompanyId);
-    }
-    return () => { ++runLoadVersion.current; };
-  }, [selectedCompanyId, companyIdsKey]);
+    const cached = readActivitySnapshot(filters, queryRunId);
+    setPage(cached);
+    setRuns(pageRuns(cached));
+    setLoading(!cached);
+    setRefreshing(false);
+    setLoadingMore(false);
+    paging.current = false;
+    const cachedId = cached?.selected?.id ?? "";
+    selectRun(cachedId, readSettingsSnapshot<ActivityDetail>(`activity:detail:${cachedId}`) ?? null);
+    void loadRuns();
+    return () => { ++runLoadVersion.current; ++detailVersion.current; };
+  }, [scopeKey, queryRunId]);
 
-  const selectedRunCompanyId = runs.find(run => run.id === selectedRunId)?.companyId || (selectedCompanyId === ALL_COMPANIES ? "" : selectedCompanyId);
-
-  // Fetch run details when selectedRunId changes
   useEffect(() => {
-    if (!selectedRunCompanyId || !selectedRunId) return;
-    if(runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding")) {setActiveRunDetails(null);return;}
+    const timer = window.setInterval(() => {
+      if (!document.hidden && !paging.current && runs.length <= 21) void loadRuns();
+    }, selectedCompanyId === ALL_COMPANIES ? 30_000 : 10_000);
+    return () => window.clearInterval(timer);
+  }, [scopeKey, runs.length]);
+
+  const selectedRun = runs.find(run => run.id === selectedRunId) ?? (page?.selected?.id === selectedRunId ? page.selected : null);
+  const selectedRunCompanyId = selectedRun?.companyId ?? "";
+  const currentDetail = detail?.runId === selectedRunId ? detail : null;
+
+  useEffect(() => {
+    if (!activeRunDetails || !liveStatuses.has(activeRunDetails.run.status)) return;
+    const id = activeRunDetails.run.id;
+    const companyId = activeRunDetails.run.companyId;
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const headers: HeadersInit = {};
-    const token = getStoredAuthToken();
-    if (token) headers["authorization"] = `Bearer ${token}`;
+    const timer = window.setTimeout(() => {
+      void readActivityDetail(companyId, id).then(data => {
+        if (!stopped && selectedRunRef.current === id && data.agent) {
+          setActiveRunDetails(data.agent);
+          setRuns(previous => previous.map(run => run.id === id ? { ...run, status: data.agent!.run.status } : run));
+        }
+      }).catch(() => undefined);
+    }, 1500);
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [activeRunDetails]);
 
-    const loadDetails = () => fetch(`/api/companies/${selectedRunCompanyId}/runs/${selectedRunId}`, { headers })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load run details`);
-        return (await res.json()) as {
-          run: CompanyRun;
-          steps: RunStep[];
-          toolAudit: ToolAuditItem[];
-          backgroundEvents: BackgroundRunEvent[];
-          completionReport?: CompletionReport;
-        };
-      })
-      .then((data) => {
-        if (stopped) return;
-        setActiveRunDetails(data);
-        setRuns((previous) => previous.map((run) => run.id === data.run.id ? data.run : run));
-        if (["queued", "planning", "running", "cancelling"].includes(data.run.status)) timer = setTimeout(loadDetails, 1500);
-      })
-      .catch((err) => {if(!stopped) {setError(String(err));timer=setTimeout(loadDetails,3000);}});
-    void loadDetails();
-    return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [selectedRunCompanyId, selectedRunId, runs.find(r=>r.id===selectedRunId)?.requestedMode]);
-
-  useEffect(()=>{
-    if(!selectedCompanyId) return;
-    const timer=setInterval(()=>{if(!document.hidden) void loadRuns(selectedCompanyId);},selectedCompanyId === ALL_COMPANIES ? 30000 : 10000);
-    return()=>clearInterval(timer);
-  },[selectedCompanyId, companyIdsKey]);
-
-  const loadOlderCodingRuns=async()=>{
-    if(!codingCursor) return;
-    if (selectedCompanyId === ALL_COMPANIES) {
-      const headers: Record<string, string> = getStoredAuthToken() ? { authorization: `Bearer ${getStoredAuthToken()}` } : {};
-      const entries = [...allCodingCursors.current].filter(([, cursor]) => cursor);
-      try {
-        const pages = await loadCompanyScopes(entries.map(([id]) => id), async id => {
-          const response = await fetch(`/api/companies/${id}/code/monitor/runs?cursor=${encodeURIComponent(allCodingCursors.current.get(id)!)}`, { headers });
-          if (!response.ok) throw new Error(`Monitoring HTTP ${response.status}`);
-          return { id, data: await response.json() as { runs: CompanyRun[]; nextCursor: string | null } };
-        });
-        if (selectedCompanyRef.current !== ALL_COMPANIES) return;
-        pages.forEach(page => allCodingCursors.current.set(page.id, page.data.nextCursor));
-        setRuns(previous => [...previous, ...pages.flatMap(page => page.data.runs.map(run => ({ ...run, companyId: page.id }))).filter(run => !previous.some(old => old.id === run.id))]);
-        setCodingCursor([...allCodingCursors.current.values()].some(Boolean) ? ALL_COMPANIES : null);
-      } catch (error) { setError(String(error)); }
-      return;
-    }
+  async function openRun(run: CompanyRun) {
+    if (selectedRunRef.current === run.id && currentDetail) return;
+    const version = ++detailVersion.current;
+    const owner = getStoredAuthToken();
+    selectRun(run.id, readSettingsSnapshot<ActivityDetail>(`activity:detail:${run.id}`) ?? null);
     try {
-      const token=getStoredAuthToken();
-      const response=await fetch(`/api/companies/${selectedCompanyId}/code/monitor/runs?cursor=${encodeURIComponent(codingCursor)}`,{headers:token?{authorization:`Bearer ${token}`}:{}});
-      if(!response.ok) throw new Error(`Monitoring HTTP ${response.status}`);
-      const data=await response.json() as {runs:CompanyRun[];nextCursor:string|null};
-      if(selectedCompanyRef.current!==selectedCompanyId) return;
-      setRuns(previous=>[...previous,...data.runs.filter(r=>!previous.some(old=>old.id===r.id))]);setCodingCursor(data.nextCursor);historyCursor.current={companyId:selectedCompanyId,cursor:data.nextCursor};
-    }catch(error){setError(String(error));}
-  };
+      const data = await readActivityDetail(run.companyId, run.id);
+      if (version === detailVersion.current && owner === getStoredAuthToken()) selectRun(run.id, data);
+    } catch (cause) {
+      if (version === detailVersion.current) setError(String(cause));
+    }
+  }
+
+  async function loadMore() {
+    if (!page?.nextCursor || paging.current) return;
+    const version = runLoadVersion.current;
+    const owner = getStoredAuthToken();
+    paging.current = true;
+    setLoadingMore(true);
+    try {
+      const next = await readActivityPage(filters, undefined, page.nextCursor);
+      if (currentScope.current !== scopeKey || version !== runLoadVersion.current || owner !== getStoredAuthToken()) return;
+      setPage(previous => previous ? { ...previous, nextCursor: next.nextCursor } : previous);
+      setRuns(previous => [...previous, ...next.items.filter(run => !previous.some(item => item.id === run.id))]);
+    } catch (cause) {
+      if (currentScope.current === scopeKey) setError(String(cause));
+    } finally {
+      if (currentScope.current === scopeKey) {
+        paging.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }
+
+  const selection = useRecordSelection({
+    resource: "activity",
+    scopeKey,
+    ready: readyScope === scopeKey && searchQuery.trim() === appliedSearch && Boolean(page?.matchingTotal),
+    loadAll: () => readBulkRecords("activity", activityParams(filters)),
+    reload: () => loadRuns(true),
+  });
 
   // Handle task dispatch
   const handleDispatch = async (overridePrompt?: string) => {
@@ -293,7 +232,9 @@ export function ActivityPage() {
       const data = await res.json();
       if (data.run) {
         setRuns((prev) => [data.run, ...prev.filter((r) => r.id !== data.run.id)]);
+        selectedRunRef.current = data.run.id;
         setSelectedRunId(data.run.id);
+        setDetail(null);
         setActiveRunDetails({
           run: data.run,
           steps: data.steps ?? [],
@@ -325,38 +266,19 @@ export function ActivityPage() {
     setTimeout(() => setCopiedId(null), 1800);
   };
 
-  // Metrics
-  const totalRunsCount = runs.length;
-  const completedRunsCount = runs.filter((r) => r.status === "completed").length;
-  const activeRunsCount = runs.filter((r) => ["running", "planning", "queued"].includes(r.status)).length;
-  const failedRunsCount = runs.filter((r) => r.status === "failed").length;
-  const totalSecurityDecisions = activeRunDetails?.toolAudit?.length ?? 0;
+  const previousCounts = readActivitySnapshot({ company: selectedCompanyId, status: "all", search: "" })?.counts;
+  const { total: totalRunsCount, completed: completedRunsCount, running: activeRunsCount, failed: failedRunsCount } = page?.counts ?? previousCounts ?? {};
+  const totalSecurityDecisions = activeRunDetails?.toolAudit.length ?? (currentDetail || page?.selected === null ? 0 : page?.securityDecisions);
   const taskPlanEvent = activeRunDetails?.backgroundEvents?.find((event) => event.eventKey === "project-plan");
   const projectTasks = Array.isArray(taskPlanEvent?.details.tasks)
     ? taskPlanEvent.details.tasks as Array<{ id: string; title: string; role: string; agentId: string; dependsOn: string[] }>
     : [];
 
-  // Filtered runs for sidebar
-  const filteredRuns = useMemo(() => {
-    return runs.filter((run) => {
-      if (statusFilter === "completed" && run.status !== "completed") return false;
-      if (statusFilter === "running" && !["running", "planning", "queued"].includes(run.status)) return false;
-      if (statusFilter === "failed" && run.status !== "failed") return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchTask = run.task.toLowerCase().includes(q);
-        const matchId = run.id.toLowerCase().includes(q);
-        const matchMode = (run.executionMode || run.requestedMode || "").toLowerCase().includes(q);
-        if (!matchTask && !matchId && !matchMode) return false;
-      }
-      return true;
-    });
-  }, [runs, statusFilter, searchQuery]);
-
-  const visiblePage = useProgressiveSettingsItems(filteredRuns, `${selectedCompanyId}:${statusFilter}:${searchQuery}`, 20);
-  const selectedVisibleRun = filteredRuns.find(run => run.id === selectedRunId);
-  const visibleRuns = selectedVisibleRun && !visiblePage.items.some(run => run.id === selectedRunId)
-    ? [...visiblePage.items, selectedVisibleRun] : visiblePage.items;
+  const matchingTotal = page?.matchingTotal;
+  const visibleRuns = runs.filter(run => {
+    if (run.id !== page?.selected?.id || page?.items.some(item => item.id === run.id)) return true;
+    return !appliedSearch && statusFilter === "all";
+  });
 
   const quickPrompts = useMemo(() => [
     { label: t("activity.dispatch.presets.marketAuditLabel"), prompt: t("activity.dispatch.presets.marketAuditPrompt") },
@@ -480,7 +402,7 @@ export function ActivityPage() {
             type="button"
             className="activity-refresh-btn"
             style={{ minWidth: "105px" }}
-            onClick={() => selectedCompanyId && loadRuns(selectedCompanyId, true)}
+            onClick={() => void loadRuns(true)}
             disabled={refreshing || loading}
             title={t("activity.controls.refreshTitle")}
           >
@@ -595,6 +517,7 @@ export function ActivityPage() {
         )}
       </div>
       {error && <div className="workspace-notice error">{error}</div>}
+      {viewMode === "trace" && <RecordSelectionToolbar selection={selection} matchingTotal={matchingTotal || (selection.message ? 0 : undefined)} />}
 
       {runs.length === 0 && loading ? (
         <div className="activity-layout-wrapper" style={{ minHeight: "500px", opacity: 0.5 }}>
@@ -619,11 +542,11 @@ export function ActivityPage() {
             {t("activity.empty.createCompanyBtn")}
           </Link>
         </div>
-      ) : (runs.length === 0 || viewMode === "presets") ? (
+      ) : (!totalRunsCount || viewMode === "presets") ? (
         <div className="activity-empty-state">
-          <h2>{runs.length === 0 ? t("activity.empty.noRunsTitle") : t("activity.empty.presetsTitle")}</h2>
+          <h2>{!totalRunsCount ? t("activity.empty.noRunsTitle") : t("activity.empty.presetsTitle")}</h2>
           <p>
-            {runs.length === 0
+            {!totalRunsCount
               ? t("activity.empty.noRunsCopy")
               : t("activity.empty.presetsCopy")}
           </p>
@@ -662,7 +585,7 @@ export function ActivityPage() {
             <aside className="activity-runs-sidebar" aria-label="Runs list">
               <div className="activity-sidebar-header">
                 <div className="sidebar-header-row">
-                  <h3>{t("activity.sidebar.recentExecutions", { count: filteredRuns.length })}</h3>
+                  <h3>{t("activity.sidebar.recentExecutions", { count: matchingTotal ?? 0 })}</h3>
                   <button
                     type="button"
                     className="sidebar-back-to-presets-btn"
@@ -673,7 +596,7 @@ export function ActivityPage() {
                   </button>
                 </div>
               </div>
-              {filteredRuns.length === 0 ? (
+              {visibleRuns.length === 0 ? (
                 <div className="activity-empty-filter">
                   <p>{t("activity.sidebar.noFilteredRuns")}</p>
                   <button type="button" className="clear-filter-btn" onClick={() => { setStatusFilter("all"); setSearchQuery(""); }}>
@@ -689,11 +612,9 @@ export function ActivityPage() {
                     const durationFormatted = r.totalDurationMs ? `${(r.totalDurationMs / 1000).toFixed(1)}s` : null;
 
                     return (
-                      <button
-                        key={r.id}
-                        className={`activity-run-item ${isSelected ? "active" : ""}`}
-                        onClick={() => setSelectedRunId(r.id)}
-                      >
+                      <div className="activity-run-selection-row" key={r.id}>
+                        <RecordCheckbox selection={selection} record={{ id: r.id, ownerId: r.companyId }} name={visibleRunTask(r.task)} />
+                        <button type="button" className={`activity-run-item ${isSelected ? "active" : ""}`} onClick={() => void openRun(r)}>
                         <div className="activity-run-item-top">
                           <span className={`status-pill ${r.status}`}>{r.status}</span>
                           <small className="run-timestamp">{timeFormatted}</small>
@@ -707,18 +628,24 @@ export function ActivityPage() {
                           {durationFormatted && <span className="activity-run-latency">{durationFormatted}</span>}
                           <span className="activity-run-id">#{r.id.slice(0, 8)}</span>
                         </div>
-                      </button>
+                        </button>
+                      </div>
                     );
                   })}
-                  <SettingsListMore state={visiblePage} label={language === "uk" ? "Завантажити ще" : "Load more"} />
+                  {page?.nextCursor && (
+                    <button type="button" className="button-secondary" onClick={() => void loadMore()} disabled={loadingMore}>
+                      {language === "uk" ? "Завантажити ще" : "Load more"}
+                    </button>
+                  )}
                 </div>
               )}
-              {codingCursor && <button type="button" className="button-secondary" onClick={()=>void loadOlderCodingRuns()}>{language==="uk"?"Попередні Coding Runs":"Older Coding Runs"}</button>}
             </aside>
 
             {/* Main: Execution Trace & Policy Inspection */}
             <section className="activity-trace-detail">
-            {runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding") ? <CodeRunMonitor key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language==="uk"}/> : <>
+            {selectedRun?.requestedMode.startsWith("coding") ? (
+              currentDetail?.code && <CodeRunMonitor key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.code} />
+            ) : <>
             <ActivityTraceDetail
               activeRunDetails={activeRunDetails}
               projectTasks={projectTasks}
@@ -731,8 +658,8 @@ export function ActivityPage() {
             </>}
             {/* C6b: the minimum Run Trace needs to explain a run's environment and policies. A run with no
                 snapshot says legacy_no_snapshot rather than rendering an error. */}
-            {selectedRunId ? (
-              <CodeSnapshotPanel companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} />
+            {currentDetail ? (
+              <CodeSnapshotPanel key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.snapshot} />
             ) : null}
           </section>
         </div>

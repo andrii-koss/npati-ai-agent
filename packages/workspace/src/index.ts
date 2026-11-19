@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./goals-page";
 export * from "./memory-page";
+export type { ActivityAgentRun, ActivityCodeRun, ActivityCatalog } from "./activity-catalog";
 export * from "./default-agent-tools";
 export * from "./project-catalog";
 export * from "./code-session-inbox";

@@ -165,6 +165,86 @@ function readLimit(value: unknown): number | undefined {
 export const LEGACY_NO_SNAPSHOT_MESSAGE =
   "This run was recorded before execution snapshots existed (legacy_no_snapshot).";
 
+export async function readRunSnapshot(store: CodeSnapshotReadStore, companyId: string, runId: string) {
+  // Same reader the runner uses, so the legacy decision cannot drift between writer and reader.
+  const read = await readSnapshotForRun(
+    { getSnapshotForRun: (id, run) => store.getSnapshotForRun(id, run) },
+    companyId,
+    runId,
+  );
+  if (read.kind === "legacy_no_snapshot") {
+    return withApiVersion({ runId, status: "legacy_no_snapshot", message: LEGACY_NO_SNAPSHOT_MESSAGE });
+  }
+  const record = await store.getExecutionSnapshot(companyId, read.snapshotId);
+  if (!record) {
+    // The snapshot vanished between the two reads: report it as missing rather than as an empty success.
+    throw new CodeSnapshotRouteError("snapshot_not_found", "Execution snapshot not found", 404, { snapshotId: read.snapshotId });
+  }
+  return withApiVersion({
+    status: "snapshot",
+    runId,
+    snapshot: {
+      snapshotId: record.id,
+      snapshotVersion: record.snapshotVersion,
+      runId: record.runId,
+      sessionId: record.sessionId,
+      projectId: record.projectId,
+      trigger: record.trigger,
+      legacy: record.legacy,
+      payloadHash: record.payloadHash,
+      prevSnapshotId: record.prevSnapshotId,
+      prevPayloadHash: record.prevPayloadHash,
+      createdBy: record.createdBy,
+      createdAt: record.createdAt,
+      payload: record.payload,
+    },
+  });
+}
+
+export async function readRunReplay(store: CodeSnapshotReadStore, companyId: string, runId: string) {
+  const bundle = await store.getReplayBundle(companyId, runId);
+  if (!bundle) {
+    // A run recorded before C6b has no bundle: first-class answer, not an error (same rule as legacy_no_snapshot).
+    return withApiVersion({
+      status: "no_bundle",
+      runId,
+      message: "This run has no recorded replay bundle (no_bundle).",
+    });
+  }
+  const stepCounts = bundle.payload?.stepCounts;
+  return withApiVersion({
+    status: "bundle",
+    runId,
+    replay: {
+      bundleId: bundle.id,
+      bundleVersion: bundle.bundleVersion,
+      replayMode: bundle.replayMode,
+      sourceRunId: bundle.sourceRunId,
+      sourceSnapshotId: bundle.sourceSnapshotId,
+      executionSnapshotId: bundle.executionSnapshotId,
+      terminalStatus: bundle.terminalStatus,
+      terminalReason: bundle.terminalReason,
+      provider: bundle.provider,
+      model: bundle.model,
+      runnerVersion: bundle.runnerVersion,
+      systemPromptVersion: bundle.systemPromptVersion,
+      systemPromptContentHash: bundle.systemPromptContentHash,
+      modelProfileVersion: bundle.modelProfileVersion,
+      replayInputHash: bundle.replayInputHash,
+      stepCount: Number(bundle.payload?.stepCount ?? 0),
+      ...(stepCounts === undefined ? {} : { stepCounts }),
+      dataClassification: bundle.dataClassification,
+      retentionClass: bundle.retentionClass,
+      createdAt: bundle.createdAt,
+      // Best-effort is a property of the mode, so the UI never has to guess it from the name.
+      bestEffort: bundle.replayMode === "live_best_effort",
+      ...(bundle.replayMode === "live_best_effort"
+        ? { notice: "Best-effort reproducibility. External models, registries and services may have changed." }
+        : {}),
+    },
+  });
+}
+
 export async function registerCodeSnapshotRoutes(instance: FastifyInstance, deps: CodeSnapshotRouteDeps) {
   const contextOrFail = (request: unknown): AuthContext => {
     const context = deps.getAuthContext(request);
@@ -195,39 +275,7 @@ export async function registerCodeSnapshotRoutes(instance: FastifyInstance, deps
     try {
       const { companyId, runId } = request.params;
       await authorizeRead(request, companyId, CODE_SNAPSHOT_ACTIONS.snapshotRead);
-      // Same reader the runner uses, so the legacy decision cannot drift between writer and reader.
-      const read = await readSnapshotForRun(
-        { getSnapshotForRun: (id, run) => deps.store.getSnapshotForRun(id, run) },
-        companyId,
-        runId,
-      );
-      if (read.kind === "legacy_no_snapshot") {
-        return reply.send(withApiVersion({ runId, status: "legacy_no_snapshot", message: LEGACY_NO_SNAPSHOT_MESSAGE }));
-      }
-      const record = await deps.store.getExecutionSnapshot(companyId, read.snapshotId);
-      if (!record) {
-        // The snapshot vanished between the two reads: report it as missing rather than as an empty success.
-        throw new CodeSnapshotRouteError("snapshot_not_found", "Execution snapshot not found", 404, { snapshotId: read.snapshotId });
-      }
-      return reply.send(withApiVersion({
-        status: "snapshot",
-        runId,
-        snapshot: {
-          snapshotId: record.id,
-          snapshotVersion: record.snapshotVersion,
-          runId: record.runId,
-          sessionId: record.sessionId,
-          projectId: record.projectId,
-          trigger: record.trigger,
-          legacy: record.legacy,
-          payloadHash: record.payloadHash,
-          prevSnapshotId: record.prevSnapshotId,
-          prevPayloadHash: record.prevPayloadHash,
-          createdBy: record.createdBy,
-          createdAt: record.createdAt,
-          payload: record.payload,
-        },
-      }));
+      return reply.send(await readRunSnapshot(deps.store, companyId, runId));
     } catch (error) {
       return fail(reply, error);
     }
@@ -352,47 +400,7 @@ export async function registerCodeSnapshotRoutes(instance: FastifyInstance, deps
     try {
       const { companyId, runId } = request.params;
       await authorizeRead(request, companyId, CODE_SNAPSHOT_ACTIONS.replayRead);
-      const bundle = await deps.store.getReplayBundle(companyId, runId);
-      if (!bundle) {
-        // A run recorded before C6b has no bundle: first-class answer, not an error (same rule as legacy_no_snapshot).
-        return reply.send(withApiVersion({
-          status: "no_bundle",
-          runId,
-          message: "This run has no recorded replay bundle (no_bundle).",
-        }));
-      }
-      const stepCounts = bundle.payload?.stepCounts;
-      return reply.send(withApiVersion({
-        status: "bundle",
-        runId,
-        replay: {
-          bundleId: bundle.id,
-          bundleVersion: bundle.bundleVersion,
-          replayMode: bundle.replayMode,
-          sourceRunId: bundle.sourceRunId,
-          sourceSnapshotId: bundle.sourceSnapshotId,
-          executionSnapshotId: bundle.executionSnapshotId,
-          terminalStatus: bundle.terminalStatus,
-          terminalReason: bundle.terminalReason,
-          provider: bundle.provider,
-          model: bundle.model,
-          runnerVersion: bundle.runnerVersion,
-          systemPromptVersion: bundle.systemPromptVersion,
-          systemPromptContentHash: bundle.systemPromptContentHash,
-          modelProfileVersion: bundle.modelProfileVersion,
-          replayInputHash: bundle.replayInputHash,
-          stepCount: Number(bundle.payload?.stepCount ?? 0),
-          ...(stepCounts === undefined ? {} : { stepCounts }),
-          dataClassification: bundle.dataClassification,
-          retentionClass: bundle.retentionClass,
-          createdAt: bundle.createdAt,
-          // Best-effort is a property of the mode, so the UI never has to guess it from the name.
-          bestEffort: bundle.replayMode === "live_best_effort",
-          ...(bundle.replayMode === "live_best_effort"
-            ? { notice: "Best-effort reproducibility. External models, registries and services may have changed." }
-            : {}),
-        },
-      }));
+      return reply.send(await readRunReplay(deps.store, companyId, runId));
     } catch (error) {
       return fail(reply, error);
     }

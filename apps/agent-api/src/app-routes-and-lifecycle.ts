@@ -47,6 +47,7 @@ import { registerCapabilityRoutes } from "./capability-routes";
 import { registerMiscRoutes } from "./misc-routes";
 import { registerChatRoutes } from "./chat-routes";
 import { registerChatDevelopmentRoutes } from "./chat-development-routes";
+import { registerActivityRoutes } from "./activity-routes";
 import { registerChatStreamRoutes } from "./chat-stream-routes";
 import { createChatProjectIntentResolver } from "./chat-project-intent";
 
@@ -83,6 +84,8 @@ export interface AppRoutesAndLifecycleDeps {
   codeService: CodeService;
   projectService: ProjectService;
   projectTerminalEvents: ProjectTerminalEventsRepository;
+  codeRbacForRun: import("./code-rbac").CodeRbac;
+  codeProjectTrust: import("./code-project-trust").CodeProjectTrustService;
   codeSessionRunExecutor: ReturnType<typeof registerCodeRouteWiring>["codeSessionRunExecutor"];
   codeRunAdmission: ReturnType<typeof registerCodeRouteWiring>["codeRunAdmission"];
   codeBackgroundRuns: ReturnType<typeof registerCodeRouteWiring>["codeBackgroundRuns"];
@@ -322,6 +325,15 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     runNeutralMessage: runNeutralMessage as never,
     workspaceStore,
     boundedResponseChunks,
+  });
+
+  registerActivityRoutes(app, {
+    auth: authProvider,
+    store: workspaceStore,
+    projects: projectService,
+    terminalEvents: projectTerminalEvents,
+    codeRbac: deps.codeRbacForRun,
+    projectTrust: deps.codeProjectTrust,
   });
 
   const chatDevelopment = registerChatDevelopmentRoutes(app, {

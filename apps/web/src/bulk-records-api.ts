@@ -2,7 +2,7 @@ import { api } from "./workspace-api";
 import { removeSettingsSnapshot } from "./settings-page-cache";
 
 export type BulkRecord = { id: string; ownerId: string };
-export type BulkResource = "goals" | "memory" | "automations";
+export type BulkResource = "goals" | "memory" | "automations" | "activity";
 export const BULK_DELETE_LIMIT = 1000;
 
 export function readBulkRecords(resource: BulkResource, params: URLSearchParams) {
