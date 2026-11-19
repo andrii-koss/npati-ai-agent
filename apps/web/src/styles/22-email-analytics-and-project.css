@@ -247,6 +247,25 @@
   overflow-y: auto;
 }
 
+.email-account-volume-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #b8b8b8 transparent;
+}
+
+.email-account-volume-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 6px;
+}
+
+.email-account-volume-scroll::-webkit-scrollbar-thumb {
+  background: #b8b8b8;
+  border-radius: 999px;
+}
+
+.email-account-volume-scroll::-webkit-scrollbar-thumb:hover {
+  background: #969696;
+}
+
 .email-volume-table-wrap .automations-table {
   width: 100%;
   border-collapse: collapse;
@@ -296,20 +315,19 @@
   color: #0f172a;
 }
 
-.email-table-agent-cell,
-.email-table-account-cell {
+.email-table-agent-cell {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.agent-avatar-mini,
-.email-avatar-mini {
+.agent-avatar-mini {
   font-size: 14px;
   line-height: 1;
 }
 
 .email-truncate-address {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

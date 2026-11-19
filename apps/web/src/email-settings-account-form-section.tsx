@@ -264,7 +264,7 @@ export function EmailSettingsAccountFormSection({ analytics, t, setAnalyticsExpa
                       <p>{t("emailSettings.analytics.noVolumeByAccount")}</p>
                     </div>
                   ) : (
-                    <div className="email-volume-table-wrap">
+                    <div className="email-volume-table-wrap email-account-volume-scroll">
                       <table className="automations-table">
                         <thead>
                           <tr>
@@ -276,10 +276,7 @@ export function EmailSettingsAccountFormSection({ analytics, t, setAnalyticsExpa
                           {analytics.volumeByAccount.map((row) => (
                             <tr key={row.accountId}>
                               <td>
-                                <div className="email-table-account-cell">
-                                  <span className="email-avatar-mini">✉️</span>
-                                  <span className="email-truncate-address" title={row.email}>{row.email}</span>
-                                </div>
+                                <span className="email-truncate-address" title={row.email}>{row.email}</span>
                               </td>
                               <td style={{ textAlign: "right" }}>
                                 <span className="email-traffic-pill msg">{row.count}</span>
