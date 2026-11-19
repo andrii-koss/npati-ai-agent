@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CryptoVault, type AuthContext } from "@npati/workspace";
+import { CryptoVault, type AuthContext, type WorkspaceStore } from "@npati/workspace";
 import { MessagingIntegrationsRepository } from "../apps/agent-api/src/messaging-integrations-repository";
 import { MessagingGateway, TelegramMessagingAdapter, formatTelegramCards, markdownToTelegramHtml, stripMarkdown } from "../apps/agent-api/src/messaging-gateway";
 import Fastify from "fastify";
@@ -11,6 +11,28 @@ import { runMigration048 } from "../packages/workspace/src/migration-048";
 import { MessagingScopeRouter } from "../apps/agent-api/src/messaging-scope-router";
 
 const owner:AuthContext={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage","tools:execute"]};
+
+it("includes company choices with the channels and connections when requested", async () => {
+  const repo = new MessagingIntegrationsRepository(undefined, undefined, new CryptoVault("test-master-key-that-is-at-least-thirty-two-characters"));
+  await repo.createTelegram(owner, "company-a", { displayName: "Saved connection", botToken: "test-token" });
+  const listCompanies = vi.fn(async () => ({ items: [{ id: "company-a", name: "Bakery", description: "Other company fields" }], nextCursor: null }));
+  const app = Fastify();
+  registerMessagingIntegrationRoutes(app, {
+    auth: { authenticate: async () => owner }, store: { listCompanies } as unknown as WorkspaceStore,
+    repo, gateway: new MessagingGateway(), handleMessage: async () => ({ message: "" }),
+  });
+  try {
+    const opening = await app.inject({ method: "GET", url: "/integrations/channels?includeCompanies=true" });
+    expect(opening.statusCode).toBe(200);
+    expect(opening.json().companies).toEqual([{ id: "company-a", name: "Bakery" }]);
+    expect(opening.json().connections[0]).toMatchObject({ displayName: "Saved connection", companyId: "company-a" });
+    expect(opening.json().channels.some((channel: { id: string }) => channel.id === "telegram")).toBe(true);
+    expect(listCompanies).toHaveBeenCalledExactlyOnceWith(owner);
+    const catalog = await app.inject({ method: "GET", url: "/integrations/channels" });
+    expect(catalog.json()).not.toHaveProperty("companies");
+    expect(listCompanies).toHaveBeenCalledTimes(1);
+  } finally { await app.close(); }
+});
 
 describe("messaging migration",()=>{
   it("uses the existing TEXT identifier type for Company Agent foreign keys",async()=>{

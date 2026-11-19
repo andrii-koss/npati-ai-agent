@@ -1,75 +1,61 @@
 import { PageGuideLink } from "./PageGuideLink";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "./i18n";
-import {
-  getCachedChannels,
-  getCachedCompanies,
-  getCachedConnections,
-  STORAGE_CHANNELS_KEY,
-  STORAGE_COMPANIES_KEY,
-  STORAGE_CONNECTIONS_KEY,
-} from "./integrations/cache";
+import { readIntegrationsCatalog, requestIntegrationsCatalog, type IntegrationsCatalog } from "./integrations/cache";
 import { IntegrationDrawer } from "./integrations/IntegrationDrawer";
 import {
-  api,
   capabilityKeyMap,
   Channel,
-  Company,
-  Connection,
   getScopeLabel,
 } from "./integrations/types";
 import { Badge, ChannelIcon } from "./integrations/ui";
 import { InboundWebhooksSection } from "./integrations/InboundWebhooksSection";
 
+const EMPTY_CATALOG: IntegrationsCatalog = { channels: [], connections: [], companies: [] };
+
 export function IntegrationsPage() {
   const { t } = useTranslation();
-  const [channels, setChannels] = useState<Channel[]>(getCachedChannels);
-  const [connections, setConnections] = useState<Connection[]>(getCachedConnections);
-  const [companies, setCompanies] = useState<Company[]>(getCachedCompanies);
+  const [catalog, setCatalog] = useState(readIntegrationsCatalog);
+  const { channels, connections, companies } = catalog ?? EMPTY_CATALOG;
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "available" | "coming" | "connected">("all");
   const [selected, setSelected] = useState<Channel | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [hasLoaded, setHasLoaded] = useState<boolean>(() => {
-    try {
-      return Boolean(localStorage.getItem(STORAGE_CHANNELS_KEY));
-    } catch {
-      return false;
-    }
-  });
-  const [loading, setLoading] = useState<boolean>(() => !hasLoaded);
+  const [loading, setLoading] = useState(() => !catalog);
   const navigate = useNavigate();
+  const mounted = useRef(false);
+  const pending = useRef<Promise<void> | null>(null);
 
-  const load = async () => {
-    try {
-      const [catalog, companyResult] = await Promise.all([
-        api<{ channels: Channel[]; connections: Connection[] }>("/integrations/channels"),
-        api<{ companies: Company[] }>("/companies"),
-      ]);
-      setChannels((prev) => JSON.stringify(prev) === JSON.stringify(catalog.channels) ? prev : catalog.channels);
-      setConnections((prev) => JSON.stringify(prev) === JSON.stringify(catalog.connections) ? prev : catalog.connections);
-      setCompanies((prev) => JSON.stringify(prev) === JSON.stringify(companyResult.companies) ? prev : companyResult.companies);
-      try {
-        localStorage.setItem(STORAGE_CHANNELS_KEY, JSON.stringify(catalog.channels));
-        localStorage.setItem(STORAGE_CONNECTIONS_KEY, JSON.stringify(catalog.connections));
-        localStorage.setItem(STORAGE_COMPANIES_KEY, JSON.stringify(companyResult.companies));
-      } catch {}
+  const load = useCallback(() => {
+    if (pending.current) return pending.current;
+    const request = requestIntegrationsCatalog().then(next => {
+      if (!mounted.current) return;
+      setCatalog(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
       setError("");
-      setHasLoaded(true);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
-    }
+    }).catch(cause => {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+    }).finally(() => {
+      pending.current = null;
+      if (mounted.current) setLoading(false);
+    });
+    pending.current = request;
+    return request;
+  }, []);
+
+  const refreshAfterChange = async () => {
+    // A poll started before the action completed cannot show its result.
+    if (pending.current) await pending.current;
+    if (mounted.current) await load();
   };
 
   useEffect(() => {
+    mounted.current = true;
     void load();
     const timer = window.setInterval(() => void load(), 5000);
-    return () => window.clearInterval(timer);
-  }, []);
+    return () => { mounted.current = false; window.clearInterval(timer); };
+  }, [load]);
 
   const connectedChannels = useMemo(() => new Set(connections.map((connection) => connection.channel)), [connections]);
   const visible = useMemo(
@@ -146,7 +132,7 @@ export function IntegrationsPage() {
           </div>
           <span>{t("integrationsPage.myConnections.addedCount", { count: connections.length })}</span>
         </div>
-        {!hasLoaded && loading && connections.length === 0 ? (
+        {!catalog && loading ? (
           <div className="empty-inline" style={{ minHeight: "84px", display: "grid", placeItems: "center" }}>
             <span>{t("integrationsPage.myConnections.loading")}</span>
           </div>
@@ -273,7 +259,7 @@ export function IntegrationsPage() {
           companies={companies}
           initialConnectionId={selectedConnectionId}
           onClose={() => { setSelected(null); setSelectedConnectionId(null); }}
-          onChanged={load}
+          onChanged={refreshAfterChange}
         />
       )}
     </main>

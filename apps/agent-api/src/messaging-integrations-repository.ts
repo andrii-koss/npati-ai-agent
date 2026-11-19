@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Pool } from "pg";
 import { CryptoVault, type AuthContext } from "@npati/workspace";
 import type { CompanyEmailAccount } from "./email-inbox-types";
@@ -88,11 +89,13 @@ export class MessagingIntegrationsRepository{
     settings.access.allowedUserIds=[...account.allowedSenders,...account.allowedDomains.map((domain)=>`*@${domain}`)];
     settings.delivery.typing=false;
     settings.delivery.progressive=false;
-    const item:MessagingConnection=existing?Object.assign(existing,{
+    const updates = {
       companyId,agentId:scope==="agent"?account.agentId||null:null,scope,
       activeCompanyId:scope==="account"?null:companyId,activeAgentId:scope==="agent"?account.agentId||null:null,
-      displayName:account.displayName||account.emailAddress,status,permissions:[...new Set(permissions)],settings,updatedAt:now,
-    }):{
+      displayName:account.displayName||account.emailAddress,status,permissions:[...new Set(permissions)],settings,
+    };
+    if (existing && (Object.keys(updates) as (keyof typeof updates)[]).every(key => isDeepStrictEqual(existing[key], updates[key]))) return existing;
+    const item:MessagingConnection=existing?{...existing,...updates,updatedAt:now}:{
       id:account.id,workspaceId:account.workspaceId,userId:account.userId,companyId,
       agentId:scope==="agent"?account.agentId||null:null,scope,channel:"email",provider:null,
       activeCompanyId:scope==="account"?null:companyId,activeAgentId:scope==="agent"?account.agentId||null:null,

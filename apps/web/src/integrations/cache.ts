@@ -1,46 +1,20 @@
-import { Channel, Company, Connection } from "./types";
+import { readSettingsSnapshot, requestSettingsRead } from "../settings-page-cache";
+import { api, type Channel, type Company, type Connection } from "./types";
 
-export const DEFAULT_CHANNELS: Channel[] = [
-  { id: "telegram", name: "Telegram", available: true, capabilities: ["Chat", "Tasks", "Files", "Automations", "Company actions"] },
-  { id: "discord", name: "Discord", available: true, capabilities: ["DMs", "Servers", "Threads", "Files", "Commands", "Automations"] },
-  { id: "slack", name: "Slack", available: true, capabilities: ["DMs", "Channels", "Threads", "Files", "Commands", "Automations"] },
-  { id: "whatsapp", name: "WhatsApp", available: true, capabilities: ["Chat", "Tasks", "Files", "Voice", "Groups", "Automations"] },
-  { id: "email", name: "Email", available: true, capabilities: ["Chat Runtime", "Company Agents", "Threads", "Files", "Approvals", "Automations"] },
-];
+export type IntegrationsCatalog = { channels: Channel[]; connections: Connection[]; companies: Company[] };
 
-export const STORAGE_CHANNELS_KEY = "npati_integrations_channels";
-export const STORAGE_CONNECTIONS_KEY = "npati_integrations_connections";
-export const STORAGE_COMPANIES_KEY = "npati_integrations_companies";
+const CATALOG_KEY = "integrations:catalog";
+const STORAGE_CHANNELS_KEY = "npati_integrations_channels";
 
-export function getCachedChannels(): Channel[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_CHANNELS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return DEFAULT_CHANNELS;
+export function readIntegrationsCatalog() {
+  return readSettingsSnapshot<IntegrationsCatalog>(CATALOG_KEY) ?? null;
 }
 
-export function getCachedConnections(): Connection[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_CONNECTIONS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return [];
-}
-
-export function getCachedCompanies(): Company[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_COMPANIES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return [];
+export function requestIntegrationsCatalog() {
+  return requestSettingsRead(CATALOG_KEY, async () => {
+    const catalog = await api<IntegrationsCatalog>("/integrations/channels?includeCompanies=true");
+    // Capability Inspector shares the public channel catalog.
+    try { localStorage.setItem(STORAGE_CHANNELS_KEY, JSON.stringify(catalog.channels)); } catch { /* Optional cache. */ }
+    return catalog;
+  });
 }
