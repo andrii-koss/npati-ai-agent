@@ -100,6 +100,16 @@ export const de: TranslationSchema = {
     deleteConfirmation: "Löschen bestätigen",
     confirmation: "Bestätigung",
     inputRequired: "Eingabe erforderlich",
+    recordSelection: {
+      selectAll: "Alle auswählen ({{count}})",
+      deselectAll: "Auswahl aufheben",
+      deleteSelected: "Ausgewählte löschen ({{count}})",
+      deleting: "Wird gelöscht …",
+      selectRecord: "{{name}} auswählen",
+      confirmMessage: "Die ausgewählten Einträge ({{count}}) werden endgültig gelöscht.",
+      deleted: "Gelöschte Einträge ({{count}})",
+      deleteFailed: "Einige ausgewählte Einträge konnten nicht gelöscht werden ({{count}}).",
+    },
   },
   nav: {
     chat: "Chat",

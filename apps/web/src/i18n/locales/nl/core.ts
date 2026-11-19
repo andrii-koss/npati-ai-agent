@@ -99,7 +99,17 @@ export const core = {
     "notification": "Melding",
     "deleteConfirmation": "Verwijdering bevestigen",
     "confirmation": "Bevestiging",
-    "inputRequired": "Invoer vereist"
+    "inputRequired": "Invoer vereist",
+    "recordSelection": {
+      "selectAll": "Alles selecteren ({{count}})",
+      "deselectAll": "Alles deselecteren",
+      "deleteSelected": "Selectie verwijderen ({{count}})",
+      "deleting": "Bezig met verwijderen…",
+      "selectRecord": "{{name}} selecteren",
+      "confirmMessage": "De geselecteerde items ({{count}}) worden definitief verwijderd.",
+      "deleted": "Verwijderde items ({{count}})",
+      "deleteFailed": "Sommige geselecteerde items konden niet worden verwijderd ({{count}})."
+    }
   },
   "nav": {
     "chat": "Chat",

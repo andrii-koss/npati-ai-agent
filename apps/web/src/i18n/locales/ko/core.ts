@@ -99,7 +99,17 @@ export const core = {
     "notification": "알림",
     "deleteConfirmation": "삭제 확인",
     "confirmation": "확인",
-    "inputRequired": "입력이 필요합니다"
+    "inputRequired": "입력이 필요합니다",
+    "recordSelection": {
+      "selectAll": "전체 선택({{count}}개)",
+      "deselectAll": "전체 선택 해제",
+      "deleteSelected": "선택 항목 삭제({{count}}개)",
+      "deleting": "삭제 중…",
+      "selectRecord": "‘{{name}}’ 선택",
+      "confirmMessage": "선택한 항목({{count}}개)이 영구적으로 삭제됩니다.",
+      "deleted": "삭제된 항목({{count}}개)",
+      "deleteFailed": "선택한 항목 중 일부를 삭제하지 못했습니다({{count}}개)."
+    }
   },
   "nav": {
     "chat": "채팅",

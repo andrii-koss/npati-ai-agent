@@ -34,6 +34,20 @@ describe("interface language catalogues", () => {
     expect(Object.keys(dictionaries).sort()).toEqual(SUPPORTED_LANGUAGES.map(item => item.code).sort());
   });
 
+  it("localizes bulk record actions in every language with the same template variables", () => {
+    const reference = dictionaries.en.common.recordSelection;
+    for (const { code } of SUPPORTED_LANGUAGES) {
+      const translated = dictionaries[code].common.recordSelection;
+      expect(Object.keys(translated).sort(), code).toEqual(Object.keys(reference).sort());
+      for (const [key, value] of Object.entries(reference)) {
+        const label = translated[key as keyof typeof reference];
+        expect(label.trim(), `${code}:${key}`).toBeTruthy();
+        expect(placeholders(label)).toEqual(placeholders(value));
+        if (code !== "en") expect(label, `${code}:${key}`).not.toBe(value);
+      }
+    }
+  });
+
   it("keeps every added locale file within the 800-line limit", () => {
     for (const language of addedLanguages) {
       const localesDirectory = join(dirname(fileURLToPath(import.meta.url)), "locales");

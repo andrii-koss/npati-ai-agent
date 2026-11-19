@@ -99,7 +99,17 @@ export const core = {
     "notification": "通知",
     "deleteConfirmation": "确认删除",
     "confirmation": "确认",
-    "inputRequired": "需要输入"
+    "inputRequired": "需要输入",
+    "recordSelection": {
+      "selectAll": "全选（{{count}}）",
+      "deselectAll": "取消全选",
+      "deleteSelected": "删除选中项（{{count}}）",
+      "deleting": "正在删除…",
+      "selectRecord": "选择「{{name}}」",
+      "confirmMessage": "选中的记录（{{count}} 条）将被永久删除。",
+      "deleted": "已删除 {{count}} 条记录",
+      "deleteFailed": "部分选中的记录未能删除（{{count}} 条）。"
+    }
   },
   "nav": {
     "chat": "聊天",

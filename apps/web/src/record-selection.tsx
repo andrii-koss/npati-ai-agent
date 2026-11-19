@@ -130,7 +130,7 @@ export function RecordSelectionToolbar({ selection, matchingTotal }: { selection
         deleting={deleting}
         selectedCount={selected.size}
         selectAllLabel={t("common.recordSelection.selectAll", { count: total })}
-        deleteLabel={deleting ? t("common.recordSelection.deleting") : t("companySettings.massDelete.deleteSelected", { count: selected.size })}
+        deleteLabel={deleting ? t("common.recordSelection.deleting") : t("common.recordSelection.deleteSelected", { count: selected.size })}
         clearLabel={t("common.recordSelection.deselectAll")}
         onToggleAll={allSelected ? selection.clear : selection.selectAll}
         onDelete={selection.remove}

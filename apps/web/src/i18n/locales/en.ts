@@ -103,6 +103,7 @@ export const en: TranslationSchema = {
     recordSelection: {
       selectAll: "Select all ({{count}})",
       deselectAll: "Deselect all",
+      deleteSelected: "Delete selected ({{count}})",
       deleting: "Deleting...",
       selectRecord: "Select {{name}}",
       confirmMessage: "The selected records ({{count}}) will be permanently removed.",

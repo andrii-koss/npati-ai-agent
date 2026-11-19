@@ -100,6 +100,16 @@ export const pl: TranslationSchema = {
     deleteConfirmation: "Potwierdzenie usunięcia",
     confirmation: "Potwierdzenie",
     inputRequired: "Wymagane wprowadzenie danych",
+    recordSelection: {
+      selectAll: "Zaznacz wszystko ({{count}})",
+      deselectAll: "Odznacz wszystko",
+      deleteSelected: "Usuń zaznaczone ({{count}})",
+      deleting: "Usuwanie…",
+      selectRecord: "Zaznacz „{{name}}”",
+      confirmMessage: "Zaznaczone pozycje ({{count}}) zostaną trwale usunięte.",
+      deleted: "Usunięte pozycje ({{count}})",
+      deleteFailed: "Nie udało się usunąć części zaznaczonych pozycji ({{count}}).",
+    },
   },
   nav: {
     chat: "Czat",

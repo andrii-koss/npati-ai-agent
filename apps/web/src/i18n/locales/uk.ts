@@ -103,6 +103,7 @@ export const uk: TranslationSchema = {
     recordSelection: {
       selectAll: "Вибрати всі ({{count}})",
       deselectAll: "Зняти виділення",
+      deleteSelected: "Видалити вибрані ({{count}})",
       deleting: "Видалення...",
       selectRecord: "Вибрати {{name}}",
       confirmMessage: "Вибрані записи ({{count}}) буде остаточно видалено.",

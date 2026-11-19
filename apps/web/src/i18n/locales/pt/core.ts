@@ -99,7 +99,17 @@ export const core = {
     "notification": "Notificação",
     "deleteConfirmation": "Confirmação de exclusão",
     "confirmation": "Confirmação",
-    "inputRequired": "Preenchimento necessário"
+    "inputRequired": "Preenchimento necessário",
+    "recordSelection": {
+      "selectAll": "Selecionar tudo ({{count}})",
+      "deselectAll": "Desmarcar tudo",
+      "deleteSelected": "Excluir selecionados ({{count}})",
+      "deleting": "Excluindo…",
+      "selectRecord": "Selecionar {{name}}",
+      "confirmMessage": "Os itens selecionados ({{count}}) serão excluídos permanentemente.",
+      "deleted": "Itens excluídos ({{count}})",
+      "deleteFailed": "Não foi possível excluir alguns dos itens selecionados ({{count}})."
+    }
   },
   "nav": {
     "chat": "Conversa",

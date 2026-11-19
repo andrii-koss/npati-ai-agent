@@ -100,6 +100,16 @@ export const fr: TranslationSchema = {
     deleteConfirmation: "Confirmation de suppression",
     confirmation: "Confirmation",
     inputRequired: "Saisie requise",
+    recordSelection: {
+      selectAll: "Tout sélectionner ({{count}})",
+      deselectAll: "Tout désélectionner",
+      deleteSelected: "Supprimer la sélection ({{count}})",
+      deleting: "Suppression en cours…",
+      selectRecord: "Sélectionner {{name}}",
+      confirmMessage: "Les éléments sélectionnés ({{count}}) seront définitivement supprimés.",
+      deleted: "Éléments supprimés ({{count}})",
+      deleteFailed: "Certains éléments sélectionnés n’ont pas pu être supprimés ({{count}}).",
+    },
   },
   nav: {
     chat: "Discussion",

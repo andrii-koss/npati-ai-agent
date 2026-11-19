@@ -99,7 +99,17 @@ export const core = {
     "notification": "Bildirim",
     "deleteConfirmation": "Silme onayı",
     "confirmation": "Onay",
-    "inputRequired": "Girdi gerekli"
+    "inputRequired": "Girdi gerekli",
+    "recordSelection": {
+      "selectAll": "Tümünü seç ({{count}})",
+      "deselectAll": "Tüm seçimleri kaldır",
+      "deleteSelected": "Seçilenleri sil ({{count}})",
+      "deleting": "Siliniyor…",
+      "selectRecord": "«{{name}}» öğesini seç",
+      "confirmMessage": "Seçili kayıtlar ({{count}}) kalıcı olarak silinecek.",
+      "deleted": "Silinen kayıtlar ({{count}})",
+      "deleteFailed": "Seçili kayıtlardan bazıları silinemedi ({{count}})."
+    }
   },
   "nav": {
     "chat": "Sohbet",

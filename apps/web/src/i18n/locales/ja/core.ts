@@ -99,7 +99,17 @@ export const core = {
     "notification": "通知",
     "deleteConfirmation": "削除の確認",
     "confirmation": "確認",
-    "inputRequired": "入力が必要です"
+    "inputRequired": "入力が必要です",
+    "recordSelection": {
+      "selectAll": "すべて選択（{{count}}件）",
+      "deselectAll": "選択をすべて解除",
+      "deleteSelected": "選択項目を削除（{{count}}件）",
+      "deleting": "削除中…",
+      "selectRecord": "「{{name}}」を選択",
+      "confirmMessage": "選択した項目（{{count}}件）は完全に削除されます。",
+      "deleted": "削除した項目（{{count}}件）",
+      "deleteFailed": "選択した項目の一部を削除できませんでした（{{count}}件）。"
+    }
   },
   "nav": {
     "chat": "チャット",

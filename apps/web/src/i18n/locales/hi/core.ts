@@ -99,7 +99,17 @@ export const core = {
     "notification": "सूचना",
     "deleteConfirmation": "हटाने की पुष्टि",
     "confirmation": "पुष्टि",
-    "inputRequired": "जानकारी देना ज़रूरी है"
+    "inputRequired": "जानकारी देना ज़रूरी है",
+    "recordSelection": {
+      "selectAll": "सभी चुनें ({{count}})",
+      "deselectAll": "सभी का चयन हटाएँ",
+      "deleteSelected": "चुने हुए रिकॉर्ड हटाएँ ({{count}})",
+      "deleting": "हटाया जा रहा है…",
+      "selectRecord": "“{{name}}” चुनें",
+      "confirmMessage": "चुने गए रिकॉर्ड ({{count}}) हमेशा के लिए हटा दिए जाएँगे।",
+      "deleted": "हटाए गए रिकॉर्ड ({{count}})",
+      "deleteFailed": "कुछ चुने गए रिकॉर्ड नहीं हटाए जा सके ({{count}})।"
+    }
   },
   "nav": {
     "chat": "चैट",

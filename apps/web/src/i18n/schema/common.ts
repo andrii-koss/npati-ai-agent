@@ -31,9 +31,10 @@ export interface CommonSchema {
     deleteConfirmation: string;
     confirmation: string;
     inputRequired: string;
-    recordSelection?: {
+    recordSelection: {
       selectAll: string;
       deselectAll: string;
+      deleteSelected: string;
       deleting: string;
       selectRecord: string;
       confirmMessage: string;

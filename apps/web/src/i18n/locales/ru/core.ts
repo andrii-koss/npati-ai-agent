@@ -99,7 +99,17 @@ export const core = {
     "notification": "Уведомление",
     "deleteConfirmation": "Подтверждение удаления",
     "confirmation": "Подтверждение",
-    "inputRequired": "Требуется ввод"
+    "inputRequired": "Требуется ввод",
+    "recordSelection": {
+      "selectAll": "Выбрать все ({{count}})",
+      "deselectAll": "Снять выделение",
+      "deleteSelected": "Удалить выбранное ({{count}})",
+      "deleting": "Удаление…",
+      "selectRecord": "Выбрать «{{name}}»",
+      "confirmMessage": "Выбранные записи ({{count}}) будут удалены без возможности восстановления.",
+      "deleted": "Удалено записей ({{count}})",
+      "deleteFailed": "Не удалось удалить некоторые выбранные записи ({{count}})."
+    }
   },
   "nav": {
     "chat": "Чат",

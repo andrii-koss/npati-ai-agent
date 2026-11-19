@@ -99,7 +99,17 @@ export const core = {
     "notification": "إشعار",
     "deleteConfirmation": "تأكيد الحذف",
     "confirmation": "تأكيد",
-    "inputRequired": "الإدخال مطلوب"
+    "inputRequired": "الإدخال مطلوب",
+    "recordSelection": {
+      "selectAll": "تحديد الكل ({{count}})",
+      "deselectAll": "إلغاء تحديد الكل",
+      "deleteSelected": "حذف المحدد ({{count}})",
+      "deleting": "جارٍ الحذف…",
+      "selectRecord": "تحديد «{{name}}»",
+      "confirmMessage": "ستُحذف السجلات المحددة ({{count}}) نهائيًا.",
+      "deleted": "السجلات المحذوفة ({{count}})",
+      "deleteFailed": "تعذّر حذف بعض السجلات المحددة ({{count}})."
+    }
   },
   "nav": {
     "chat": "الدردشة",
