@@ -441,6 +441,11 @@
   background: #d7d7d7;
 }
 
+.ai-marketplace .provider-card-main > .connection-light {
+  align-self: start;
+  justify-self: end;
+}
+
 .connection-light.on {
   background: #35b971;
   box-shadow: 0 0 0 4px rgb(53 185 113 / 12%);
