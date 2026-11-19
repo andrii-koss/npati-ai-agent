@@ -1,7 +1,7 @@
 import { getChatMessagesWithProjectCards } from "./project-chat-cards";
 import { registerConversationImportRoute } from "./conversation-import-route";
 import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
-import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
+import { decodeGoalPageCursor, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { isChatCapableModel } from "@npati/omniroute-adapter";
@@ -193,6 +193,23 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
 
   app.get("/goals", async (request, reply) => {
     try { return await store.listUserGoals(await auth.authenticate(request)); } catch (error) { return errorReply(reply, error); }
+  });
+  app.get<{ Querystring: Record<string, string | undefined> }>("/goals/page", async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "workspace:read");
+      const { businessId, status, priority, search, cursor, workspace } = request.query;
+      if (status !== undefined && status !== "active" && status !== "paused" && status !== "completed" && status !== "cancelled") {
+        throw new Error("Invalid goal status filter");
+      }
+      if (priority && priority !== "1" && priority !== "2" && priority !== "3") throw new Error("Invalid goal priority filter");
+      const page = store.listGoalPage(context, {
+        businessId, status, priority: priority ? Number(priority) : undefined,
+        search: search?.trim(), after: cursor ? decodeGoalPageCursor(cursor) : undefined,
+      });
+      if (workspace !== "1" || cursor) return await page;
+      const [data, overview] = await Promise.all([page, store.overview(context)]);
+      return { ...data, overview };
+    } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/goals", async (request, reply) => {
     try { return await store.listGoals(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }

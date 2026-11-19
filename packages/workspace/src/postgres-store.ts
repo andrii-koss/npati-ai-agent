@@ -7,6 +7,8 @@ import * as replay from "./postgres-replay-repositories";
 import * as governance from "./postgres-governance-repositories";
 import * as onboarding from "./postgres-onboarding-repositories";
 import * as collab from "./postgres-collaboration-repositories";
+import { listGoalPage } from "./postgres-goal-repositories";
+import type { GoalPageQuery } from "./goals-page";
 import { readNeutralMessagePage, readChatSidebarPage } from "./postgres-chat-pages";
 import { PostgresSessionRepositories } from "./postgres-session-repositories";
 import type {
@@ -308,6 +310,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async failOrphanedInlineCompanyAgentRuns(staleMs: number) { return company.failOrphanedInlineCompanyAgentRuns(this.pool, staleMs); }
   async listGoals(context: AuthContext, businessId: string) { return collab.listGoals(this.pool, context, businessId); }
   async listUserGoals(context: AuthContext) { return collab.listUserGoals(this.pool, context); }
+  async listGoalPage(context: AuthContext, query: GoalPageQuery) { return listGoalPage(this.pool, context, query); }
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) { return collab.createGoal(this.pool, context, businessId, input); }
   async linkGoal(context: AuthContext, businessId: string, goalId: string) { return collab.linkGoal(this.pool, context, businessId, goalId); }
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) { return collab.updateGoal(this.pool, context, businessId, goalId, input); }

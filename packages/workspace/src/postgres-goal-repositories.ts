@@ -1,14 +1,59 @@
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
-import { getBusiness } from "./postgres-store-support";
+import { assertMember, businessCredentialScopeSql, getBusiness } from "./postgres-store-support";
 import { goalColumns } from "./postgres-store-schema";
 import { WorkspaceAccessError } from "./types";
 import type { AuthContext, Goal, GoalInput } from "./types";
+import { GOALS_PAGE_SIZE, goalPageCursor, type GoalCounts, type GoalPage, type GoalPageQuery } from "./goals-page";
 
 export async function listGoals(pool: Pool, context: AuthContext, businessId: string) {
     await getBusiness(pool, context, businessId);
     const goals = (await pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
-    // The Goals page names the responsible agent (V6 step 11: it was stored and shown in the chat, never on the page).
+    return withAssignedAgents(pool, context, goals);
+  }
+
+export async function listGoalPage(pool: Pool, context: AuthContext, query: GoalPageQuery): Promise<GoalPage> {
+  if (query.businessId) await getBusiness(pool, context, query.businessId);
+  else await assertMember(pool, context);
+  const result = await pool.query<{ goals: Goal[]; counts: GoalCounts | null }>(
+    `WITH scope AS MATERIALIZED (
+      SELECT id, created_at, status, priority, title, description, target_unit
+      FROM goals
+      WHERE workspace_id=$1 AND business_id IN (
+        SELECT id FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2
+          AND ${businessCredentialScopeSql(3)}
+          AND (($4::text IS NULL AND activation_status='active') OR id=$4)
+      )
+    ), page AS (
+      SELECT ${goalColumns}
+      FROM goals WHERE id IN (
+        SELECT id FROM scope
+        WHERE ($5::text IS NULL OR status=$5)
+          AND ($6::integer IS NULL OR priority=$6)
+          AND ($7::text IS NULL OR strpos(lower(title), lower($7)) > 0
+            OR strpos(lower(description), lower($7)) > 0
+            OR strpos(lower(target_unit), lower($7)) > 0)
+          AND ($8::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) < ($8,$9::text))
+        ORDER BY date_trunc('milliseconds',created_at) DESC, id DESC LIMIT $10
+      )
+    )
+    SELECT
+      (SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY date_trunc('milliseconds',"createdAt") DESC, id DESC), '[]'::jsonb) FROM page) AS goals,
+      CASE WHEN $8::timestamptz IS NULL THEN (
+        SELECT jsonb_build_object('total',count(*),'active',count(*) FILTER (WHERE status='active'),
+          'paused',count(*) FILTER (WHERE status='paused'),'completed',count(*) FILTER (WHERE status='completed'),
+          'highPriority',count(*) FILTER (WHERE priority=1))
+        FROM scope
+      ) END AS counts`,
+    [context.workspaceId, context.userId, context.companyId ?? null, query.businessId ?? null, query.status ?? null,
+      query.priority ?? null, query.search || null, query.after?.createdAt ?? null, query.after?.id ?? null, GOALS_PAGE_SIZE + 1],
+  );
+  const { goals, counts } = result.rows[0]!;
+  const items = await withAssignedAgents(pool, context, goals.slice(0, GOALS_PAGE_SIZE));
+  return { goals: items, counts, nextCursor: goals.length > GOALS_PAGE_SIZE ? goalPageCursor(items.at(-1)!) : null };
+}
+
+async function withAssignedAgents(pool: Pool, context: AuthContext, goals: Goal[]) {
     const ids = [...new Set(goals.map((goal) => goal.assignedAgentId).filter((id): id is string => Boolean(id)))];
     if (!ids.length) return goals;
     const agents = new Map((await pool.query<{ id: string; name: string; role: string; companyName: string }>(

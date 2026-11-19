@@ -1,8 +1,8 @@
-import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
-import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { ALL_COMPANIES } from "./company-scope";
+import { useGoalsPage } from "./use-goals-page";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
 import { useLinkedBusiness } from "./linked-business";
@@ -13,39 +13,20 @@ import {
   type GoalFormData,
   initialForm,
   api,
-  getCachedGoals,
-  updateCachedGoals,
 } from "./goals-types";
 import { GoalsDrawer } from "./goals-drawer";
 
 export type { Goal };
 
-function getInitialBusinessId(): string {
-  try {
-    const raw = sessionStorage.getItem("npati_workspace_overview_cache_v1")
-      || localStorage.getItem("npati_workspace_overview_cache_v1");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return parsed?.currentBusiness?.id || parsed?.businesses?.[0]?.id || "";
-    }
-  } catch {}
-  return "";
-}
-
 export function GoalsPage() {
   const { t, language } = useTranslation();
-  const { overview, refresh, switchBusiness } = useWorkspace();
+  const { overview, switchBusiness } = useWorkspace();
   const business = useLinkedBusiness(overview, switchBusiness);
   const [scopeParams] = useSearchParams();
   const [companyScope, setCompanyScope] = useState(() => scopeParams.get("business") || ALL_COMPANIES);
-  const scopeIds = companyScope === ALL_COMPANIES ? (overview?.businesses.map(item => item.id) ?? []) : [companyScope];
-  const scopeKey = scopeIds.join("\0");
-  const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
-
-  const [goals, setGoals] = useState<Goal[]>(() => readSettingsSnapshot<Goal[]>(`goals:${companyScope}`) ?? (companyScope === ALL_COMPANIES ? scopeIds.flatMap(id => getCachedGoals(id)) : getCachedGoals(businessId)));
-  const [loading, setLoading] = useState(false);
+  const scopedBusinessId = companyScope === ALL_COMPANIES ? undefined : companyScope;
+  const businessId = scopedBusinessId ?? business?.id;
   const [notice, setNotice] = useState<string | null>(null);
-  const loadVersion = useRef(0);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
@@ -58,89 +39,21 @@ export function GoalsPage() {
   const [form, setForm] = useState<GoalFormData>(initialForm);
   const [saving, setSaving] = useState(false);
 
-  const loadGoals = async () => {
-    const version = ++loadVersion.current;
-    if (!scopeIds.length) {
-      if (overview) setGoals([]);
-      setLoading(false);
-      return;
-    }
-    const snapshotKey = `goals:${companyScope}`;
-    const cached = readSettingsSnapshot<Goal[]>(snapshotKey);
-    if (cached) setGoals(cached);
-    const publish = (data: Goal[]) => {
-      if (version !== loadVersion.current) return;
-      setGoals(data);
-      writeSettingsSnapshot(snapshotKey, data);
-      if (data.length) setLoading(false);
-    };
-    try {
-      const pages = await loadCompanyScopes(scopeIds, async id => {
-        const records = await api<Goal[]>(`/businesses/${id}/goals`);
-        return { id, records: records.map(item => ({ ...item, businessId: id })) };
-      }, { key: "goals", initial: cached ? scopeIds.map(id => ({ id, records: cached.filter(item => item.businessId === id) })) : undefined, isActive: () => version === loadVersion.current, onProgress: pages => publish(pages.flatMap(page => page.records)) });
-      const data = pages.flatMap(page => page.records);
-      if (version !== loadVersion.current) return;
-      publish(data);
-      pages.forEach(page => updateCachedGoals(page.id, page.records));
-    } catch (err: any) {
-      if (version !== loadVersion.current) return;
-      if ([403, 404].includes(err?.status ?? 0)) {
-        setGoals([]);
-        updateCachedGoals(businessId, []);
-        void refresh();
-      } else {
-        setNotice(t("goalsPage.notices.failedToLoad", { message: err.message }));
-      }
-    } finally {
-      if (version === loadVersion.current) setLoading(false);
-    }
-  };
-
+  const [search, setSearch] = useState("");
   useEffect(() => {
-    void loadGoals();
-    const handleGoalsChanged = () => { void loadGoals(); };
-    window.addEventListener("npati:goals-changed", handleGoalsChanged);
-    window.addEventListener("npati:business-changed", handleGoalsChanged);
-    return () => {
-      ++loadVersion.current;
-      window.removeEventListener("npati:goals-changed", handleGoalsChanged);
-      window.removeEventListener("npati:business-changed", handleGoalsChanged);
-    };
-  }, [scopeKey]);
+    const query = searchQuery.trim();
+    if (!query) { setSearch(""); return; }
+    const timer = setTimeout(() => setSearch(query), 200);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  // Statistics calculation
-  const stats = useMemo(() => {
-    const total = goals.length;
-    const active = goals.filter((g) => g.status === "active").length;
-    const paused = goals.filter((g) => g.status === "paused").length;
-    const completed = goals.filter((g) => g.status === "completed").length;
-    const highPriority = goals.filter((g) => g.priority === 1).length;
-    return { total, active, paused, completed, highPriority };
-  }, [goals]);
-
-  // Filtered goals
-  const filteredGoals = useMemo(() => {
-    return goals.filter((goal) => {
-      // Status filter
-      if (statusFilter !== "all" && goal.status !== statusFilter) {
-        return false;
-      }
-      // Priority filter
-      if (priorityFilter !== "all" && String(goal.priority) !== priorityFilter) {
-        return false;
-      }
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchesTitle = goal.title.toLowerCase().includes(q);
-        const matchesDesc = (goal.description || "").toLowerCase().includes(q);
-        const matchesUnit = (goal.targetUnit || "").toLowerCase().includes(q);
-        return matchesTitle || matchesDesc || matchesUnit;
-      }
-      return true;
-    });
-  }, [goals, statusFilter, priorityFilter, searchQuery]);
+  const { page, counts: stats, failed, bottom, reload: loadGoals } = useGoalsPage({
+    businessId: scopedBusinessId,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    priority: priorityFilter === "all" ? undefined : Number(priorityFilter),
+    search,
+  }, message => setNotice(t("goalsPage.notices.failedToLoad", { message })));
+  const goals = page?.goals ?? [];
 
   // Drawer handlers
   const openCreateDrawer = () => {
@@ -355,22 +268,22 @@ export function GoalsPage() {
       {/* 4 Stat Overview Cards matching /automations & /settings/capabilities */}
       <section className="overview-grid inspector-stats-grid automations-stats-grid goals-stats-grid">
         <div>
-          <strong>{stats.total}</strong>
+          <strong>{stats?.total}</strong>
           <span>{t("goalsPage.stats.totalGoals")}</span>
           <small>{t("goalsPage.stats.totalGoalsDesc")}</small>
         </div>
         <div>
-          <strong>{stats.active}</strong>
+          <strong>{stats?.active}</strong>
           <span>{t("goalsPage.stats.activeOutcomes")}</span>
           <small>{t("goalsPage.stats.activeOutcomesDesc")}</small>
         </div>
         <div>
-          <strong>{stats.completed}</strong>
+          <strong>{stats?.completed}</strong>
           <span>{t("goalsPage.stats.completedGoals")}</span>
           <small>{t("goalsPage.stats.completedGoalsDesc")}</small>
         </div>
         <div>
-          <strong>{stats.highPriority}</strong>
+          <strong>{stats?.highPriority}</strong>
           <span>{t("goalsPage.stats.highPriority")}</span>
           <small>{t("goalsPage.stats.highPriorityDesc")}</small>
         </div>
@@ -412,7 +325,7 @@ export function GoalsPage() {
               onClick={() => setStatusFilter("all")}
             >
               <span>{t("goalsPage.tabs.all")}</span>
-              <small className="tab-count">{goals.length}</small>
+              <small className="tab-count">{stats?.total}</small>
             </button>
             <button
               type="button"
@@ -422,7 +335,7 @@ export function GoalsPage() {
               onClick={() => setStatusFilter("active")}
             >
               <span>{t("goalsPage.tabs.active")}</span>
-              <small className="tab-count">{stats.active}</small>
+              <small className="tab-count">{stats?.active}</small>
             </button>
             <button
               type="button"
@@ -432,7 +345,7 @@ export function GoalsPage() {
               onClick={() => setStatusFilter("paused")}
             >
               <span>{t("goalsPage.tabs.paused")}</span>
-              <small className="tab-count">{stats.paused}</small>
+              <small className="tab-count">{stats?.paused}</small>
             </button>
             <button
               type="button"
@@ -442,7 +355,7 @@ export function GoalsPage() {
               onClick={() => setStatusFilter("completed")}
             >
               <span>{t("goalsPage.tabs.completed")}</span>
-              <small className="tab-count">{stats.completed}</small>
+              <small className="tab-count">{stats?.completed}</small>
             </button>
           </div>
 
@@ -472,17 +385,17 @@ export function GoalsPage() {
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            {t("goalsPage.showingGoals", { count: filteredGoals.length, total: goals.length })}
-            {searchQuery ? t("goalsPage.matchingQuery", { query: searchQuery }) : ""}
-            {priorityFilter !== "all" ? ` (P${priorityFilter})` : ""}
+            {page && stats && t("goalsPage.showingGoals", { count: goals.length, total: stats.total })}
+            {page && search ? t("goalsPage.matchingQuery", { query: search }) : ""}
+            {page && priorityFilter !== "all" ? ` (P${priorityFilter})` : ""}
           </span>
         </div>
       </div>
 
       {/* Main Content Area */}
-      {goals.length === 0 && loading ? (
-        <div className="automations-table-container goals-table-container" style={{ minHeight: "220px" }} />
-      ) : goals.length === 0 ? (
+      {!page ? (
+        failed ? null : <div className="automations-table-container goals-table-container" style={{ minHeight: "220px" }} />
+      ) : stats?.total === 0 ? (
         <div className="automations-empty-card goals-empty-card">
           <div className="automations-empty-icon">🎯</div>
           <h3>{t("goalsPage.empty.noGoalsTitle")}</h3>
@@ -497,7 +410,7 @@ export function GoalsPage() {
             {t("goalsPage.empty.createFirstGoal")}
           </button>
         </div>
-      ) : filteredGoals.length === 0 ? (
+      ) : goals.length === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🔍</div>
           <h3>{t("goalsPage.empty.noMatchingTitle")}</h3>
@@ -528,7 +441,7 @@ export function GoalsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredGoals.map((goal) => {
+              {goals.map((goal) => {
                 const progress = calculateProgress(goal.currentValue, goal.targetValue);
                 const targetDate = goal.targetDate ? new Date(goal.targetDate) : null;
                 const isOverdue = targetDate && goal.status === "active" && targetDate.getTime() < Date.now();
@@ -658,6 +571,8 @@ export function GoalsPage() {
           </table>
         </div>
       )}
+
+      {page?.nextCursor && <div ref={bottom} aria-hidden="true" style={{ height: 1 }} />}
 
       {/* Slide-over Drawer for Create / Edit Goal */}
       <GoalsDrawer

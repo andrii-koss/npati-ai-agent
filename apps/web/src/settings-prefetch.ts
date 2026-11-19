@@ -32,15 +32,16 @@ export function prefetchSettingsPage(href: string) {
   const module = modules[path!]; if (!module) return;
   warming.set(warmKey, Date.now()); void module().catch(() => undefined);
   void (async () => {
-    if (["/settings/business", "/settings/goals", "/settings/memory"].includes(path!)) {
+    if (["/settings/business", "/settings/memory"].includes(path!)) {
       const overview = readSettingsSnapshot<WorkspaceOverview>("business:overview") ?? await requestSettingsRead("business:overview", () => apiFetch<WorkspaceOverview>("/workspace/context"));
       if (path === "/settings/business") return;
-      const kind = path === "/settings/goals" ? "goals" : "memory";
+      const kind = "memory";
       if (readSettingsSnapshot(`${kind}:all`)) return;
       await loadCompanyScopes(overview.businesses.slice(0, 4).map(business => business.id), async id => ({ id, records: (await apiFetch<Row[]>(`/businesses/${id}/${kind}`)).map(item => ({ ...item, businessId: id })) }),
         { key: kind, isActive: () => getStoredAuthToken() === token, onProgress: pages => merge(`${kind}:all`, pages.flatMap(page => page.records)) });
       return;
     }
+    if (path === "/settings/goals") return;
     const companies = await listProjectCompanies();
     if (getStoredAuthToken() !== token) return;
     writeCachedCompanies(companies);

@@ -35,7 +35,16 @@ beforeEach(() => {
     const id = url.match(/\/(?:companies|businesses)\/(alpha|beta)/)?.[1] ?? "alpha";
     const item = { id: `${id}-item`, companyId: id, businessId: id, title: `Record ${id}`, name: `Record ${id}`, description: "Details", content: "Content", source: "user", type: "business_fact", confidence: 1, status: "active", priority: 2, prompt: "Task", cronExpression: "0 9 * * *", createdAt: "2026-11-16", updatedAt: "2026-11-16" };
     let data: unknown = {};
-    if (/\/businesses\/.*\/(goals|memory)$/.test(url)) data = [item];
+    if (url.startsWith("/api/goals/page")) {
+      const businessId = new URL(url, "http://localhost").searchParams.get("businessId");
+      const ids = businessId ? [businessId] : ["alpha", "beta"];
+      data = {
+        goals: ids.map(id => ({ ...item, id: `${id}-item`, businessId: id, title: `Record ${id}` })),
+        counts: { total: ids.length, active: ids.length, paused: 0, completed: 0, highPriority: 0 },
+        nextCursor: null,
+      };
+    }
+    else if (/\/businesses\/.*\/(goals|memory)$/.test(url)) data = [item];
     else if (url.endsWith("/automations")) data = { automations: [item] };
     else if (url.endsWith("/agents")) data = { agents: [] };
     else if (url.endsWith("/browser-targets")) data = { targets: [], emailAccounts: [] };
@@ -167,6 +176,10 @@ it.each([
   expect(host.textContent).toContain(first);
   expect(host.textContent).toContain(second);
   expect(requests.some(url => url.includes("/companies/all/") || url.includes("/businesses/all/"))).toBe(false);
+  if (page === "goals") {
+    expect(requests).toEqual(["/api/goals/page?workspace=1"]);
+    expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0"]);
+  }
   await act(async () => selector.click());
   expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe("All companies");
   await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "Beta Company")!.click());

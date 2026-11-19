@@ -1,7 +1,7 @@
 import { ContextBuilder } from "@npati/agent";
 import type { HubClient } from "@npati/hub-connector";
 import { defaultSkillRegistry } from "@npati/skills";
-import { InMemoryWorkspaceStore, WorkspaceAccessError, type AuthContext } from "@npati/workspace";
+import { decodeGoalPageCursor, InMemoryWorkspaceStore, WorkspaceAccessError, type AuthContext } from "@npati/workspace";
 import { describe, expect, it } from "vitest";
 
 const owner: AuthContext = { userId: "user-a", workspaceId: "workspace-a", permissions: ["owner"] };
@@ -79,6 +79,29 @@ describe("business workspace repository", () => {
     await expect(store.updateConversation({ ...owner, userId: "user-c" }, business.id, conversation.id, "No access")).rejects.toBeInstanceOf(WorkspaceAccessError);
     expect(await store.deleteConversation(owner, business.id, conversation.id)).toBe(true);
     expect(await store.listConversations(owner, business.id)).toEqual([]);
+  });
+
+  it("paginates newest goals across owned businesses and keeps counts independent of the filters", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const first = await store.createBusiness(owner, { name: "First business" });
+    const second = await store.createBusiness(owner, { name: "Second business" });
+    const colleague = { ...owner, userId: "user-c" };
+    const privateBusiness = await store.createBusiness(colleague, { name: "Colleague's business" });
+    await store.createGoal(colleague, privateBusiness.id, { title: "Private goal" });
+    const goals = await Promise.all(Array.from({ length: 13 }, (_, index) => store.createGoal(owner,
+      index % 2 ? first.id : second.id,
+      { title: `Goal ${index}`, status: index === 0 ? "paused" : "active", priority: index === 0 ? 1 : 2 },
+    )));
+    const ordered = [...goals].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    const start = await store.listGoalPage(owner, {});
+    expect(start.goals).toEqual(ordered.slice(0, 10));
+    expect(start.counts).toEqual({ total: 13, active: 12, paused: 1, completed: 0, highPriority: 1 });
+    const next = await store.listGoalPage(owner, { after: decodeGoalPageCursor(start.nextCursor!) });
+    expect(next).toEqual({ goals: ordered.slice(10), counts: null, nextCursor: null });
+    const filtered = await store.listGoalPage(owner, { status: "paused", priority: 1, search: "GOAL 0" });
+    expect(filtered.goals).toEqual([goals[0]]);
+    expect(filtered.counts).toEqual(start.counts);
+    await expect(store.listGoalPage(owner, { businessId: privateBusiness.id })).rejects.toBeInstanceOf(WorkspaceAccessError);
   });
 
   it("persists goals and memory while rejecting secrets", async () => {

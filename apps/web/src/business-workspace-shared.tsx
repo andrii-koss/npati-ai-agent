@@ -3,6 +3,7 @@ import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from
 import { ReactNode, createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { chatOpen, isChatPage } from "./chat-open";
+import { openGoalsPage } from "./goals-page-read";
 
 export type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -89,7 +90,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     try {
       // Opening a chat page reads the overview from its single open request instead of a request of its own.
       const opened = initial && isChatPage() ? await chatOpen().catch(() => null) : null;
-      const nextOverview = opened?.overview ?? await requestSettingsRead("business:overview", () => api<WorkspaceOverview>("/workspace/context"));
+      const path = window.location.pathname.replace(/\/$/, "");
+      const goalBusiness = new URLSearchParams(window.location.search).get("business");
+      const goals = initial && (path === "/settings/goals" || path === "/goals")
+        ? await openGoalsPage(goalBusiness && goalBusiness !== "all" ? goalBusiness : undefined, "workspace").catch(() => null)
+        : null;
+      const nextOverview = opened?.overview ?? goals?.overview
+        ?? await requestSettingsRead("business:overview", () => api<WorkspaceOverview>("/workspace/context"));
       if (getStoredAuthToken() !== token) return;
       updateCachedWorkspaceOverview(nextOverview);
       setOverview((prev) => {

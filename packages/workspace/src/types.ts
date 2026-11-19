@@ -411,6 +411,7 @@ export interface WorkspaceStore {
   failOrphanedInlineCompanyAgentRuns?(staleMs: number): Promise<string[]>;
   listGoals(context: AuthContext, businessId: string): Promise<Goal[]>;
   listUserGoals(context: AuthContext): Promise<Goal[]>;
+  listGoalPage(context: AuthContext, query: import("./goals-page").GoalPageQuery): Promise<import("./goals-page").GoalPage>;
   createGoal(context: AuthContext, businessId: string, input: GoalInput): Promise<Goal>;
   linkGoal(context: AuthContext, businessId: string, goalId: string): Promise<Goal>;
   updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>): Promise<Goal>;

@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./goals-page";
 export * from "./default-agent-tools";
 export * from "./project-catalog";
 export * from "./code-session-inbox";

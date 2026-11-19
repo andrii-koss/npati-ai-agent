@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { GOALS_PAGE_SIZE, goalPageCursor, type GoalCounts, type GoalPage, type GoalPageQuery } from "./goals-page";
 import { InMemoryConversationResearch } from "./conversation-research-evidence";
 import { codeChildSessionId } from "./code-child-session-id";
 import { MemoryCodeInboxStore } from "./code-session-inbox-memory";
@@ -462,6 +463,30 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     async listGoals(context: AuthContext, businessId: string) { return listGoals(this.goalState(), context, businessId); }
 
     async listUserGoals(context: AuthContext) { return listUserGoals(this.companyState(), context); }
+  async listGoalPage(context: AuthContext, query: GoalPageQuery): Promise<GoalPage> {
+    const businesses = query.businessId ? [await this.getBusiness(context, query.businessId)] : await this.listBusinesses(context);
+    const ids = new Set(businesses.map(business => business.id));
+    const scope = [...this.goals.values()].filter(goal => goal.workspaceId === context.workspaceId && ids.has(goal.businessId));
+    const counts: GoalCounts | null = query.after ? null : {
+      total: scope.length,
+      active: scope.filter(goal => goal.status === "active").length,
+      paused: scope.filter(goal => goal.status === "paused").length,
+      completed: scope.filter(goal => goal.status === "completed").length,
+      highPriority: scope.filter(goal => goal.priority === 1).length,
+    };
+    const search = query.search?.toLowerCase();
+    const after = query.after;
+    const rows = scope.filter(goal => (!query.status || goal.status === query.status)
+      && (!query.priority || goal.priority === query.priority)
+      && (!search || [goal.title, goal.description, goal.targetUnit].some(value => value?.toLowerCase().includes(search)))
+      && (!after || goal.createdAt < after.createdAt || (goal.createdAt === after.createdAt && goal.id < after.id)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    const { agentDisplay } = this.goalState();
+    const goals = rows.slice(0, GOALS_PAGE_SIZE).map(goal => goal.assignedAgentId
+      ? { ...goal, assignedAgent: agentDisplay?.(goal.assignedAgentId) ?? null }
+      : goal);
+    return { goals, counts, nextCursor: rows.length > GOALS_PAGE_SIZE ? goalPageCursor(goals.at(-1)!) : null };
+  }
 
     async createGoal(context: AuthContext, businessId: string, input: GoalInput) { return createGoal(this.goalState(), context, businessId, input); }
 
