@@ -1,0 +1,100 @@
+.email-accounts-table-container {
+  container-type: inline-size;
+}
+
+.email-accounts-table {
+  table-layout: fixed;
+}
+
+.email-accounts-table th,
+.email-accounts-table td {
+  padding: 8px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.email-accounts-table th:nth-child(2),
+.email-accounts-table th:nth-child(3),
+.email-accounts-table th:nth-child(4) {
+  width: 17%;
+}
+
+.email-accounts-table th:last-child {
+  width: 174px;
+  text-align: right;
+}
+
+.email-accounts-table .automation-status-btn {
+  max-width: 100%;
+  padding-inline: 6px;
+  white-space: normal;
+}
+
+.email-accounts-table .automation-status-dot {
+  flex-shrink: 0;
+}
+
+.email-accounts-table .automation-agent-badge {
+  padding-inline: 6px;
+}
+
+.email-accounts-table .automation-actions-cell {
+  gap: 4px;
+}
+
+.email-accounts-table .automation-action-btn {
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.email-accounts-table .automation-action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.email-accounts-table .automation-action-btn:focus-visible {
+  outline: 2px solid var(--npati-red);
+  outline-offset: 2px;
+}
+
+@container (max-width: 630px) {
+  .email-accounts-table,
+  .email-accounts-table tbody {
+    display: block;
+  }
+
+  .email-accounts-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    clip-path: inset(50%);
+    overflow: hidden;
+  }
+
+  .email-accounts-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .email-accounts-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .email-accounts-table tbody td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .email-accounts-table tbody td:first-child,
+  .email-accounts-table tbody td:last-child {
+    grid-column: 1 / -1;
+  }
+}

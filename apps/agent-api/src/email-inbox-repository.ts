@@ -1,3 +1,4 @@
+import { calculateEmailAnalytics, type AnalyticsMessage, type AnalyticsThread } from "./email-analytics";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { defaultVault, type AuthContext, type CryptoVault } from "@npati/workspace";
@@ -574,6 +575,80 @@ export class EmailInboxRepository {
     return markNotificationRead(this.jobsHost(), ctx, companyId, notificationId);
   }
 
+  async readSettingsData(ctx: AuthContext, companyIds: string[], includeAnalytics: boolean) {
+    if (!companyIds.length) return { accounts: [], analytics: [] };
+    const ids = new Set(companyIds);
+    const accounts = this.pool
+      ? (await this.pool.query<CompanyEmailAccount>(
+        `SELECT ${accountCols} FROM company_email_accounts
+         WHERE workspace_id=$1 AND company_id=ANY($2::text[]) AND deleted_at IS NULL ORDER BY created_at`,
+        [ctx.workspaceId, companyIds],
+      )).rows
+      : [...this.memoryAccounts.values()].filter(account => account.workspaceId === ctx.workspaceId && ids.has(account.companyId));
+    if (!includeAnalytics) return { accounts, analytics: [] };
+
+    let threads: AnalyticsThread[];
+    let messages: AnalyticsMessage[];
+    let auditCounts: Array<{ companyId: string; count: number }> = [];
+    if (this.pool) {
+      const params = [ctx.workspaceId, companyIds];
+      const [threadRows, messageRows, auditRows] = await Promise.all([
+        this.pool.query<AnalyticsThread>(
+          `SELECT latest.id, scope.id AS "companyId", latest.status, latest.is_human_takeover AS "isHumanTakeover",
+                  latest.ai_confidence_score AS "aiConfidenceScore", latest.assigned_agent_id AS "assignedAgentId"
+           FROM unnest($2::text[]) AS scope(id) CROSS JOIN LATERAL (
+             SELECT id,status,is_human_takeover,ai_confidence_score,assigned_agent_id FROM company_email_threads
+             WHERE workspace_id=$1 AND company_id=scope.id ORDER BY last_message_at DESC LIMIT 100
+           ) AS latest`, params),
+        this.pool.query<AnalyticsMessage>(
+          `SELECT id,company_id AS "companyId",thread_id AS "threadId",email_account_id AS "emailAccountId",
+                  direction,is_draft AS "isDraft",delivery_status AS "deliveryStatus",is_ai_generated AS "isAiGenerated",
+                  ai_draft_approved_by AS "aiDraftApprovedBy",created_at AS "createdAt",sent_by_agent_id AS "sentByAgentId"
+           FROM company_email_messages WHERE workspace_id=$1 AND company_id=ANY($2::text[]) ORDER BY created_at`, params),
+        this.pool.query<{ companyId: string; count: number }>(
+          `SELECT company_id AS "companyId",count(*)::int AS count FROM company_audit_logs
+           WHERE workspace_id=$1 AND company_id=ANY($2::text[]) AND action='email.ai_draft_edited' GROUP BY company_id`, params),
+      ]);
+      threads = threadRows.rows;
+      messages = messageRows.rows;
+      auditCounts = auditRows.rows;
+    } else {
+      threads = [...this.memoryThreads.values()].filter(thread => thread.workspaceId === ctx.workspaceId && ids.has(thread.companyId))
+        .sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
+      messages = [...this.memoryMessages.values()].filter(message => message.workspaceId === ctx.workspaceId && ids.has(message.companyId))
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    }
+    const groups = <T extends { companyId: string }>(rows: T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const bucket = grouped.get(row.companyId);
+        if (bucket) bucket.push(row);
+        else grouped.set(row.companyId, [row]);
+      }
+      return grouped;
+    };
+    const byAccount = groups(accounts);
+    const byThread = groups(threads);
+    const byMessage = groups(messages);
+    const edits = new Map(auditCounts.map(row => [row.companyId, row.count]));
+    return { accounts, analytics: companyIds.map(id => calculateEmailAnalytics(
+      (byThread.get(id) ?? []).slice(0, 100), byAccount.get(id) ?? [], byMessage.get(id) ?? [], edits.get(id) ?? 0,
+    )) };
+  }
+
+  async readSettingsAgents(ctx: AuthContext, companyIds: string[], assignedOnly: boolean) {
+    if (!this.pool) return null;
+    return (await this.pool.query<{ id: string; name: string; role: string }>(
+      `SELECT agent.id,agent.name,agent.role FROM company_agents AS agent
+       WHERE agent.workspace_id=$1 AND agent.company_id=ANY($2::text[])
+         AND (NOT $3::boolean OR EXISTS (
+           SELECT 1 FROM company_email_accounts AS account WHERE account.workspace_id=agent.workspace_id
+             AND account.company_id=agent.company_id AND account.agent_id=agent.id AND account.deleted_at IS NULL
+         )) ORDER BY agent.created_at,agent.id`,
+      [ctx.workspaceId, companyIds, assignedOnly],
+    )).rows;
+  }
+
   async getAnalytics(ctx: AuthContext, companyId: string): Promise<EmailAnalytics> {
     const threads = await this.listThreads(ctx, companyId, { limit: 1000 });
     const accounts = await this.listAccounts(ctx, companyId);
@@ -587,19 +662,6 @@ export class EmailInboxRepository {
         .filter((message) => message.workspaceId === ctx.workspaceId && message.companyId === companyId)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-    const receivedEmails = messages.filter((message) => message.direction === "inbound").length;
-    const completedOutbound = messages.filter((message) =>
-      message.direction === "outbound"
-      && !message.isDraft
-      && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered"));
-    const sentEmails = completedOutbound.length;
-    const aiAnswered = completedOutbound.filter((message) => message.isAiGenerated).length;
-    const humanAnswered = completedOutbound.filter((message) => !message.isAiGenerated).length;
-    const draftedByAi = messages.filter((message) => message.direction === "outbound" && message.isAiGenerated && message.isDraft).length;
-    const approvedByHuman = completedOutbound.filter((message) => Boolean(message.aiDraftApprovedBy)).length;
-    const failedEmails = messages.filter((message) => message.deliveryStatus === "failed" || message.deliveryStatus === "rejected").length;
-    const bouncedEmails = messages.filter((message) => message.deliveryStatus === "bounced").length;
-    const escalatedToHuman = threads.filter((thread) => thread.status === "waiting_human" || thread.isHumanTakeover).length;
     const editedAiResponsesCount = this.pool
       ? Number((await this.pool.query<{ count: string }>(
         `SELECT COUNT(*)::text AS count FROM company_audit_logs
@@ -607,83 +669,6 @@ export class EmailInboxRepository {
         [ctx.workspaceId, companyId]
       )).rows[0]?.count || 0)
       : 0;
-    let highConf = 0;
-    let medConf = 0;
-    let lowConf = 0;
-
-    for (const t of threads) {
-      if (t.aiConfidenceScore !== null && t.aiConfidenceScore !== undefined) {
-        if (t.aiConfidenceScore >= 0.85) highConf++;
-        else if (t.aiConfidenceScore >= 0.6) medConf++;
-        else lowConf++;
-      }
-    }
-
-    const responseTimes: number[] = [];
-    const threadById = new Map(threads.map((thread) => [thread.id, thread]));
-    for (const thread of threads) {
-      const threadMessages = messages.filter((message) => message.threadId === thread.id);
-      const firstInbound = threadMessages.find((message) => message.direction === "inbound");
-      const firstResponse = firstInbound && threadMessages.find((message) =>
-        message.direction === "outbound"
-        && !message.isDraft
-        && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered")
-        && new Date(message.createdAt) >= new Date(firstInbound.createdAt));
-      if (firstInbound && firstResponse) {
-        responseTimes.push((new Date(firstResponse.createdAt).getTime() - new Date(firstInbound.createdAt).getTime()) / 60_000);
-      }
-    }
-    const averageResponse = responseTimes.length
-      ? Math.round((responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length) * 10) / 10
-      : 0;
-    const automationRate = sentEmails > 0 ? Math.round((aiAnswered / sentEmails) * 100) : 0;
-    const dayMap = new Map<string, { received: number; sent: number }>();
-    const accountMap = new Map<string, number>();
-    const agentMap = new Map<string, number>();
-    for (const message of messages) {
-      const day = new Date(message.createdAt).toISOString().slice(0, 10);
-      const entry = dayMap.get(day) || { received: 0, sent: 0 };
-      if (message.direction === "inbound") entry.received++;
-      else if (!message.isDraft && (message.deliveryStatus === "sent" || message.deliveryStatus === "delivered")) entry.sent++;
-      dayMap.set(day, entry);
-      if (message.emailAccountId) accountMap.set(message.emailAccountId, (accountMap.get(message.emailAccountId) || 0) + 1);
-      const creditedAgentId = message.sentByAgentId || (message.isAiGenerated ? threadById.get(message.threadId)?.assignedAgentId : undefined);
-      if (creditedAgentId && completedOutbound.some((outbound) => outbound.id === message.id)) {
-        agentMap.set(creditedAgentId, (agentMap.get(creditedAgentId) || 0) + 1);
-      }
-    }
-
-    return {
-      receivedEmails,
-      sentEmails,
-      aiAnswered,
-      humanAnswered,
-      draftedByAi,
-      approvedByHuman,
-      escalatedToHuman,
-      failedEmails,
-      bouncedEmails,
-      averageResponseTimeMinutes: averageResponse,
-      averageFirstResponseTimeMinutes: averageResponse,
-      editedAiResponsesCount,
-      automationRate,
-      confidenceDistribution: {
-        high: highConf,
-        medium: medConf,
-        low: lowConf,
-      },
-      volumeByDay: Array.from(dayMap.entries()).sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, volume]) => ({ date, ...volume })),
-      volumeByAgent: Array.from(agentMap.entries()).map(([agentId, count]) => ({
-        agentId,
-        agentName: accounts.find((account) => account.agentId === agentId)?.displayName || agentId,
-        count,
-      })),
-      volumeByAccount: accounts.map((a) => ({
-        accountId: a.id,
-        email: a.emailAddress,
-        count: accountMap.get(a.id) || 0,
-      })),
-    };
+    return calculateEmailAnalytics(threads, accounts, messages, editedAiResponsesCount);
   }
 }

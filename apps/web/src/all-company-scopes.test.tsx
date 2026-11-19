@@ -68,7 +68,12 @@ beforeEach(() => {
     else if (url.endsWith("/code/limits")) data = { limits: {} };
     else if (url.includes("/code/monitor/runs")) data = { runs: [], nextCursor: null };
     else if (url.includes("/runs?")) data = { runs: [{ ...item, task: `Record ${id}`, requestedMode: "coding", effectiveMode: "coding", status: "completed" }] };
-    else if (url.endsWith("/email-accounts")) data = { accounts: [{ ...item, emailAddress: `${id}@example.com`, provider: "imap_smtp", mode: "manual", testMode: true, status: "connected", imapConfig: {}, smtpConfig: {}, rateLimits: {}, followupConfig: {}, signatureConfig: {} }] };
+    else if (url.startsWith("/api/email/settings/open") || url.endsWith("/email-accounts")) {
+      const companyId = new URL(url, "http://localhost").searchParams.get("company");
+      const ids = url.endsWith("/email-accounts") ? [id] : companyId ? [companyId] : ["alpha", "beta"];
+      const accounts = ids.map(owner => ({ ...item, id: `${owner}-account`, companyId: owner, emailAddress: `${owner}@example.com`, provider: "imap_smtp", mode: "manual", testMode: true, status: "connected", imapConfig: {}, smtpConfig: {}, rateLimits: {}, followupConfig: {}, signatureConfig: {} }));
+      data = { accounts, companies: fixture.companies, agents: [], analytics: [] };
+    }
     else if (url.endsWith("/email-inbox/analytics")) data = { analytics: null };
     else if (url.includes("/email-inbox/threads?")) data = { threads: [{ ...item, subject: `Record ${id}`, customerEmail: `${id}@example.com`, folder: "inbox", unreadCount: 0, lastMessageAt: "2026-11-16", priority: "normal", status: "new" }] };
     else if (url.includes("/email-inbox/folder-counts")) data = { counts: { inbox: 1, sent: 0, drafts: 0, archived: 0, spam: 0 } };
@@ -79,18 +84,23 @@ beforeEach(() => {
   }));
 });
 
-it("paints email accounts without waiting for slow analytics", async () => {
+it("loads Email Settings in one request and keeps all account actions accessible", async () => {
   const original = vi.mocked(fetch).getMockImplementation()!;
   let release!: () => void;
-  const analytics = new Promise<void>(resolve => { release = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
   vi.mocked(fetch).mockImplementation(async (input, init) => {
-    if (String(input).endsWith("/email-inbox/analytics")) { await analytics; return new Response(JSON.stringify({ analytics: null })); }
+    if (String(input).endsWith("/email/settings/open")) await pending;
     return original(input, init);
   });
   await act(async () => root.render(<MemoryRouter><EmailSettingsPage /></MemoryRouter>));
+  expect(host.querySelector(".inspector-stats-grid strong")?.textContent).toBe("");
+  await act(async () => release());
+  expect(requests).toEqual(["/api/email/settings/open"]);
   expect(host.textContent).toContain("alpha@example.com");
   expect(host.textContent).toContain("beta@example.com");
-  await act(async () => release());
+  const actions = host.querySelectorAll(".email-accounts-table tbody tr:first-child .automation-actions-cell [aria-label]");
+  expect(actions).toHaveLength(5);
+  expect([...actions].every(action => action.querySelector("svg") && !action.textContent?.trim())).toBe(true);
 });
 
 it("keeps code records visible immediately on remount while the refresh is pending", async () => {

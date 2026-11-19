@@ -39,7 +39,7 @@ export function prefetchSettingsPage(href: string) {
       }
       return;
     }
-    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content") return;
+    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content" || path === "/settings/email") return;
     const companies = await listProjectCompanies();
     if (getStoredAuthToken() !== token) return;
     writeCachedCompanies(companies);
@@ -62,10 +62,6 @@ export function prefetchSettingsPage(href: string) {
         const combine = (rows: Row[], old: Row[] = []) => [...rows, ...old.filter(item => !rows.some(row => row.id === item.id))];
         writeSettingsSnapshot("code:all", { projects: combine(pages.flatMap(page => page.projects), previous?.projects), sessions: combine(pages.flatMap(page => page.sessions), previous?.sessions) });
       } });
-    } else if (path === "/settings/email") {
-      if (readSettingsSnapshot("email-accounts:all")) return;
-      await loadCompanyScopes(ids, async id => (await apiFetch<{ accounts: Row[] }>(`/companies/${id}/email-accounts`)).accounts.map(item => ({ ...item, companyId: id })),
-        { key: "email:email-accounts", isActive: () => getStoredAuthToken() === token, onProgress: pages => merge("email-accounts:all", pages.flat()) });
     } else if (path === "/settings/activity") {
       if (readSettingsSnapshot("activity:all")) return;
       await loadCompanyScopes(ids, async id => {

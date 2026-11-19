@@ -1,11 +1,9 @@
-import { readSettingsSnapshot, writeSettingsSnapshot } from "./settings-page-cache";
-import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
-import { readEmailCollection, mergeEmailAnalytics } from "./email-company-scope";
-import { listProjectCompanies } from "./website-builder-cache";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { invalidateEmailSettings, readCachedEmailSettings, readEmailSettings } from "./email-settings-read";
+import { ALL_COMPANIES } from "./company-scope";
+import { readEmailCollection } from "./email-company-scope";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
-import { useWorkspace } from "./BusinessWorkspace";
+import { readCachedCompanies, writeCachedCompanies } from "./active-company";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { EmailSettingsTemplatesSection } from "./email-settings-templates-section";
@@ -23,9 +21,7 @@ import { EmailSettingsSidebarBlock } from "./email-settings-sidebar-block";
 import { EmailSettingsFooterBlock } from "./email-settings-footer-block";
 import {
   api,
-  readCachedAccounts,
   writeCachedAccounts,
-  readCachedAnalytics,
   writeCachedAnalytics,
   type Company,
   type Agent,
@@ -46,22 +42,15 @@ export * from "./email-settings-types";
 
 export function EmailSettingsPage() {
   const { t, language } = useTranslation();
-  const { overview } = useWorkspace();
-  const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(() => new URLSearchParams(window.location.search).get("company") || ALL_COMPANIES);
+  const [companies, setCompanies] = useState<Company[]>(() => readCachedEmailSettings(selectedCompanyId)?.companies ?? readCachedCompanies());
   const companyIdsKey = companies.map(company => company.id).join("\0");
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
-    const currentUrl = new URL(window.location.href);
-    return currentUrl.searchParams.get("company") || ALL_COMPANIES;
-  });
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [accounts, setAccounts] = useState<EmailAccount[]>(() => {
-    const currentUrl = new URL(window.location.href);
-    const scope = currentUrl.searchParams.get("company") || ALL_COMPANIES;
-    return readSettingsSnapshot<EmailAccount[]>(`email-accounts:${scope}`) ?? readCachedAccounts(scope);
-  });
+  const [agents, setAgents] = useState<Agent[]>(() => readCachedEmailSettings(selectedCompanyId)?.agents ?? []);
+  const [accounts, setAccounts] = useState<EmailAccount[]>(() => readCachedEmailSettings(selectedCompanyId)?.accounts ?? []);
   const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !readCachedEmailSettings(selectedCompanyId));
+  const accountsVersion = useRef(0);
   const [notice, setNotice] = useState<string | null>(null);
 
   // Email Account Drawer
@@ -218,11 +207,7 @@ export function EmailSettingsPage() {
   } = useEmailTemplatesContacts(selectedCompanyId, t, setNotice);
 
   // Analytics
-  const [analytics, setAnalytics] = useState<EmailAnalytics | null>(() => {
-    const currentUrl = new URL(window.location.href);
-    const scope = currentUrl.searchParams.get("company") || ALL_COMPANIES;
-    return readSettingsSnapshot<EmailAnalytics>(`email-analytics:${scope}`) ?? readCachedAnalytics(scope);
-  });
+  const [analytics, setAnalytics] = useState<EmailAnalytics | null>(() => readCachedEmailSettings(selectedCompanyId)?.analytics ?? null);
   const [analyticsExpanded, setAnalyticsExpanded] = useState(true);
 
   // Granular permissions are delegated through the existing scoped API-key system.
@@ -232,82 +217,38 @@ export function EmailSettingsPage() {
   const [createdPermissionToken, setCreatedPermissionToken] = useState<string | null>(null);
   const [savingPermissionKey, setSavingPermissionKey] = useState(false);
 
-  // Load companies
   useEffect(() => {
-    listProjectCompanies()
-      .then((list) => {
-        setCompanies(list);
-        writeCachedCompanies(list);
-        const currentUrl = new URL(window.location.href);
-        const requested = currentUrl.searchParams.get("company");
-        const selected = requested === "personal"
-          ? "personal"
-          : requested && requested !== ALL_COMPANIES ? chooseAvailableCompanyId(list, { requested, fallback: "personal" }) : ALL_COMPANIES;
-        if (selected !== selectedCompanyId) {
-          setSelectedCompanyId(selected);
-          if (selected !== ALL_COMPANIES) writeActiveCompanyId(selected === "personal" ? "" : selected);
-        }
-        if (requested) {
-          currentUrl.searchParams.delete("company");
-          window.history.replaceState(window.history.state, "", currentUrl.pathname + currentUrl.search + currentUrl.hash);
-        }
-      })
-      .catch((e) => setNotice(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Load accounts, agents and analytics when company changes
-  useEffect(() => {
-    if (!selectedCompanyId) return;
     let active = true;
-    if (selectedCompanyId === ALL_COMPANIES) {
-      const ids = companies.map(company => company.id);
-      if (!ids.length) return;
-      const cached = readSettingsSnapshot<EmailAccount[]>("email-accounts:all");
-      if (cached) setAccounts(cached);
-      const analytics = readSettingsSnapshot<EmailAnalytics>("email-analytics:all");
-      if (analytics) setAnalytics(analytics);
-      setLoading(!cached);
-      const publish = (accounts: EmailAccount[]) => {
-        if (!active) return;
-        setAccounts(accounts); writeSettingsSnapshot("email-accounts:all", accounts);
-        if (accounts.length) setLoading(false);
-      };
-      void readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts", { onProgress: publish, isActive: () => active, initial: cached })
-        .then(accounts => {
-          if (!active) return;
-          publish(accounts);
-          const agentOwners = [...new Set(accounts.filter(account => account.agentId).map(account => account.companyId))];
-          void readEmailCollection<Agent>(agentOwners, "agents", "agents", { isActive: () => active })
-            .then(agents => { if (active) setAgents(agents); }).catch(() => undefined);
-          // Analytics starts after mailboxes have painted and never holds their list back.
-          void loadCompanyScopes(ids, id => api<{ analytics: EmailAnalytics }>(`/companies/${id}/email-inbox/analytics`).then(result => result.analytics), { key: "email-analytics", isActive: () => active, onProgress: analytics ? undefined : pages => { if (active) setAnalytics(mergeEmailAnalytics(pages.filter(Boolean))); } })
-            .then(pages => { if (active) { const merged = mergeEmailAnalytics(pages.filter(Boolean)); setAnalytics(merged); if (merged) writeSettingsSnapshot("email-analytics:all", merged); } })
-            .catch(() => undefined);
-        }).catch(error => { if (active) setNotice(error.message); })
-          .finally(() => { if (active) setLoading(false); });
-      return () => { active = false; };
-    }
-    const personalScope = selectedCompanyId === "personal";
-    Promise.all([
-      api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
-      personalScope ? Promise.resolve({ agents: [] as Agent[] }) : api<{ agents: Agent[] }>(`/companies/${selectedCompanyId}/agents`),
-      api<{ analytics: EmailAnalytics }>(`/companies/${selectedCompanyId}/email-inbox/analytics`).catch(() => ({ analytics: null })),
-    ])
-      .then(([accRes, agentRes, analRes]) => {
-        if (!active) return;
-        setAccounts(accRes.accounts.map(account => ({ ...account, companyId: selectedCompanyId })));
-        writeCachedAccounts(selectedCompanyId, accRes.accounts);
-        setAgents(agentRes.agents);
-        if (analRes.analytics) {
-          setAnalytics(analRes.analytics);
-          writeCachedAnalytics(selectedCompanyId, analRes.analytics);
-        }
-      })
-      .catch((e) => setNotice(e.message))
-      .finally(() => { if (active) setLoading(false); });
+    const version = accountsVersion.current;
+    const cached = readCachedEmailSettings(selectedCompanyId);
+    setLoading(!cached);
+    setAccounts(cached?.accounts ?? []);
+    setAgents(cached?.agents ?? []);
+    setAnalytics(cached?.analytics ?? null);
+
+    void readEmailSettings(selectedCompanyId).then(data => {
+      if (!active) return;
+      setCompanies(data.companies);
+      writeCachedCompanies(data.companies);
+      if (version === accountsVersion.current) {
+        setAccounts(data.accounts);
+        writeCachedAccounts(selectedCompanyId, data.accounts);
+      }
+      setAgents(data.agents);
+      setAnalytics(data.analytics);
+      writeCachedAnalytics(selectedCompanyId, data.analytics);
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("company") === selectedCompanyId) {
+        url.searchParams.delete("company");
+        window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+      }
+    }).catch(error => {
+      if (active) setNotice(error.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
     return () => { active = false; };
-  }, [selectedCompanyId, companyIdsKey]);
+  }, [selectedCompanyId]);
 
   // Load rules/templates/contacts on tab switch
   useEffect(() => {
@@ -578,13 +519,17 @@ export function EmailSettingsPage() {
           `/companies/${selectedCompanyId}/email-accounts/${editingId}`,
           { method: "PATCH", body: JSON.stringify(payload) }
         );
-        setAccounts((prev) => prev.map((a) => (a.id === editingId ? res.account : a)));
+        accountsVersion.current++;
+        invalidateEmailSettings(selectedCompanyId);
+        setAccounts((prev) => prev.map((a) => (a.id === editingId ? { ...res.account, companyId: selectedCompanyId } : a)));
       } else {
         const res = await api<{ account: EmailAccount }>(
           `/companies/${selectedCompanyId}/email-accounts`,
           { method: "POST", body: JSON.stringify(payload) }
         );
-        setAccounts((prev) => [...prev, res.account]);
+        accountsVersion.current++;
+        invalidateEmailSettings(selectedCompanyId);
+        setAccounts((prev) => [...prev, { ...res.account, companyId: selectedCompanyId }]);
       }
       setDrawerOpen(false);
     } catch (err: any) {
@@ -604,7 +549,10 @@ export function EmailSettingsPage() {
     if (!ok) return;
 
     try {
-      await api(`/companies/${accounts.find(account => account.id === id)?.companyId || selectedCompanyId}/email-accounts/${id}`, { method: "DELETE" });
+      const ownerId = accounts.find(account => account.id === id)?.companyId || selectedCompanyId;
+      await api(`/companies/${ownerId}/email-accounts/${id}`, { method: "DELETE" });
+      accountsVersion.current++;
+      invalidateEmailSettings(ownerId);
       setAccounts((prev) => prev.filter((a) => a.id !== id));
     } catch (err: any) {
       setNotice(err.message);
@@ -655,6 +603,8 @@ export function EmailSettingsPage() {
       });
       const ownerId = account.companyId || selectedCompanyId;
       const updated = await api<{ accounts: EmailAccount[] }>(`/companies/${ownerId}/email-accounts`);
+      accountsVersion.current++;
+      invalidateEmailSettings(ownerId);
       setAccounts(previous => [...previous.filter(item => (item.companyId || selectedCompanyId) !== ownerId), ...updated.accounts.map(item => ({ ...item, companyId: ownerId }))]);
     } catch (err: any) {
       setTestResult({ id: account.id, success: false, message: err.message });
@@ -716,7 +666,7 @@ export function EmailSettingsPage() {
       <EmailSettingsOverviewBlock selectedCompanyId={selectedCompanyId} t={t} setSelectedCompanyId={setSelectedCompanyId} setAgentId={setAgentId} setRuleAgentId={setRuleAgentId} setRuleWorkflowId={setRuleWorkflowId} setRuleCreateTask={setRuleCreateTask} setAccounts={setAccounts} setAnalytics={setAnalytics} companies={companies} accounts={accounts} />
 
       {/* 4 Stat Overview Cards matching /settings/activity and /settings/capabilities */}
-      <EmailSettingsStatsCards analytics={analytics} t={t} />
+      <EmailSettingsStatsCards analytics={analytics} loading={loading} t={t} />
 
       {analytics && (
         <EmailSettingsAccountFormSection analytics={analytics} t={t} setAnalyticsExpanded={setAnalyticsExpanded} analyticsExpanded={analyticsExpanded} />

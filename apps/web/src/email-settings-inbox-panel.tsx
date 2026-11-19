@@ -1,6 +1,7 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { Globe, Mail, Pencil, Plug, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Agent, EmailAccount } from "./EmailSettingsPage";
+import "./email-accounts-table.css";
 
 export interface EmailSettingsInboxPanelProps {
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -24,7 +25,7 @@ export function EmailSettingsInboxPanel({ t, filteredAccounts, accounts, loading
           <div className="inspector-table-status">
             <div className="status-left">
               <span>
-                {t("emailSettings.accountsTab.showingAccounts")
+                {!loading && t("emailSettings.accountsTab.showingAccounts")
                   .replace("{{count}}", String(filteredAccounts.length))
                   .replace("{{total}}", String(accounts.length))}
               </span>
@@ -45,15 +46,15 @@ export function EmailSettingsInboxPanel({ t, filteredAccounts, accounts, loading
               </button>
             </div>
           ) : (
-            <div className="automations-table-container">
-              <table className="automations-table">
+            <div className="automations-table-container email-accounts-table-container" aria-busy={loading}>
+              <table className="automations-table email-accounts-table">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: "220px" }}>{t("emailSettings.accountsTab.colAccount")}</th>
-                    <th style={{ minWidth: "160px" }}>{t("emailSettings.accountsTab.colAssignedAgent")}</th>
-                    <th style={{ minWidth: "150px" }}>{t("emailSettings.accountsTab.colMode")}</th>
-                    <th style={{ minWidth: "180px" }}>{t("emailSettings.accountsTab.colConnectionDns")}</th>
-                    <th style={{ width: "240px", textAlign: "right" }}>{t("emailSettings.accountsTab.colActions")}</th>
+                    <th scope="col">{t("emailSettings.accountsTab.colAccount")}</th>
+                    <th scope="col">{t("emailSettings.accountsTab.colAssignedAgent")}</th>
+                    <th scope="col">{t("emailSettings.accountsTab.colMode")}</th>
+                    <th scope="col">{t("emailSettings.accountsTab.colConnectionDns")}</th>
+                    <th scope="col">{t("emailSettings.accountsTab.colActions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -61,6 +62,8 @@ export function EmailSettingsInboxPanel({ t, filteredAccounts, accounts, loading
                     const assigned = agents.find((a) => a.id === acc.agentId);
                     const isTesting = testingId === acc.id;
                     const testFeedback = testResult?.id === acc.id ? testResult : null;
+                    const composeLabel = t("emailSettings.accountsTab.actionComposeTitle", { email: acc.emailAddress });
+                    const testLabel = t(isTesting ? "emailSettings.accountsTab.actionTesting" : "emailSettings.accountsTab.actionTestTitle");
 
                     return (
                       <tr key={acc.id}>
@@ -118,42 +121,47 @@ export function EmailSettingsInboxPanel({ t, filteredAccounts, accounts, loading
                             <Link
                               to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}${(acc.companyId || selectedCompanyId) ? `&company=${encodeURIComponent(acc.companyId || selectedCompanyId)}` : ""}`}
                               className="automation-action-btn"
-                              title={t("emailSettings.accountsTab.actionComposeTitle").replace("{{email}}", acc.emailAddress)}
+                              title={composeLabel}
+                              aria-label={composeLabel}
                             >
-                              {t("emailSettings.accountsTab.actionCompose")}
+                              <Mail size={15} aria-hidden="true" />
                             </Link>
                             <button
                               type="button"
                               className="automation-action-btn"
                               disabled={isTesting}
                               onClick={() => runConnectionTest(acc)}
-                              title={t("emailSettings.accountsTab.actionTestTitle")}
+                              title={testLabel}
+                              aria-label={testLabel}
                             >
-                              {isTesting ? t("emailSettings.accountsTab.actionTesting") : t("emailSettings.accountsTab.actionTest")}
+                              <Plug size={15} aria-hidden="true" />
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn"
                               onClick={() => openDnsCheck(acc)}
                               title={t("emailSettings.accountsTab.actionDnsTitle")}
+                              aria-label={t("emailSettings.accountsTab.actionDnsTitle")}
                             >
-                              {t("emailSettings.accountsTab.actionDns")}
+                              <Globe size={15} aria-hidden="true" />
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn"
                               onClick={() => openEditDrawer(acc)}
                               title={t("emailSettings.accountsTab.actionEditTitle")}
+                              aria-label={t("emailSettings.accountsTab.actionEditTitle")}
                             >
-                              {t("emailSettings.accountsTab.actionEdit")}
+                              <Pencil size={15} aria-hidden="true" />
                             </button>
                             <button
                               type="button"
                               className="automation-action-btn danger"
                               onClick={() => deleteAccount(acc.id)}
                               title={t("emailSettings.accountsTab.actionDeleteTitle")}
+                              aria-label={t("emailSettings.accountsTab.actionDeleteTitle")}
                             >
-                              {t("emailSettings.accountsTab.actionDelete")}
+                              <Trash2 size={15} aria-hidden="true" />
                             </button>
                           </div>
                         </td>

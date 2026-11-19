@@ -9,6 +9,8 @@ import {
   ctx,
   err,
   resolveEmailScope,
+  hasEmailPermission,
+  PERSONAL_EMAIL_SCOPE,
 } from "./email-routes-context";
 
 export function registerEmailManagementRoutes(
@@ -20,6 +22,46 @@ export function registerEmailManagementRoutes(
   // =========================================================================
   // 1. Email Accounts (Settings -> Email)
   // =========================================================================
+
+  app.get<{ Querystring: { company?: string } }>("/email/settings/open", {
+    schema: { querystring: { type: "object", properties: { company: { type: "string", minLength: 1, maxLength: 128 } } } },
+  }, async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:view");
+      const scope = r.query.company ?? "all";
+      const canReadCompanies = c.permissions.includes("workspace:read");
+      const companies: Array<{ id: string; name: string }> = [];
+      if (canReadCompanies) {
+        let cursor: string | undefined;
+        do {
+          const page = await store.listCompanies(c, 100, cursor);
+          companies.push(...page.items.map(({ id, name }) => ({ id, name })));
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+      }
+      const companyIds = scope === "all"
+        ? companies.map(company => company.id)
+        : [companies.some(company => company.id === scope) ? scope : await resolveEmailScope(store, c, scope)];
+      const agentCompanyIds = canReadCompanies && scope !== PERSONAL_EMAIL_SCOPE ? companyIds : [];
+      const [data, storedAgents] = await Promise.all([
+        repo.readSettingsData(c, companyIds, hasEmailPermission(c, "email:view_analytics")),
+        agentCompanyIds.length ? repo.readSettingsAgents(c, agentCompanyIds, scope === "all") : [],
+      ]);
+      const relevant = scope === "all"
+        ? [...new Set(data.accounts.filter(account => account.agentId).map(account => account.companyId))]
+        : agentCompanyIds;
+      const agents = storedAgents ?? (await Promise.all(relevant.map(id => store.listCompanyAgents(c, id)))).flat();
+      return reply.header("cache-control", "private, no-store").send({
+        companies,
+        accounts: data.accounts.map(account => ({
+          ...presentEmailAccount(account),
+          companyId: scope === PERSONAL_EMAIL_SCOPE ? PERSONAL_EMAIL_SCOPE : account.companyId,
+        })),
+        agents: agents.map(({ id, name, role }) => ({ id, name, role })),
+        analytics: data.analytics,
+      });
+    } catch (e) { return err(reply, e); }
+  });
 
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/email-accounts", async (r, reply) => {
     try {

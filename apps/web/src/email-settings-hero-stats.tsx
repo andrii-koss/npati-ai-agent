@@ -56,30 +56,32 @@ export function EmailSettingsHeroHeader({
 
 export function EmailSettingsStatsCards({
   analytics,
+  loading = false,
   t,
 }: {
   analytics: EmailAnalytics | null;
+  loading?: boolean;
   t: (key: string) => string;
 }) {
   return (
     <section className="overview-grid inspector-stats-grid automations-stats-grid">
       <div>
-        <strong>{analytics?.receivedEmails ?? 0}</strong>
+          <strong>{loading ? null : analytics?.receivedEmails ?? 0}</strong>
         <span>{t("emailSettings.stats.totalReceived")}</span>
         <small>{t("emailSettings.stats.totalReceivedDesc")}</small>
       </div>
       <div>
-        <strong>{analytics?.sentEmails ?? 0}</strong>
+          <strong>{loading ? null : analytics?.sentEmails ?? 0}</strong>
         <span>{t("emailSettings.stats.totalSent")}</span>
         <small>{t("emailSettings.stats.totalSentDesc")}</small>
       </div>
       <div>
-        <strong>{Math.round(analytics?.automationRate ?? 0)}%</strong>
+          <strong>{loading ? null : `${Math.round(analytics?.automationRate ?? 0)}%`}</strong>
         <span>{t("emailSettings.stats.automationRate")}</span>
         <small>{t("emailSettings.stats.automationRateDesc")}</small>
       </div>
       <div>
-        <strong>{analytics?.draftedByAi ?? 0}</strong>
+          <strong>{loading ? null : analytics?.draftedByAi ?? 0}</strong>
         <span>{t("emailSettings.stats.draftsPrepared")}</span>
         <small>{t("emailSettings.stats.draftsPreparedDesc")}</small>
       </div>

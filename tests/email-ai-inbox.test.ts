@@ -273,6 +273,9 @@ describe("Email / AI Inbox Module", () => {
 
   it("15. Analytics accurately aggregates email metrics and automation rate", async () => {
     const analytics = await repo.getAnalytics(mockAuth, companyId);
+    const settings = await repo.readSettingsData(mockAuth, [companyId], true);
+    expect(settings.analytics).toEqual([analytics]);
+    expect(settings.accounts.every(account => account.companyId === companyId)).toBe(true);
     expect(analytics.receivedEmails).toBeGreaterThan(0);
     expect(analytics.automationRate).toBeGreaterThanOrEqual(0);
     expect(analytics.confidenceDistribution).toBeDefined();

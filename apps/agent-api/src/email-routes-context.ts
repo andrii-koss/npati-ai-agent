@@ -54,10 +54,9 @@ export type EmailPermission =
   | "email:approve_drafts" | "email:configure_autopilot" | "email:configure_agents"
   | "email:view_analytics";
 
-export async function ctx(auth: AuthProvider, r: FastifyRequest, permission: EmailPermission) {
-  const scope = await auth.authenticate(r);
+export function hasEmailPermission(scope: AuthContext, permission: EmailPermission) {
   const emailReadPermission = ["email:view", "email:read_messages", "email:view_analytics"].includes(permission);
-  const hasAccess = scope.permissions.includes(permission) ||
+  return scope.permissions.includes(permission) ||
     (permission === "workspace:read" || emailReadPermission
       ? scope.permissions.includes("workspace:read") ||
       scope.permissions.includes("workspace:write") ||
@@ -69,7 +68,11 @@ export async function ctx(auth: AuthProvider, r: FastifyRequest, permission: Ema
       scope.permissions.includes("admin:all") ||
       scope.permissions.includes("*"));
 
-  if (!hasAccess) {
+}
+
+export async function ctx(auth: AuthProvider, r: FastifyRequest, permission: EmailPermission) {
+  const scope = await auth.authenticate(r);
+  if (!hasEmailPermission(scope, permission)) {
     throw Object.assign(new Error(`Missing required permission: ${permission}`), { status: 403 });
   }
   return scope;
