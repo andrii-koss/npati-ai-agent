@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { developmentIsActive, type DevelopmentProcess } from "@npati/shared";
 import { authFetch } from "./shell/auth-helpers";
+import { isChatPage, recentChatOpen } from "./chat-open";
 
 type Process = Pick<DevelopmentProcess, "id" | "conversationId" | "parentConversationId" | "status">;
 type Turn = { conversationId: string; stop: () => Promise<void> };
@@ -66,8 +67,23 @@ export function useChatActivity() {
   useEffect(() => {
     let controller: AbortController | undefined;
     let closed = false;
+    let waitingForOpen = false;
+    let readOpening: ReturnType<typeof recentChatOpen> = null;
     const refresh = async () => {
-      if (document.hidden || controller || Date.now() - updatedAt < 10_000) return;
+      if (document.hidden || controller || waitingForOpen || Date.now() - updatedAt < 10_000) return;
+      const opening = isChatPage() ? recentChatOpen() : null;
+      if (opening && opening !== readOpening) {
+        readOpening = opening;
+        waitingForOpen = true;
+        const readRevision = revision;
+        try {
+          const data = await opening;
+          const history = await (data.pendingProcesses ?? data);
+          if (!closed && revision === readRevision && !history.processesDeferred) publishChatProcesses(history.processes);
+        } catch { /* The ordinary activity read can recover from an unavailable chat snapshot. */ }
+        finally { waitingForOpen = false; }
+        if (closed || document.hidden || Date.now() - updatedAt < 10_000) return;
+      }
       const request = new AbortController(); controller = request;
       const readRevision = revision;
       try {

@@ -18,3 +18,22 @@ it("never reuses another authentication token's pending response", async () => {
   localStorage.setItem("npati_agent_access_token", "second");
   expect(sharedChatOpen("same")).toBeNull(); expect(chatOpen("same")).not.toBe(first); expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+it("makes messages available while the same response is still delivering development history", async () => {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(stream) { controller = stream; } });
+  const fetch = vi.fn(async () => new Response(body, { headers: { "content-type": "application/x-ndjson" } }));
+  vi.stubGlobal("fetch", fetch);
+  const opened = chatOpen("chat");
+  controller.enqueue(encoder.encode(JSON.stringify({ conversation: { id: "chat", messages: [{ content: "Ready now" }] }, processes: [], processesPending: true }) + "\n"));
+  const data = await opened;
+  expect(data.conversation?.messages[0]?.content).toBe("Ready now");
+  expect(sharedChatOpen("chat")).toBe(opened);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const next = JSON.stringify({ processes: [{ id: "development" }] }) + "\n";
+  controller.enqueue(encoder.encode(next.slice(0, 10)));
+  controller.enqueue(encoder.encode(next.slice(10)));
+  controller.close();
+  await expect(data.pendingProcesses).resolves.toEqual({ processes: [{ id: "development" }] });
+});

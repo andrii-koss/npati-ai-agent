@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { chatOpenData, currentChatConversationId, isChatPage } from "./chat-open";
+import { chatOpenData, currentChatConversationId, isChatPage, type ChatProjectThumbnails } from "./chat-open";
 import { developmentIsActive, requestsDevelopmentRestore, planChatDevelopment, createDevelopmentAssistantIntro, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
@@ -19,6 +19,7 @@ export function useChatDevelopment(options: {
   const { language } = useTranslation();
   const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
+  const [openingThumbnails, setOpeningThumbnails] = useState<{ conversationId: string; images: ChatProjectThumbnails }>();
   const [streamed, setStreamed] = useState<StreamedDevelopmentSnapshot | null>(null);
   // The chat continues where it last worked (its newest card), not with the empty project it was opened with ("Open in
   // chat" leaves an idle entry) nor with the most recently created process: a TODO chat that made a game and then
@@ -71,20 +72,14 @@ export function useChatDevelopment(options: {
   useEffect(() => { if (!options.busy) setStreamed(null); }, [options.busy]);
   useEffect(() => { if (!firstRead.current) publishChatProcesses(processes); }, [processes]);
   const readFor = useRef<string | null | undefined>(undefined);
-  // An opened chat shows its text and steps together. A slow read must not leave the chat blank, so the wait is bounded.
+  // History renders independently while the opening response delivers the steps.
   const [loadedFor, setLoadedFor] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (!options.conversationId) return;
-    const conversationId = options.conversationId;
-    const timer = window.setTimeout(() => setLoadedFor(conversationId), 3000);
-    return () => window.clearTimeout(timer);
-  }, [options.conversationId]);
-  async function refresh(): Promise<void> {
+  async function refresh(opening = false): Promise<void> {
     // A read already running for the same chat is shared; a read for another chat waits for it and then runs.
     if (refreshing.current) {
       if (readFor.current === (callbacks.current.conversationId ?? currentChatConversationId())) return refreshing.current;
       await refreshing.current.catch(() => {});
-      return refresh();
+      return refresh(opening);
     }
     const generation = snapshotGeneration.current;
     const task = async () => { let readConversation: string | null = null; try {
@@ -92,12 +87,16 @@ export function useChatDevelopment(options: {
     // chat's and running processes. A project link still needs the full list to find that project's chat.
     const conversationId = callbacks.current.conversationId ?? currentChatConversationId();
     readFor.current = conversationId; readConversation = conversationId;
-    const shared = firstRead.current && conversationId && isChatPage() && !queryProjectId ? chatOpenData(conversationId) : null;
+    const shared = opening && conversationId && isChatPage() ? chatOpenData(conversationId) : null;
     const opened = shared ? await shared.catch(() => null) : null;
     firstRead.current = false;
-    const data = opened && !opened.processesDeferred ? { processes: opened.processes }
+    const snapshot = opened?.pendingProcesses ? await opened.pendingProcesses : opened;
+    const data = snapshot && !snapshot.processesDeferred ? snapshot
       : await api<{ processes: DevelopmentProcess[] }>(queryProjectId && !conversationId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
-    if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
+    if (alive.current && generation === snapshotGeneration.current && conversationId === (callbacks.current.conversationId ?? currentChatConversationId())) {
+      if (conversationId && opened?.pendingProcesses && snapshot?.projectThumbnails) setOpeningThumbnails({ conversationId, images: snapshot.projectThumbnails });
+      setProcesses(data.processes);
+    }
     } finally { if (alive.current) setLoadedFor(readConversation); } };
     refreshing.current = task();
     try { await refreshing.current; } finally { refreshing.current = undefined; }
@@ -111,7 +110,10 @@ export function useChatDevelopment(options: {
     return () => { alive.current = false; };
   }, []);
   // The chat id arriving after the first read of the same page chat needs no second read.
-  useEffect(() => { if (readFor.current === undefined || readFor.current !== options.conversationId) void refresh().catch(() => {}); }, [options.conversationId]);
+  useEffect(() => {
+    const conversationId = options.conversationId ?? currentChatConversationId();
+    if ((conversationId || queryProjectId) && readFor.current !== conversationId) void refresh(true).catch(() => {});
+  }, [options.conversationId, queryProjectId]);
   useEffect(() => {
     // A chat without development processes needs no polling and no live stream; a started process turns them on.
     if (!live) return;
@@ -119,10 +121,9 @@ export function useChatDevelopment(options: {
     // The stream already carries every change and its heartbeat comes every 3 s. A second reader only loads the server.
     let streamAliveAt = 0;
     let controller: AbortController | undefined;
-    const visibility = () => {
+    const connect = (skipInitial = false) => {
       controller?.abort(); controller = undefined;
       if (document.hidden) return;
-      poll();
       // Hidden tabs must release HTTP/1 connections, leaving navigation and
       // Activity requests available while a visible chat receives live updates.
       {
@@ -133,11 +134,13 @@ export function useChatDevelopment(options: {
           if (stream.signal.aborted) return;
           if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
           else poll();
-        }, chatConversation ?? (queryProjectId ? undefined : ""), chatConversation ? undefined : queryProjectId ?? undefined, () => { streamAliveAt = Date.now(); });
+        }, chatConversation ?? (queryProjectId ? undefined : ""), chatConversation ? undefined : queryProjectId ?? undefined, () => { streamAliveAt = Date.now(); }, skipInitial);
       }
     };
-    visibility();
+    connect(!anyActive && !callbacks.current.busy && loadedFor === options.conversationId);
+    const visibility = () => connect();
     document.addEventListener("visibilitychange", visibility);
+    streamAliveAt = Date.now();
     const timer = window.setInterval(() => { if (Date.now() - streamAliveAt > 15_000) poll(); }, anyActive ? 5000 : 10000);
     return () => { controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
   }, [live, anyActive, options.conversationId, queryProjectId]);
@@ -251,6 +254,7 @@ export function useChatDevelopment(options: {
     },
     isActive,
     processesReady: !options.conversationId || loadedFor === options.conversationId,
+    projectThumbnails: openingThumbnails?.conversationId === options.conversationId ? openingThumbnails.images : undefined,
     /** The project this chat is building right now: a follow-up belongs to it, not to whatever was open before. */
     activeProject: activeProcess,
     openingProjectChat,

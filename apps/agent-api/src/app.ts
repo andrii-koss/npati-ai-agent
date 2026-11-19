@@ -786,7 +786,7 @@ export function buildApp(config: AppConfig = {}) {
     activeContextResolver, chatFiles, browserTool, projectMediaService, activeChatStreams, companyRuntime, getAIContext, marketplace,
     persistAutomaticCompanyMemory, projectOrchestrator, runBusinessMessage, runNeutralMessage,
     codeService, projectService, projectTerminalEvents, codeSessionRunExecutor, codeRunAdmission,
-    codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, codeRunCancellation,
+    codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, projectBrowserQaService, codeRunCancellation,
     activeSessionRegistry, aiPreferences, codePreferences, codeRunQueueLimits, notifyMessagingConnections,
     automationScheduler, codeReaper, sandboxIdleTimer, sandboxRetentionTimer, lifecycleRetentionTimer, backupTimer,
     auditVerifyTimer, auditAnchorTimer, runnerReadinessTimer, storageReconciler,

@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatProjectPreviewCard } from "../ChatProjectPreviewCard";
+import { ChatProjectPreviewCard, ChatProjectThumbnailsContext } from "../ChatProjectPreviewCard";
 import type { ProjectCardData } from "@npati/shared";
 import { I18nProvider } from "../i18n";
 
@@ -17,6 +17,16 @@ afterEach(async () => {
 });
 
 describe("ChatProjectPreviewCard", () => {
+  it("shows the bundled chat thumbnail without fetching another copy", async () => {
+    const fetch = vi.fn(async (_url: string) => new Response(JSON.stringify({ isRunning: true })));
+    vi.stubGlobal("fetch", fetch);
+    const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    const card: ProjectCardData = { id: "bundled-project", companyId: "company", name: "Bundled site", framework: "HTML/CSS", kind: "code_project", status: "running" };
+    const dataUrl = "data:image/webp;base64,UklGRg==";
+    await act(async () => root!.render(<MemoryRouter><ChatProjectThumbnailsContext.Provider value={{ '["company","bundled-project"]': dataUrl }}><ChatProjectPreviewCard card={card} /></ChatProjectThumbnailsContext.Provider></MemoryRouter>));
+    expect(host.querySelector(".chat-preview-card-thumbnail-img")?.getAttribute("src")).toBe(dataUrl);
+    expect(fetch.mock.calls.some(([url]) => url.endsWith("/qa/thumbnail"))).toBe(false);
+  });
   it("renders Website project card matching design specifications", async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.stubGlobal(

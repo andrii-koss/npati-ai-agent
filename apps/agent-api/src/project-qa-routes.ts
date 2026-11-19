@@ -3,7 +3,6 @@ import { WorkspaceAccessError, WorkspaceNotFoundError, type AuthContext } from "
 import { SandboxProviderError } from "./sandbox-provider";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { BrowserQaError, ProjectBrowserQaService, type BrowserQaInspectOptions } from "./project-browser-qa-service";
-import { screenshotHasDetail } from "./project-screenshot-content";
 
 interface ProjectParams {
   companyId: string;
@@ -52,13 +51,9 @@ export function registerProjectQaRoutes(
     try {
       reply.header("Cache-Control", "private, no-store");
       reply.header("Vary", [reply.getHeader("Vary"), "Authorization"].filter(Boolean).join(", "));
-      const report = await qaService.getLatestReport(ctx, request.params.companyId, request.params.projectId);
-      const screenshot = report?.screenshots.find(image => image.captureMode === "visual" && ["image/png", "image/webp"].includes(image.mimeType) && image.sizeBytes <= 2_000_000);
-      const visualReport = report && !screenshot ? await qaService.getLatestVisualReport(ctx, request.params.companyId, request.params.projectId) : report;
-      const activeScreenshot = screenshot ?? visualReport?.screenshots.find(image => image.captureMode === "visual" && ["image/png", "image/webp"].includes(image.mimeType) && image.sizeBytes <= 2_000_000);
-      if (activeScreenshot && (activeScreenshot.mimeType === "image/webp" ? activeScreenshot.hasDetail !== true : !screenshotHasDetail(Buffer.from(activeScreenshot.base64Data, "base64")))) return { thumbnail: null };
-      if (activeScreenshot) reply.header("Cache-Control", "private, max-age=300");
-      return { thumbnail: activeScreenshot ? { dataUrl: `data:${activeScreenshot.mimeType};base64,` + activeScreenshot.base64Data, capturedAt: visualReport!.createdAt } : null };
+      const thumbnail = await qaService.getSavedThumbnail(ctx, request.params.companyId, request.params.projectId);
+      if (thumbnail) reply.header("Cache-Control", "private, max-age=300");
+      return { thumbnail };
     } catch (error) { return handleError(error, reply); }
   });
 

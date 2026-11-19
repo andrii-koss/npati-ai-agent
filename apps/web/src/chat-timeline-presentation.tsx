@@ -1,5 +1,6 @@
 import { developmentIsActive, type ProjectCardData } from "@npati/shared";
 import { useCodeInbox } from "./use-code-inbox";
+import { inboxActive } from "./code-inbox-client";
 import { developmentPreviewAnchor } from "./chat-development-view";
 import { chatTimeline, mergeConversationMessages, normalizeActivity } from "./chat-timeline";
 import { processDuration } from "./AgentExecutionTrace";
@@ -26,7 +27,7 @@ export function chatTimelinePresentation(input: {
     const displayMessages = mergeConversationMessages(messages, development.project?.conversationMessages);
     const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project, earlierMessages > 0, development.conversationProcesses);
     // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
-    const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
+    const agentWorking = sending || inboxActive(codeInbox.snapshot) || Boolean(development.project && developmentIsActive(development.project));
     // Only the project the agent is changing loses its Open block meanwhile. Every project's block vanished while one
     // site's database run waited 15 minutes for a confirmation (V6 step 14). When the changed project is not known yet
     // (a request just sent), all blocks wait as before.

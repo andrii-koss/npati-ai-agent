@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AuthProvider } from "./auth";
-import { chatProcess, registerChatOpenRoutes } from "./chat-open-routes";
+import { chatProcess, registerChatOpenRoutes, type ReadChatThumbnail } from "./chat-open-routes";
 import { AuthenticationError } from "./auth";
 import { ChatDevelopmentService, DevelopmentError, type DevelopmentPorts } from "./chat-development-service";
 import { registerCodeMonitorRoutes } from "./code-monitor-routes";
@@ -9,10 +9,10 @@ function fail(reply: FastifyReply, error: unknown) {
   return reply.code(error instanceof AuthenticationError ? error.status : error instanceof DevelopmentError ? error.status : shaped.httpStatus ?? shaped.status ?? 500)
     .send({ error: { code: shaped.code ?? "development_error", message: shaped.message ?? "Development request failed", retryable: false } });
 }
-export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider }) {
+export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider; readThumbnail?: ReadChatThumbnail }) {
   registerCodeMonitorRoutes(app, deps);
   const service = new ChatDevelopmentService(deps);
-  registerChatOpenRoutes(app, { auth: deps.auth, store: deps.store, listProcesses: (context, conversationId) => service.listForChat(context, conversationId) });
+  registerChatOpenRoutes(app, { auth: deps.auth, store: deps.store, listProcesses: (context, conversationId) => service.listForChat(context, conversationId), readThumbnail: deps.readThumbnail });
   const streams = new Set<() => void>();
   app.post<{ Body: { message: string; companyId?: string; projectId?: string; conversationId?: string; businessId?: string } }>("/chat/development/plan",
     { schema: { body: { type: "object", additionalProperties: false, required: ["message"], properties: {
@@ -24,7 +24,7 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
     });
   app.addHook("preClose", async () => { for (const close of streams) close(); await service.close(); });
   // Transport only: snapshots use the existing persisted runtime records.
-  app.get<{ Querystring: { conversationId?: string; projectId?: string } }>("/chat/development/processes/stream", async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string; projectId?: string; skipInitial?: string } }>("/chat/development/processes/stream", async (request, reply) => {
     try {
       const ctx = await deps.auth.authenticate(request);
       // A chat's live stream carries only its own and running processes; without the parameter the full list is kept.
@@ -32,7 +32,7 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       const list = async () => conversationId !== undefined
         ? (await service.listForChat(ctx, conversationId || undefined)).filter((process) => chatProcess(process, conversationId || undefined))
         : service.list(ctx, request.query.projectId);
-      const initial = await list();
+      const initial = request.query.skipInitial === "1" ? undefined : await list();
       reply.hijack();
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
       let closed = false, polling = false, pending = false, signature = "", timer: ReturnType<typeof setTimeout>;
@@ -67,7 +67,8 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       });
       const close = () => { if (closed) return; closed = true; unsub(); clearTimeout(timer); if (updateTimer) clearTimeout(updateTimer); streams.delete(close); reply.raw.end(); };
       streams.add(close); reply.raw.on("close", close);
-      publish(initial); timer = setTimeout(poll, 3000);
+      if (initial) publish(initial); else reply.raw.write(": heartbeat\n\n");
+      timer = setTimeout(poll, 3000);
     } catch (error) { return fail(reply, error); }
   });
   app.get<{ Querystring: { conversationId?: string; projectId?: string } }>("/chat/development/processes", async (request, reply) => {

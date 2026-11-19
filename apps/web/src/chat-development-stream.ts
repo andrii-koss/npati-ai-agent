@@ -1,13 +1,18 @@
 import type { DevelopmentProcess } from "@npati/shared";
 import { getStoredAuthToken } from "./AuthContext";
 /** Stream notifications use server projections; GET remains the recovery source. */
-export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void, conversationId?: string, projectId?: string, onAlive?: () => void) {
+export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void, conversationId?: string, projectId?: string, onAlive?: () => void, skipInitial = false) {
   let delay = 1000;
   while (!signal.aborted) {
     try {
       const token = getStoredAuthToken();
       // A chat watches only its own and running processes; a project link (no conversation filter) sees all.
-      const url = "/api/chat/development/processes/stream" + (conversationId !== undefined ? "?conversationId=" + encodeURIComponent(conversationId) : projectId ? "?projectId=" + encodeURIComponent(projectId) : "");
+      const query = new URLSearchParams();
+      if (conversationId !== undefined) query.set("conversationId", conversationId);
+      else if (projectId) query.set("projectId", projectId);
+      if (skipInitial) query.set("skipInitial", "1");
+      skipInitial = false;
+      const url = "/api/chat/development/processes/stream" + (query.size ? "?" + query : "");
       const response = await fetch(url, { signal, headers: token ? { authorization: "Bearer " + token } : {} });
       if (response.status === 401 || response.status === 403) return;
       if (!response.ok || !response.body) throw new Error("Trace stream unavailable");

@@ -9,6 +9,7 @@ vi.mock("../business-workspace-shared", async importOriginal => ({ ...await impo
 import { I18nProvider } from "../i18n";
 import { BusinessChatPage } from "../BusinessWorkspace";
 import { useChatDevelopment } from "../use-chat-development";
+import { forgetChatOpen } from "../chat-open";
 let root: Root | undefined;
 afterEach(async () => { if(root) await act(async () => root!.unmount()); document.body.innerHTML="";vi.unstubAllGlobals();vi.restoreAllMocks(); });
 it("does not adopt or stop another chat's active project and has no task panel", async () => {
@@ -135,20 +136,26 @@ it("keeps Preview outside user messages before and after reloading persisted cha
  const card={id:"reload-project",projectId:"reload-project",companyId:"company",name:"Store",framework:"HTML/CSS",kind:"code_project",status:"completed",previewUrl:"/preview/store",lastBuildStatus:"ready"};
  const process:DevelopmentProcess={id:"reload-process",companyId:"company",projectId:"reload-project",parentConversationId:"parent",conversationId:"reload-chat",name:"Store",framework:"HTML/CSS",status:"completed",hidden:false,createdAt:"2026-10-21T10:00:00Z",updatedAt:"2026-10-21T10:02:00Z",previewUrl:"/preview/store",progress:[{id:"build",stage:"build",title:"Build complete",status:"completed",at:"2026-10-21T10:01:00Z"}]};
  const messages=[{id:"request",role:"user",content:"Create my store",projectCard:card,createdAt:"2026-10-21T10:00:00Z"},{id:"reply",role:"assistant",content:"The store is ready.",createdAt:"2026-10-21T10:02:00Z"}];
- let releaseProcesses:()=>void=()=>{};
- let loaded:Promise<void>;
- mocks.api.mockImplementation(async(url:string)=>{
-  if(url.startsWith("/chat/development/processes")){await loaded;return {processes:[process]};}
-  if(url==="/conversations")return [];
-  if(url.startsWith("/conversations/reload-chat"))return {messages:JSON.parse(JSON.stringify(messages)),earlier:0};
-  return {};
+ const originalPath = window.location.pathname;
+ window.history.replaceState({}, "", "/c/reload-chat");
+ const encoder = new TextEncoder();
+ let releaseProcesses: () => void = () => {};
+ mocks.api.mockClear();
+ mocks.api.mockResolvedValue({});
+ const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+  if (url.startsWith("/api/chat/open")) return new Response(new ReadableStream({ start(controller) {
+   const send = (data: unknown) => controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+   send({ overview: null, conversation: { id: "reload-chat", title: "", messages, earlier: 0 }, company: null, chats: { items: [], more: false }, processes: [], processesPending: true });
+   releaseProcesses = () => { send({ processes: [process] }); controller.close(); };
+  } }), { headers: { "content-type": "application/x-ndjson" } });
+  if (url.startsWith("/api/chat/development/processes/stream")) return new Response(new ReadableStream({ start(controller) { init?.signal?.addEventListener("abort", () => controller.close(), { once: true }); } }));
+  return new Response("{}");
  });
- vi.stubGlobal("fetch",vi.fn(async(url:string,init?:RequestInit)=>String(url).startsWith("/api/chat/open")
-  ? new Response(JSON.stringify({overview:null,conversation:{id:"reload-chat",title:"",messages:JSON.parse(JSON.stringify(messages)),earlier:0},company:null,chats:{items:[],more:false},processes:[]}))
-  : new Response(new ReadableStream({start(c){init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}))));
+ vi.stubGlobal("fetch", fetch);
  const host=document.createElement("div");document.body.append(host);
+ try {
  for(let reload=0;reload<2;reload++){
-  loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});
+  forgetChatOpen();
   root=createRoot(host);
   await act(async()=>{root!.render(<MemoryRouter initialEntries={["/c/reload-chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="reload-chat" /></I18nProvider></MemoryRouter>);});
   // History shows at once and is not held for its steps (03c6795e, docs/audit/performance/2026-11-12-chat-double-flash-audit.md);
@@ -165,5 +172,11 @@ it("keeps Preview outside user messages before and after reloading persisted cha
   expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);
   expect(reply===preview.closest("article")||Boolean(reply.compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   await act(async()=>root!.unmount());root=undefined;
+ }
+ expect(fetch.mock.calls.filter(([url]) => url.startsWith("/api/chat/open"))).toHaveLength(2);
+ expect(mocks.api.mock.calls.some(([url]) => String(url).startsWith("/chat/development/processes"))).toBe(false);
+ } finally {
+  window.history.replaceState({}, "", originalPath);
+  forgetChatOpen();
  }
 });

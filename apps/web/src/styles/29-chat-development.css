@@ -1334,28 +1334,16 @@ body:has(.project-chat-preview-layer) .message-stream {
 }
 
 .chat-project-preview-card.chat-database-card {
-  padding: 18px 22px;
-  margin-bottom: 10px;
   border-color: #e5e7ed;
-  border-radius: 20px;
   background-color: #fff;
   box-shadow: 0 1px 4px rgba(26, 30, 52, 0.05);
 }
-.chat-database-card .chat-preview-card-left { gap: 20px; }
+.chat-database-card .chat-preview-card-actions { min-height: 36px; }
 .chat-database-card .chat-database-open { text-decoration: none; }
 .chat-database-card .chat-database-card-icon {
-  width: 76px;
-  height: 68px;
   background-color: #fbecec;
   color: #b7352c;
-  border-radius: 16px;
   box-shadow: 0 1px 2px rgba(26, 30, 52, 0.04);
-}
-
-@media (max-width: 600px) {
-  .chat-project-preview-card.chat-database-card { padding: 12px; }
-  .chat-database-card .chat-preview-card-left { gap: 12px; }
-  .chat-database-card .chat-database-card-icon { width: 58px; height: 54px; }
 }
 
 /* The block menu floats above the page at its button (V6 step 15): it is never cut off or covered by messages. */

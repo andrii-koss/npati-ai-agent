@@ -14,7 +14,7 @@ import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import { type ChatAttachmentInput } from "./ChatAttachments";
 import { ChatThinking, useChatThinking, ResearchProgressPanel } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
-import { InboxSubmission } from "./code-inbox-client";
+import { InboxSubmission, inboxActive } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { projectConversationUrl } from "./chat-development-view";
 import { chatCardLabels } from "./chat-card-i18n";
@@ -24,13 +24,13 @@ import { mergeConversationMessages, nearChatBottom } from "./chat-timeline";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer } from "./business-workspace-composer";
-import { chatOpenData } from "./chat-open";
+import { chatOpenData, type ChatProjectThumbnails } from "./chat-open";
 import { registerChatTurn } from "./chat-activity";
 import { ChatMessageRow, useChatRowActions } from "./chat-message-row";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 import { api, useWorkspace } from "./business-workspace-shared";
 import { FloatingNotice, Message } from "./business-workspace-cards";
-import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
+import { ChatPreviewOpenContext, ChatProjectThumbnailsContext } from "./ChatProjectPreviewCard";
 import { ChatFileViewerProvider } from "./ChatFileViewer";
 import { ChatPreviewPanelProvider } from "./ChatPreviewPanel";
 import { ChatRunApprovals } from "./ChatRunApprovals";
@@ -41,6 +41,7 @@ export * from "./business-workspace-shared";
 
 // Earlier messages load before the top is reached, so the view never stops at the very top while they arrive.
 const EARLIER_MESSAGES_THRESHOLD_PX = 600;
+type ConversationPage = { messages: Message[]; earlier?: number; cursor?: string | null; company?: { id: string } | null; projectThumbnails?: ChatProjectThumbnails };
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { t, language } = useTranslation();
@@ -55,18 +56,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     return projectId && selectedCompany ? { projectId, companyId: selectedCompany, conversationId: initialConversationId ?? null } : null;
   });
   const [entryProjectCard, setEntryProjectCard] = useState<ProjectCardData | null>(null);
-  useEffect(() => {
-    const projectId = selectedProject?.projectId ?? chatSearch.get("project");
-    const companyId = selectedProject?.companyId ?? chatSearch.get("company");
-    if (!projectId || !companyId) return;
-    const controller = new AbortController();
-    void api<{ id: string; name: string; status: string; framework?: string; previewUrl?: string; type: string }>(
-      `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`, { signal: controller.signal }
-    ).then(project => {
-      if (!controller.signal.aborted) setEntryProjectCard({ id: project.id, projectId: project.id, companyId, name: project.name, status: project.status, framework: project.framework, previewUrl: project.previewUrl, kind: project.type === "code_project" ? "code_project" : "website_project" });
-    }).catch(error => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Project unavailable"); });
-    return () => controller.abort();
-  }, [chatSearch, selectedProject?.projectId, selectedProject?.companyId]);
   const [selected, setSelected] = useState<string | null>(null); const [earlierMessages, setEarlierMessages] = useState(0);
   const loadingEarlierRef = useRef(false);
   // Earlier messages load on the user's own scroll, not on the scroll that opens the chat at its end.
@@ -75,6 +64,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   // The oldest loaded message id: the history cursor for the next earlier page.
   const earlierCursorRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
+  const [messageThumbnails, setMessageThumbnails] = useState<ChatProjectThumbnails>({});
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
   const [chatMode, setChatMode] = useState<"none" | "private" | "tts">("none");
   const noMemory = chatMode === "private";
@@ -147,10 +137,26 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         return index < 0 ? curr : curr.filter((_, position) => position !== index);
       });
     },
-    busy: sending || inboxSubmitting || codeInbox.active,
+    busy: sending || inboxSubmitting || inboxActive(codeInbox.snapshot),
     onSession: codeInbox.accept,
     boundSessionId: codeInbox.session?.sessionId
   });
+  const projectThumbnails = useMemo(() => ({ ...development.projectThumbnails, ...messageThumbnails }), [development.projectThumbnails, messageThumbnails]);
+  const entryProjectId = selectedProject?.projectId ?? chatSearch.get("project");
+  const entryCompanyId = selectedProject?.companyId ?? chatSearch.get("company");
+  const latestProjectId = latestCard && (latestCard.projectId ?? latestCard.id);
+  const needsEntryProject = Boolean(entryProjectId && entryCompanyId && entryProjectId !== latestProjectId && entryProjectId !== development.project?.projectId);
+  const openingTimeline = Boolean(initialConversationId && (loadingHistory || !development.processesReady));
+  useEffect(() => {
+    if (openingTimeline || !needsEntryProject || !entryProjectId || !entryCompanyId) return;
+    const controller = new AbortController();
+    void api<{ id: string; name: string; status: string; framework?: string; previewUrl?: string; type: string }>(
+      `/companies/${encodeURIComponent(entryCompanyId)}/projects/${encodeURIComponent(entryProjectId)}`, { signal: controller.signal }
+    ).then(project => {
+      if (!controller.signal.aborted) setEntryProjectCard({ id: project.id, projectId: project.id, companyId: entryCompanyId, name: project.name, status: project.status, framework: project.framework, previewUrl: project.previewUrl, kind: project.type === "code_project" ? "code_project" : "website_project" });
+    }).catch(error => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Project unavailable"); });
+    return () => controller.abort();
+  }, [entryProjectId, entryCompanyId, needsEntryProject, openingTimeline]);
   // A project created in this chat becomes its selection: Preview and follow-ups no longer use the empty entry project.
   // A chat opened for one project ("Edit in chat" on its card) keeps that project: the chat's newest card, already there
   // when the page opened, is not a new project and must not replace it (V6 step 04: a game's edits went to the site).
@@ -201,7 +207,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   } = useChatResearchProgress(flushDeltasRef);
   const streamControllerRef=useRef<{controller:AbortController;streamId:string;stopRequested?:boolean}|null>(null);
   const thinking = useChatThinking({
-    busy: sending || development.submitting || development.isActive || codeInbox.active,
+    busy: sending || development.submitting || development.isActive || inboxActive(codeInbox.snapshot),
     streaming: streamingResponse, text: textIn(messageLanguage([...messages].reverse().find((message) => message.role === "user")?.content, development.project?.responseLanguage ?? language), "chat.thinking"), items: development.project?.progress, events: progressEvents,
     runIds: [...Object.keys(development.project?.runStatuses ?? {}), development.project?.runId, development.project?.initialRunId].filter((id): id is string => Boolean(id)),
   });
@@ -233,7 +239,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     if (!id || business || earlierMessages <= 0 || loadingEarlierRef.current || !stream) return;
     loadingEarlierRef.current = true;
     try {
-      const page = await api<{ messages: Message[]; earlier: number; cursor: string | null }>(`/conversations/${id}/messages?before=${encodeURIComponent(earlierCursorRef.current ?? String(earlierMessages))}`);
+      const page = await api<ConversationPage>(`/conversations/${id}/messages?before=${encodeURIComponent(earlierCursorRef.current ?? String(earlierMessages))}`);
       if (selectedRef.current !== id) return;
       // The first visible message keeps its place on screen. Only the shift left after the browser's own scroll
       // anchoring is corrected (none at the very top, where browsers do not anchor), so the view never moves twice.
@@ -242,7 +248,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       earlierAnchorRef.current = first ? { id: first.dataset.messageId!, offset: first.getBoundingClientRect().top - top } : null;
       followBottomRef.current = false;
       setMessages((current) => [...page.messages.filter((message) => !current.some((item) => item.id === message.id)), ...current]);
-      setEarlierMessages(page.earlier);
+      if (page.projectThumbnails) setMessageThumbnails(current => ({ ...page.projectThumbnails, ...current }));
+      setEarlierMessages(page.earlier ?? 0);
       earlierCursorRef.current = page.cursor ?? earlierCursorRef.current;
     } catch {
       // The loaded page stays as it is; scrolling up again retries.
@@ -258,17 +265,20 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const next = preferred ?? null; setSelected(next);
     if (next) {
       let loaded: Message[] = [];
+      let thumbnails: ChatProjectThumbnails | undefined;
       try {
         if (business) loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
         else {
           // A chat opens with its latest messages from the page's single open request; a refresh after a turn
           // reads only the latest page. Earlier messages load when the user scrolls up.
           const opened = preserveActiveTurn ? null : chatOpenData(next);
-          const page = opened ? (await opened).conversation : await api<{ messages: Message[]; earlier: number; cursor?: string | null }>(`/conversations/${next}/messages`);
+          const snapshot = opened ? await opened : null;
+          const page = snapshot ? snapshot.conversation : await api<ConversationPage>(`/conversations/${next}/messages`);
+          thumbnails = snapshot?.projectThumbnails ?? (page && "projectThumbnails" in page ? page.projectThumbnails : undefined);
           loaded = (page?.messages ?? []) as Message[];
           setEarlierMessages(page?.earlier ?? 0);
           // The chat selects the company it worked in, as the user expects on opening it (owner decision, V6 step 14).
-          const chatCompany = (page as { company?: { id: string } | null } | null | undefined)?.company;
+          const chatCompany = page?.company;
           if (chatCompany?.id && chatCompany.id !== readActiveCompanyId()) {
             writeActiveCompanyId(chatCompany.id);
             window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "select", companyId: chatCompany.id } }));
@@ -279,12 +289,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       } catch {
         try {
           // Without the combined open request the chat still shows its latest page.
-          const page = await api<{ messages: Message[]; earlier?: number }>(`/conversations/${next}${business ? "" : "/messages"}`);
+          const page = await api<ConversationPage>(`/conversations/${next}${business ? "" : "/messages"}`);
           loaded = page.messages;
+          thumbnails = page.projectThumbnails;
           setEarlierMessages(page.earlier ?? 0);
         } catch {}
       }
       if (loadVersion !== historyLoadVersionRef.current) return [] as Message[];
+      if (thumbnails || !preserveActiveTurn) setMessageThumbnails(current => preserveActiveTurn ? { ...current, ...thumbnails } : thumbnails ?? {});
       if (loaded.length > 0) {
         // The active turn already has stable React keys and the final streamed text.
         // Replacing it with persisted message IDs remounts both bubbles and flashes.
@@ -300,6 +312,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
     if (!preserveActiveTurn) {
       setMessages([]);
+      setMessageThumbnails({});
     }
     return [] as Message[];
   }
@@ -681,10 +694,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
-  const { displayMessages, timeline, agentWorking, previewBusyFor, deletedProcessOf, lastCardEntry, runTotal, previewAnchor, projectPreview, bottomCard } = chatTimelinePresentation({ messages, development, selected, sending, codeInbox, earlierMessages, entryProjectCard, setSelectedProject });
+  const { displayMessages, timeline, agentWorking, previewBusyFor, deletedProcessOf, lastCardEntry, runTotal, previewAnchor, projectPreview, bottomCard } = chatTimelinePresentation({ messages, development, selected, sending, codeInbox, earlierMessages, entryProjectCard: needsEntryProject && entryProjectCard?.id === entryProjectId && entryProjectCard.companyId === entryCompanyId ? entryProjectCard : null, setSelectedProject });
   rowStateRef.current = { displayMessages, activeTurn };
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
+    <ChatProjectThumbnailsContext.Provider value={business ? null : projectThumbnails}>
     <ChatPreviewPanelProvider busy={agentWorking} conversationId={selected}>
     <ChatFileViewerProvider busy={agentWorking}>
       {notice && (
@@ -790,6 +804,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       </div>
     </ChatFileViewerProvider>
     </ChatPreviewPanelProvider>
+    </ChatProjectThumbnailsContext.Provider>
     </ChatPreviewOpenContext.Provider>
   );
 }

@@ -14,6 +14,7 @@ import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
 import { ChatPreviewPanelContext, wasPreviewPanelOpen } from "./ChatPreviewPanel";
 import { previewUpdateFailure } from "./preview-update-failure";
+import type { ChatProjectThumbnails } from "./chat-open";
 
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
@@ -23,6 +24,7 @@ export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed"
  * mounts a new card; it reopens the Preview instead of closing it while the agent edits the project.
  */
 export const ChatPreviewOpenContext = React.createContext<Set<string> | null>(null);
+export const ChatProjectThumbnailsContext = React.createContext<ChatProjectThumbnails | null>(null);
 const OPEN_PREVIEW_KEY = "npati_open_preview";
 const openPreviewValue = (projectId: string) => window.location.pathname + "|" + projectId;
 /** An open panel survives a page reload in this tab, and only in the chat it was opened from. */
@@ -106,15 +108,20 @@ export function ChatProjectPreviewCard({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [refreshNotice, setRefreshNotice] = useState("");
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(() => knownThumbnails.get(previewKey) ?? null);
+  const chatThumbnails = useContext(ChatProjectThumbnailsContext);
+  const hasChatThumbnails = chatThumbnails !== null;
+  const [fetchedThumbnail, setThumbnailUrl] = useState<string | null>(() => hasChatThumbnails ? null : knownThumbnails.get(previewKey) ?? null);
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
+  const thumbnail = chatThumbnails ? chatThumbnails[JSON.stringify([card.companyId, previewKey])] : fetchedThumbnail;
+  const thumbnailUrl = thumbnail && thumbnail !== failedThumbnail ? thumbnail : null;
   // The standard picture appears only once it is certain the project has no screenshot.
-  const [thumbnailChecked, setThumbnailChecked] = useState(() => knownThumbnails.has(previewKey));
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<PreviewRuntimeStatus>(() => {
     if (card.status === "failed") return "failed";
     if (card.status === "running") return "running";
     if (card.status === "starting" || card.status === "building" || card.status === "provisioning") return "starting";
     if (card.status === "stopped") return "stopped";
+    if (card.previewUrl && ["ready", "success"].includes(card.lastBuildStatus ?? "")) return "running";
     return "starting";
   });
 
@@ -324,6 +331,7 @@ export function ChatProjectPreviewCard({
 
   // Load project thumbnail screenshot if available
   useEffect(() => {
+    if (hasChatThumbnails) return;
     let isMounted = true;
     const companyId = card.companyId;
     const projectId = card.projectId ?? card.id;
@@ -343,14 +351,13 @@ export function ChatProjectPreviewCard({
       } catch {
         if (isMounted) setThumbnailUrl(knownThumbnails.get(projectId) ?? null);
       }
-      if (isMounted) setThumbnailChecked(true);
     }
 
     void loadThumbnail();
     return () => {
       isMounted = false;
     };
-  }, [card.companyId, card.projectId, card.id]);
+  }, [card.companyId, card.projectId, card.id, hasChatThumbnails]);
 
   // Close dropdown on click outside or Escape
   useEffect(() => {
@@ -556,9 +563,9 @@ export function ChatProjectPreviewCard({
                   src={thumbnailUrl}
                   alt={title}
                   className="chat-preview-card-thumbnail-img"
-                  onError={() => setThumbnailUrl(null)}
+                  onError={() => setFailedThumbnail(thumbnailUrl)}
                 />
-              ) : !thumbnailChecked ? null : projectType === "website" ? (
+              ) : projectType === "website" ? (
                 <WebsiteSvgThumbnail />
               ) : projectType === "mobile_app" ? (
                 <MobileSvgThumbnail />

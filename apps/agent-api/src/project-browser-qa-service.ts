@@ -189,4 +189,15 @@ export class ProjectBrowserQaService {
     const reports = await this.store.listProjectQaReports(ctx, companyId, projectId, 10);
     return reports.find(r => r.screenshots.some(s => s.captureMode === "visual" && ["image/png", "image/webp"].includes(s.mimeType) && s.sizeBytes <= 2_000_000)) ?? null;
   }
+
+  async getSavedThumbnail(ctx: AuthContext, companyId: string, projectId: string): Promise<{ dataUrl: string; capturedAt: string } | null> {
+    const findVisual = (report: ProjectQaReport | null) => report?.screenshots.find(image =>
+      image.captureMode === "visual" && ["image/png", "image/webp"].includes(image.mimeType) && image.sizeBytes <= 2_000_000);
+    const latest = await this.getLatestReport(ctx, companyId, projectId);
+    const latestImage = findVisual(latest);
+    const report = latest && !latestImage ? await this.getLatestVisualReport(ctx, companyId, projectId) : latest;
+    const image = latestImage ?? findVisual(report);
+    if (!report || !image || !(image.mimeType === "image/webp" ? image.hasDetail === true : screenshotHasDetail(Buffer.from(image.base64Data, "base64")))) return null;
+    return { dataUrl: `data:${image.mimeType};base64,${image.base64Data}`, capturedAt: report.createdAt };
+  }
 }

@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type WorkspaceStore, type AuthContext } from "@npati/workspace";
 import { chatPreflightReads } from "../apps/agent-api/src/chat-preflight-reads";
 import { registerChatOpenRoutes } from "../apps/agent-api/src/chat-open-routes";
+import { saveChatProjectCard } from "../apps/agent-api/src/project-chat-cards";
 const owner: AuthContext = { workspaceId: "ws", userId: "owner", permissions: ["workspace:read"] };
 
 it("shares routing reads within one request while retaining store method binding and user isolation", async () => {
@@ -46,5 +47,26 @@ it("uses bounded store pages for open and history instead of full conversations 
     expect(full).not.toHaveBeenCalled(); expect(allChats).not.toHaveBeenCalled();
     // Overview may list businesses, but the sidebar no longer requests each business's conversations.
     expect(businesses.mock.calls.length).toBeLessThanOrEqual(2);
+  } finally { await app.close(); }
+});
+
+it("includes a project's saved thumbnail once in the first record of a streamed chat opening", async () => {
+  const store = new InMemoryWorkspaceStore(); await store.initialize();
+  const conversation = await store.createNeutralConversation(owner, "Chat");
+  const card = { id: "site", companyId: "company", status: "running", name: "Site", kind: "website_project" as const };
+  for (const content of ["Created the site", "Updated the site"]) {
+    const message = await store.appendNeutralMessage(owner, conversation.id, "assistant", content);
+    await saveChatProjectCard(store, owner, conversation.id, message.id, card);
+  }
+  const readThumbnail = vi.fn(async () => ({ dataUrl: "data:image/png;base64,c2FtcGxl" }));
+  const app = Fastify();
+  registerChatOpenRoutes(app, { auth: { authenticate: async () => owner }, store, listProcesses: async () => [], readThumbnail });
+  try {
+    const response = await app.inject({ method: "GET", url: `/chat/open?conversationId=${conversation.id}&stream=1` });
+    expect(response.statusCode).toBe(200);
+    const first = JSON.parse(response.body.split("\n")[0]!);
+    expect(first.conversation.messages).toHaveLength(2);
+    expect(first.projectThumbnails).toEqual({ '["company","site"]': "data:image/png;base64,c2FtcGxl" });
+    expect(readThumbnail).toHaveBeenCalledExactlyOnceWith(owner, "company", "site");
   } finally { await app.close(); }
 });

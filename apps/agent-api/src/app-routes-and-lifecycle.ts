@@ -89,6 +89,7 @@ export interface AppRoutesAndLifecycleDeps {
   codeSessionInbox: ReturnType<typeof registerCodeRouteWiring>["codeSessionInbox"];
   projectSandbox?: ProjectSandboxService;
   projectPreviewService: ProjectPreviewService;
+  projectBrowserQaService: import("./project-browser-qa-service").ProjectBrowserQaService;
   codeRunCancellation: ReturnType<typeof registerCodeRouteWiring>["codeRunCancellation"];
   activeSessionRegistry: ReturnType<typeof createRedisHealthWiring>["activeSessionRegistry"];
   aiPreferences: AIPreferencesStore;
@@ -341,6 +342,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     inbox: codeSessionInbox,
     sandbox: projectSandbox,
     preview: projectPreviewService,
+    readThumbnail: (context, companyId, projectId) => deps.projectBrowserQaService.getSavedThumbnail(context, companyId, projectId),
     cancellation: codeRunCancellation,
   });
 
