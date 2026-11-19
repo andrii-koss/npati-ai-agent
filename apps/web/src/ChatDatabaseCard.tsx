@@ -17,9 +17,7 @@ export function ChatDatabaseCard({ card, language }: { card: DatabaseCardData; l
     <div className="chat-project-preview-card chat-database-card" data-testid="chat-database-card">
       <div className="chat-preview-card-left">
         <div className="chat-preview-card-thumbnail chat-database-card-thumbnail" aria-hidden="true">
-          <div className="chat-database-card-icon">
-            <Database size={38} strokeWidth={2} />
-          </div>
+          <div className="ds-environment-icon"><Database size={36} strokeWidth={1.8} /></div>
         </div>
         <div className="chat-preview-card-info">
           <h4 className="chat-preview-card-title" title={title}>{title}</h4>
