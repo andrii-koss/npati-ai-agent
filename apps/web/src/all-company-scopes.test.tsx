@@ -40,7 +40,7 @@ beforeEach(() => {
       const ids = businessId ? [businessId] : ["alpha", "beta"];
       const records = ids.map(id => ({ ...item, id: `${id}-item`, businessId: id, title: `Record ${id}` }));
       data = url.startsWith("/api/memory/") ? {
-        items: records,
+        items: records.map(record => record.businessId === "alpha" ? { ...record, source: "chat:" + "a".repeat(64) } : record),
         counts: { all: ids.length, facts: ids.length, audience: 0, brand: 0, decisions: 0, product: 0, other: 0 },
         nextCursor: null,
       } : {
@@ -188,6 +188,9 @@ it.each([
   if (page === "memory") {
     expect(requests).toEqual(["/api/memory/page?workspace=1"]);
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0", "0", "0", "0"]);
+    const source = host.querySelector(".memory-source-tag");
+    expect(source?.textContent).toBe("memoryPage.sources.chatConfirmed");
+    expect(source?.getAttribute("title")).toBe("memoryPage.sources.sourcePrefix: memoryPage.sources.chatConfirmed");
   }
   await act(async () => selector.click());
   expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe("All companies");

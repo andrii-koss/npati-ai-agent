@@ -346,6 +346,8 @@ export function MemoryPage() {
         <div className="memory-grid">
           {page.items.map((item) => {
             const meta = MEMORY_TYPE_META[item.type] || MEMORY_TYPE_META.other;
+            const isChatSource = item.source?.startsWith("chat:");
+            const sourceLabel = formatSourceLabel(isChatSource ? "chat_confirmed" : item.source);
             return (
               <article key={item.id} className="memory-card">
                 <div className="memory-card-body">
@@ -357,9 +359,9 @@ export function MemoryPage() {
                       </span>
                       <span
                         className="memory-source-tag"
-                        title={`${t("memoryPage.sources.sourcePrefix")}: ${item.source || "user"}`}
+                        title={`${t("memoryPage.sources.sourcePrefix")}: ${isChatSource ? sourceLabel : item.source || "user"}`}
                       >
-                        {formatSourceLabel(item.source)}
+                        {sourceLabel}
                       </span>
                     </div>
                   </div>
