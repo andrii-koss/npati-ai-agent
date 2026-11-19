@@ -321,12 +321,14 @@ function MyModels({ models, routing, onChanged }: { models: Model[]; routing: Ro
   </section>;
 }
 
-export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChanged, onReady = () => {} }: { provider: Provider; addedIds?: Set<string>; onClose: () => void; onChanged: () => void; onReady?: () => void }) {
+export function ProviderDrawer({ provider, addedIds = new Set(), preloadModels = false, onClose, onChanged, onReady = () => {} }: { provider: Provider; addedIds?: Set<string>; preloadModels?: boolean; onClose: () => void; onChanged: () => void; onReady?: () => void }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"details" | "models" | "connect">(provider.connected ? "details" : "connect");
   const [models, setModels] = useState<Model[]>([]);
   const [modelSearch, setModelSearch] = useState("");
-  const [loadingModels, setLoadingModels] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [modelsError, setModelsError] = useState("");
+  const [modelRevision, setModelRevision] = useState(0);
   const [modelOffset, setModelOffset] = useState(0);
   const [modelTotal, setModelTotal] = useState(0);
   const [apiKey, setApiKey] = useState("");
@@ -336,21 +338,53 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
   const [oauth, setOauth] = useState<{ flowId: string; method: string; authorizationUrl: string; userCode?: string; interval?: number; message?: string } | null>(null);
   const [oauthCode, setOauthCode] = useState("");
   const pollRef = useRef<number | null>(null);
+  const modelRequestId = useRef(0);
+  type ModelPage = { models: Model[]; pagination: { total: number } };
+  const pendingModelPages = useRef(new Map<string, Promise<ModelPage>>());
 
-  const loadModels = useCallback(async (reset = true, refresh = false) => {
+  const loadModels = useCallback(async (offset = 0, refresh = false) => {
+    const id = ++modelRequestId.current;
     setLoadingModels(true);
+    setModelsError("");
     try {
-      const offset = reset ? 0 : modelOffset;
       const query = new URLSearchParams({ offset: String(offset), limit: "48", ...(modelSearch ? { search: modelSearch } : {}), ...(refresh ? { refresh: "true" } : {}) });
-      const result = await api<{ models: Model[]; pagination: { total: number; hasMore: boolean } }>(`/api/ai/providers/${encodeURIComponent(provider.id)}/models?${query}`);
-      setModels((current) => reset ? result.models : [...current, ...result.models]);
+      const url = `/api/ai/providers/${encodeURIComponent(provider.id)}/models?${query}`;
+      const key = `${modelRevision}:${url}`;
+      let pending = pendingModelPages.current.get(key);
+      if (!pending) {
+        pending = api<ModelPage>(url).finally(() => pendingModelPages.current.delete(key));
+        pendingModelPages.current.set(key, pending);
+      }
+      const result = await pending;
+      if (id !== modelRequestId.current) return;
+      setModels((current) => offset ? [...current, ...result.models] : result.models);
       setModelOffset(offset + result.models.length); setModelTotal(result.pagination.total);
-    } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.couldNotLoadModels")); }
-    finally { setLoadingModels(false); }
-  }, [modelOffset, modelSearch, provider.id, t]);
+    } catch (error) {
+      if (id === modelRequestId.current) setModelsError(error instanceof Error ? error.message : t("aiMarketplace.drawer.couldNotLoadModels"));
+    } finally {
+      if (id === modelRequestId.current) setLoadingModels(false);
+    }
+  }, [modelRevision, modelSearch, provider.id, t]);
+
+  const reloadModelList = () => setModelRevision(revision => revision + 1);
+  const showModels = () => {
+    setMode("models");
+    if ((preloadModels || mode === "models") && modelsError && !loadingModels) void loadModels();
+  };
+  const shouldLoadModels = preloadModels || mode === "models";
 
   useEffect(() => () => { if (pollRef.current) window.clearInterval(pollRef.current); }, []);
-  useEffect(() => { if (mode === "models") void loadModels(true); }, [mode, modelSearch]);
+  // Prepare the first page as soon as the drawer opens. Switching tabs keeps the loaded models.
+  useEffect(() => {
+    if (!shouldLoadModels) return;
+    void loadModels();
+    return () => { modelRequestId.current++; };
+  }, [loadModels, shouldLoadModels]);
+  useEffect(() => {
+    const receive = (event: MessageEvent) => { if (event.data === "npati-oauth-success") setModelRevision(revision => revision + 1); };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, []);
   useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setMessage(""), 2000);
@@ -361,7 +395,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
     event?.preventDefault(); setBusy(t("aiMarketplace.drawer.connecting")); setMessage("");
     try {
       await api(`/api/ai/providers/${encodeURIComponent(provider.id)}/connect`, { method: "POST", body: JSON.stringify({ ...(apiKey ? { apiKey } : {}), ...(baseUrl ? { baseUrl } : {}) }) });
-      setApiKey(""); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setMode("models"); onChanged();
+      setApiKey(""); setMessage(t("aiMarketplace.drawer.connectedSuccess")); reloadModelList(); setMode("models"); onChanged();
     } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.connectionFailed")); }
     finally { setBusy(""); }
   }
@@ -376,7 +410,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
           try {
             const result = await api<{ status: string; message?: string }>(`/api/ai/oauth/${flow.flowId}/poll`, { method: "POST" });
             setMessage(result.message || t("aiMarketplace.drawer.waitingAuth"));
-            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setMode("models"); onChanged(); }
+            if (result.status === "connected") { if (pollRef.current) window.clearInterval(pollRef.current); setOauth(null); setMessage(t("aiMarketplace.drawer.connectedSuccess")); reloadModelList(); setMode("models"); onChanged(); }
           } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.oauthFailed")); if (pollRef.current) window.clearInterval(pollRef.current); }
         };
         pollRef.current = window.setInterval(poll, Math.max(3, flow.interval || 5) * 1000); void poll();
@@ -387,7 +421,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
 
   async function completeOauth() {
     if (!oauth) return; setBusy(t("aiMarketplace.drawer.completing"));
-    try { await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setOauth(null); setMode("models"); onChanged(); }
+    try { await api<{ message?: string }>(`/api/ai/oauth/${oauth.flowId}/complete`, { method: "POST", body: JSON.stringify({ code: oauthCode }) }); setMessage(t("aiMarketplace.drawer.connectedSuccess")); setOauth(null); reloadModelList(); setMode("models"); onChanged(); }
     catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.oauthFailed")); }
     finally { setBusy(""); }
   }
@@ -397,6 +431,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
     try {
       const result = await api<Record<string, unknown>>(`/api/ai/providers/${encodeURIComponent(provider.id)}${kind === "disconnect" ? "" : `/${kind}`}`, { method: kind === "disconnect" ? "DELETE" : "POST" });
       setMessage(kind === "test" ? (result.valid ? t("aiMarketplace.drawer.connectionHealthy") : String(result.error || t("aiMarketplace.drawer.connectionTestFailed"))) : kind === "disconnect" ? t("aiMarketplace.drawer.providerDisconnected") : t("aiMarketplace.drawer.modelsSynchronized", { details: result.syncedModels ? `: ${result.syncedModels}` : "" }));
+      if (kind !== "test") reloadModelList();
       onChanged(); if (kind === "disconnect") setMode("connect");
     } catch (error) { setMessage(error instanceof Error ? error.message : t("aiMarketplace.drawer.actionFailed")); }
     finally { setBusy(""); }
@@ -417,7 +452,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
       <ProviderBadges provider={provider} />
       <div className="drawer-tabs">
         <button className={mode === "details" ? "active" : ""} onClick={() => setMode("details")}>{t("aiMarketplace.drawer.overview")}</button>
-        <button className={mode === "models" ? "active" : ""} onClick={() => setMode("models")}>{t("aiMarketplace.drawer.models")}</button>
+        <button className={mode === "models" ? "active" : ""} onClick={showModels}>{t("aiMarketplace.drawer.models")}</button>
         <button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}>{provider.connected ? t("common.settings") : t("aiMarketplace.drawer.setup")}</button>
       </div>
       {message && <div className="inline-message">{message}</div>}
@@ -431,7 +466,7 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
         </dl>
         {provider.availabilityReason && <p className="provider-availability-note">{provider.availabilityReason}</p>}
         <div className="drawer-actions">{provider.connected ? <>
-          <button className="button-primary" onClick={() => setMode("models")}>{t("aiMarketplace.drawer.browseModels")}</button>
+          <button className="button-primary" onClick={showModels}>{t("aiMarketplace.drawer.browseModels")}</button>
           <button className="button-secondary" disabled={!!busy} onClick={() => action("test")}>{t("aiMarketplace.drawer.testConnection")}</button>
           <button className="button-secondary" disabled={!!busy} onClick={() => action("refresh-models")}>{t("aiMarketplace.drawer.refreshModels")}</button>
           <button className="button-danger" disabled={!!busy} onClick={() => action("disconnect")}>{t("aiMarketplace.drawer.disconnect")}</button>
@@ -443,10 +478,11 @@ export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChan
           <form onSubmit={connect}>{provider.authType === "none" && <div className="no-auth-note"><strong>{t("aiMarketplace.drawer.noAuthNote")}</strong><span>{t("aiMarketplace.drawer.noAuthSupport")}</span></div>}{provider.authType === "web_session" && <div className="provider-setup-note"><strong>{t("aiMarketplace.drawer.webSessionNotice")}</strong><span>{t("aiMarketplace.drawer.webSessionDesc")}</span>{provider.website && <a href={provider.website} target="_blank" rel="noreferrer">{t("aiMarketplace.drawer.openProviderSignIn")}</a>}</div>}{provider.local && <div className="field"><label>{t("aiMarketplace.drawer.serverUrl")}</label><input type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></div>}{!["none", "local"].includes(provider.authType) || !provider.credentialOptional ? <div className="field"><label>{provider.authType === "web_session" ? t("aiMarketplace.drawer.sessionToken") : t("aiMarketplace.drawer.apiKey")}{provider.credentialOptional ? ` (${t("aiMarketplace.drawer.optional")})` : ""}</label><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} required={!provider.credentialOptional} /><small>{t("aiMarketplace.drawer.credentialSecurity")}</small></div> : null}<button className="button-primary wide" disabled={!!busy}>{busy || t("aiMarketplace.drawer.connectProvider")}</button></form>}
       </div>}
       {mode === "models" && <div className="models-body">
-        <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder={t("aiMarketplace.drawer.searchModels")} /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(true, true)}>{t("aiMarketplace.drawer.refreshModels")}</button></div>
+        <div className="model-toolbar"><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder={t("aiMarketplace.drawer.searchModels")} /><button className="button-secondary" disabled={loadingModels || !provider.connected} onClick={() => loadModels(0, true)}>{t("aiMarketplace.drawer.refreshModels")}</button></div>
+        {modelsError && <div className="inline-message">{modelsError}</div>}
         <p className="showing-copy">{t("aiMarketplace.drawer.showingModels", { current: String(models.length), total: String(modelTotal) })}</p>
         {loadingModels && models.length === 0 ? <div className="loading-state">{t("aiMarketplace.drawer.loadingModels")}</div> : models.length === 0 ? <div className="empty-inline"><strong>{t("aiMarketplace.drawer.noModelsTitle")}</strong><span>{provider.connected ? t("aiMarketplace.drawer.noModelsDescConnected") : t("aiMarketplace.drawer.noModelsDescNotConnected")}</span></div> : <div className="model-list">{models.map((model) => <div className="model-row" key={model.id}><span><strong>{model.name}</strong><small>{model.upstreamId}</small><span className="capability-row">{model.capabilities.slice(0, 4).map((capability) => <i key={capability}>{getCapabilityLabel(capability, t)}</i>)}</span></span><button disabled={!provider.connected || model.added || addedIds.has(model.id)} onClick={() => addModel(model)}>{model.added || addedIds.has(model.id) ? t("aiMarketplace.drawer.added") : provider.connected ? t("aiMarketplace.drawer.addToNpati") : t("aiMarketplace.drawer.connectFirst")}</button></div>)}</div>}
-        {models.length < modelTotal && <button className="load-more" disabled={loadingModels} onClick={() => loadModels(false)}>{loadingModels ? t("common.loading") : t("aiMarketplace.explore.loadMore")}</button>}
+        {models.length < modelTotal && <button className="load-more" disabled={loadingModels} onClick={() => loadModels(modelOffset)}>{loadingModels ? t("common.loading") : t("aiMarketplace.explore.loadMore")}</button>}
       </div>}
     </aside>
   </div>;
@@ -716,7 +752,7 @@ export function AIProviderMarketplace() {
       )}
     </section>
     <CatalogScrollToTop gridRef={providerGridRef} items={providers} enabled={!error} />
-    {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
+    {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} preloadModels onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
   </main>;
 }
 

@@ -73,6 +73,25 @@ it("opens the library and the first provider page in one request", async () => {
   expect(host.querySelector(".my-model-row .ai-badge.red")).not.toBeNull();
 });
 
+it("starts reading models when the provider opens and reuses them across tabs", async () => {
+  await render();
+  let releaseModels!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => { releaseModels = resolve; }));
+  const modelReads = () => vi.mocked(fetch).mock.calls.filter(([request]) => String(request).includes("/providers/provider-0/models?"));
+  const clickTab = async (name: string) => act(async () => [...host.querySelectorAll<HTMLButtonElement>(".drawer-tabs button")].find(button => button.textContent === name)!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>(".provider-card-main")!.click());
+  expect(modelReads()).toHaveLength(1);
+  expect(host.querySelector(".models-body")).toBeNull();
+  await clickTab("Available Models");
+  expect(modelReads()).toHaveLength(1);
+  await act(async () => releaseModels(new Response(JSON.stringify({ models: library.addedModels, pagination: { total: 1 } }))));
+  expect(host.querySelector(".models-body .model-row")?.textContent).toContain("Saved model");
+  await clickTab("Overview");
+  await clickTab("Available Models");
+  expect(modelReads()).toHaveLength(1);
+  expect(host.querySelector(".models-body .model-row")?.textContent).toContain("Saved model");
+});
+
 it("appends providers near the end, prevents duplicate requests, and stops on the last page", async () => {
   await render();
   expect(host.querySelectorAll(".provider-card")).toHaveLength(24);
