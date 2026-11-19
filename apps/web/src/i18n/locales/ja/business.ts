@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "ビジネスプロフィールを手動で作成します。すべての項目は後で更新できます。",
     "editDraftCopy": "このビジネスアイデアの保存済み情報を編集します。",
     "editCopy": "NPATIが使用するビジネス情報を正確かつ完全に保ちます。",
-    "openingCopy": "このビジネスプロフィールと使用中のコンテキストを開きます。",
-    "openingProfile": "ビジネスプロフィールを開いています…",
     "loadingCopy": "NPATIがチャットや提案で使用するビジネス情報を管理します。",
     "notFoundError": "このビジネスは存在しないか、現在のユーザーでは利用できません。",
     "backToSettings": "設定に戻る",

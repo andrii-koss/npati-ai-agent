@@ -32,32 +32,24 @@ export function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: B
 
   useEffect(() => {
     let active = true;
-    async function fetchLinkedData() {
-      try {
-        const [goalsRes, memoriesRes] = await Promise.all([
-          api<Goal[]>("/goals").catch(() => []),
-          api<MemoryItem[]>("/memory").catch(() => []),
-        ]);
+    void Promise.all([
+      api<Goal[]>("/goals").catch(() => []),
+      api<MemoryItem[]>("/memory").catch(() => []),
+    ]).then(([goals, memories]) => {
+      if (!active) return;
+      setAvailableGoals(goals || []);
+      setAvailableMemories(memories || []);
+    });
+    if (initial?.id) {
+      void Promise.all([
+        api<Goal[]>(`/businesses/${initial.id}/goals`).catch(() => []),
+        api<MemoryItem[]>(`/businesses/${initial.id}/memory`).catch(() => []),
+      ]).then(([businessGoals, businessMemories]) => {
         if (!active) return;
-        setAvailableGoals(goalsRes || []);
-        setAvailableMemories(memoriesRes || []);
-
-        if (initial?.id) {
-          const [bGoals, bMemories] = await Promise.all([
-            api<Goal[]>(`/businesses/${initial.id}/goals`).catch(() => []),
-            api<MemoryItem[]>(`/businesses/${initial.id}/memory`).catch(() => []),
-          ]);
-          if (!active) return;
-          if (bGoals.length > 0 && bGoals[0]?.id) {
-            setSelectedGoalId(bGoals[0].id);
-          }
-          if (bMemories.length > 0 && bMemories[0]?.id) {
-            setSelectedMemoryId(bMemories[0].id);
-          }
-        }
-      } catch {}
+        setSelectedGoalId(selected => selected || businessGoals?.[0]?.id || "");
+        setSelectedMemoryId(selected => selected || businessMemories?.[0]?.id || "");
+      });
     }
-    void fetchLinkedData();
     return () => { active = false; };
   }, [initial?.id]);
 

@@ -549,9 +549,6 @@ export const it: TranslationSchema = {
     editDraftCopy: "Modifica i dettagli salvati di questa idea di business.",
     editCopy:
       "Mantieni i fatti aziendali su cui NPATI si basa accurati e completi.",
-    openingCopy:
-      "Apertura di questo profilo aziendale e del suo contesto attivo.",
-    openingProfile: "Apertura del profilo aziendale…",
     loadingCopy:
       "Gestisci il contesto aziendale che NPATI utilizza nelle chat e nei suggerimenti.",
     notFoundError:

@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "Eksiksiz bir işletme profilini elle oluşturun. Tüm alanları daha sonra güncelleyebilirsiniz.",
     "editDraftCopy": "Bu iş fikrinin kayıtlı ayrıntılarını düzenleyin.",
     "editCopy": "NPATI'nin dayandığı işletme bilgilerinin doğru ve eksiksiz olmasını sağlayın.",
-    "openingCopy": "Bu işletme profili ve etkin bağlamı açılıyor.",
-    "openingProfile": "İşletme profili açılıyor…",
     "loadingCopy": "NPATI'nin sohbetlerde ve önerilerde kullandığı işletme bağlamını yönetin.",
     "notFoundError": "Bu işletme yok veya kullanıcınız tarafından erişilemiyor.",
     "backToSettings": "Ayarlara dön",

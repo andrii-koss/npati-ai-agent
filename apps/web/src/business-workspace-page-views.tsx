@@ -81,6 +81,7 @@ export function BusinessPage() {
   const navigate = useNavigate();
   const [creatingManually, setCreatingManually] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<{ businessId: string; message: string } | null>(null);
   const current = overview?.currentBusiness;
   const editDraft = editBusinessId ? overview?.onboardings.find((session) => session.businessId === editBusinessId) ?? null : null;
   const editTarget = editBusinessId ? overview?.businesses.find((business) => business.id === editBusinessId) : undefined;
@@ -97,7 +98,15 @@ export function BusinessPage() {
 
   useEffect(() => {
     if (!editTarget || current?.id === editTarget.id) return;
-    void switchBusiness(editTarget.id);
+    const businessId = editTarget.id;
+    let active = true;
+    setSwitchError(null);
+    void switchBusiness(businessId).catch((reason: unknown) => {
+      if (active) {
+        setSwitchError({ businessId, message: reason instanceof Error ? reason.message : String(reason) });
+      }
+    });
+    return () => { active = false; };
   }, [editTarget?.id, current?.id]);
 
   useEffect(() => {
@@ -312,7 +321,7 @@ export function BusinessPage() {
   }
 
   // EARLY RETURNS ARE NOW AFTER ALL HOOKS - FULLY COMPLIANT WITH RULES OF HOOKS
-  if (loading && editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /></main>;
+  if (loading && editBusinessId && !overview) return null;
   if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
 
   if (creatingManually) {
@@ -329,11 +338,16 @@ export function BusinessPage() {
   }
 
   if (editDraft) {
-    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editDraft.business.name} copy={t("businessSettings.editDraftCopy")} backTo="/settings/business" /><BusinessForm initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></main>;
+    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editDraft.business.name} copy={t("businessSettings.editDraftCopy")} backTo="/settings/business" /><BusinessForm key={editDraft.businessId} initial={editDraft.business} mode={editDraft.scenario} onSaved={refresh} /></main>;
   }
-  if (editTarget && current?.id !== editTarget.id) return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy={t("businessSettings.openingCopy")} backTo="/settings/business" /><div className="workspace-loading">{t("businessSettings.openingProfile")}</div></main>;
   if (editTarget) {
-    return <main className="automations-container business-settings-page"><BusinessSettingsHeader title={editTarget.name} copy={t("businessSettings.editCopy")} backTo="/settings/business" /><BusinessForm initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} /></main>;
+    return (
+      <main className="automations-container business-settings-page">
+        <BusinessSettingsHeader title={editTarget.name} copy={t("businessSettings.editCopy")} backTo="/settings/business" />
+        {switchError?.businessId === editTarget.id && <Notice tone="error">{switchError.message}</Notice>}
+        <BusinessForm key={editTarget.id} initial={editTarget} mode={editTarget.businessType ?? "existing"} onSaved={refresh} />
+      </main>
+    );
   }
   if (editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /><Notice tone="error">{t("businessSettings.notFoundError")}</Notice></main>;
 

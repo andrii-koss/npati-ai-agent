@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "Maak handmatig een volledig ondernemingsprofiel. Je kunt alle velden later bijwerken.",
     "editDraftCopy": "Bewerk de opgeslagen gegevens voor dit ondernemingsidee.",
     "editCopy": "Houd de ondernemingsgegevens waarop NPATI vertrouwt nauwkeurig en volledig.",
-    "openingCopy": "Dit ondernemingsprofiel en de actieve context openen.",
-    "openingProfile": "Ondernemingsprofiel openen…",
     "loadingCopy": "Beheer de ondernemingscontext die NPATI gebruikt voor chats en aanbevelingen.",
     "notFoundError": "Deze onderneming bestaat niet of is niet beschikbaar voor je gebruiker.",
     "backToSettings": "Terug naar instellingen",

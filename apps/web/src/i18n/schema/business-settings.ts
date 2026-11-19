@@ -6,8 +6,6 @@ export interface BusinessSettingsSchema {
     newBusinessCopy: string;
     editDraftCopy: string;
     editCopy: string;
-    openingCopy: string;
-    openingProfile: string;
     loadingCopy: string;
     notFoundError: string;
     backToSettings: string;

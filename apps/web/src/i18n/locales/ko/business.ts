@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "완전한 비즈니스 프로필을 직접 만드세요. 모든 항목은 나중에 수정할 수 있습니다.",
     "editDraftCopy": "이 사업 아이디어의 저장된 세부 정보를 수정하세요.",
     "editCopy": "NPATI가 참고하는 비즈니스 정보를 정확하고 완전하게 유지하세요.",
-    "openingCopy": "이 비즈니스 프로필과 활성 맥락을 엽니다.",
-    "openingProfile": "비즈니스 프로필 여는 중…",
     "loadingCopy": "NPATI가 채팅과 추천에 사용하는 비즈니스 맥락을 관리합니다.",
     "notFoundError": "이 비즈니스가 없거나 현재 사용자에게 접근 권한이 없습니다.",
     "backToSettings": "설정으로 돌아가기",

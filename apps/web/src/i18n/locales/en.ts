@@ -473,8 +473,6 @@ export const en: TranslationSchema = {
     newBusinessCopy: "Create a complete business profile manually. You can update every field later.",
     editDraftCopy: "Edit the saved details for this business idea.",
     editCopy: "Keep the business facts NPATI relies on accurate and complete.",
-    openingCopy: "Opening this business profile and its active context.",
-    openingProfile: "Opening business profile…",
     loadingCopy: "Manage the business context NPATI uses across chats and recommendations.",
     notFoundError: "This business does not exist or is not available to your user.",
     backToSettings: "Back to settings",

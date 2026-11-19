@@ -595,11 +595,11 @@ export function DataStudioSettingsPage() {
   // --- Detail view ----------------------------------------------------------
 
   if (databaseName && !detail) {
+    if (!routeError) return null;
     return <main className="automations-container">
       <Link to="/settings/data-studio" className="button-secondary">{isUk ? "Усі бази даних" : "All databases"}</Link>
       <h1>{databaseName}</h1>
-      {routeError ? <div className="data-studio-alert error" role="alert">{routeError}</div>
-        : <p role="status">{isUk ? "Завантаження бази даних…" : "Loading database…"}</p>}
+      <div className="data-studio-alert error" role="alert">{routeError}</div>
     </main>;
   }
 

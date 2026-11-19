@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "手动创建完整业务档案。您可以稍后更新所有字段。",
     "editDraftCopy": "编辑此业务创意的已保存详情。",
     "editCopy": "保持 NPATI 所依据的业务事实准确、完整。",
-    "openingCopy": "正在打开此业务档案及其当前上下文。",
-    "openingProfile": "正在打开业务档案…",
     "loadingCopy": "管理 NPATI 在聊天和建议中使用的业务上下文。",
     "notFoundError": "此业务不存在，或您的账户无权访问。",
     "backToSettings": "返回设置",

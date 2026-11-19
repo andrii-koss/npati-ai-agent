@@ -473,8 +473,6 @@ export const de: TranslationSchema = {
     newBusinessCopy: "Erstellen Sie manuell ein vollständiges Geschäftsprofil. Jedes Feld kann später aktualisiert werden.",
     editDraftCopy: "Bearbeiten Sie die gespeicherten Details dieser Geschäftsidee.",
     editCopy: "Halten Sie die Geschäftsfakten, auf die sich NPATI stützt, genau und vollständig.",
-    openingCopy: "Öffnen dieses Geschäftsprofils und seines aktiven Kontexts.",
-    openingProfile: "Geschäftsprofil wird geöffnet…",
     loadingCopy: "Verwalten Sie den Geschäftskontext, den NPATI in Chats und Empfehlungen verwendet.",
     notFoundError: "Dieses Geschäft existiert nicht oder ist für Ihren Benutzer nicht verfügbar.",
     backToSettings: "Zurück zu Einstellungen",

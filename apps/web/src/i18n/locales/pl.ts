@@ -473,8 +473,6 @@ export const pl: TranslationSchema = {
     newBusinessCopy: "Utwórz kompletny profil biznesowy ręcznie. Każde pole możesz zaktualizować później.",
     editDraftCopy: "Edytuj zapisane dane tego pomysłu biznesowego.",
     editCopy: "Dbaj o to, aby fakty biznesowe, na których polega NPATI, były dokładne i kompletne.",
-    openingCopy: "Otwieranie tego profilu biznesowego i jego aktywnego kontekstu.",
-    openingProfile: "Otwieranie profilu biznesowego…",
     loadingCopy: "Zarządzaj kontekstem biznesowym, którego NPATI używa w czatach i rekomendacjach.",
     notFoundError: "Ten biznes nie istnieje lub nie jest dostępny dla Twojego użytkownika.",
     backToSettings: "Wróć do ustawień",

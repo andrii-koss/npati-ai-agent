@@ -251,8 +251,6 @@ export const business = {
     "newBusinessCopy": "Crie um perfil completo de negócio manualmente. Você pode atualizar todos os campos depois.",
     "editDraftCopy": "Edite os detalhes salvos desta ideia de negócio.",
     "editCopy": "Mantenha corretos e completos os fatos do negócio usados pelo NPATI.",
-    "openingCopy": "Abrindo este perfil de negócio e seu contexto ativo.",
-    "openingProfile": "Abrindo perfil do negócio…",
     "loadingCopy": "Gerencie o contexto do negócio que o NPATI usa nas conversas e recomendações.",
     "notFoundError": "Este negócio não existe ou não está disponível para seu usuário.",
     "backToSettings": "Voltar às configurações",

@@ -553,9 +553,6 @@ export const fr: TranslationSchema = {
       "Modifiez les détails enregistrés de cette idée d'entreprise.",
     editCopy:
       "Gardez les faits commerciaux sur lesquels NPATI s'appuie précis et complets.",
-    openingCopy:
-      "Ouverture de ce profil d'entreprise et de son contexte actif.",
-    openingProfile: "Ouverture du profil d'entreprise…",
     loadingCopy:
       "Gérez le contexte commercial que NPATI utilise dans les chats et les recommandations.",
     notFoundError:
