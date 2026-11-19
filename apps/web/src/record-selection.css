@@ -1,0 +1,22 @@
+.automations-table .record-selection-cell {
+  width: 38px;
+  padding-inline: 10px;
+  text-align: center;
+}
+
+.automations-table tbody tr.record-selected,
+.memory-card.record-selected {
+  background: #fffdfd;
+}
+
+.memory-card.record-selected {
+  border-color: #f87171;
+}
+
+.memory-record-title {
+  flex: initial;
+}
+
+.memory-record-title .memory-card-title {
+  white-space: normal;
+}

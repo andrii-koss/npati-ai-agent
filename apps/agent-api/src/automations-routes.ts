@@ -24,6 +24,7 @@ import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
 import { deliverWebhook, validateWebhookDestination } from "./webhook-destination-policy";
 import type { ResolverPort } from "./ssrf-policy";
 import type { readBrowserCampaign } from "./browser-credentials-routes";
+import { bulkDeleteSchema, collectBulkRecords, deleteBulkRecords, type BulkDeleteBody } from "./bulk-records";
 
 async function listAutomationCompanies(store: WorkspaceStore, context: AuthContext) {
   const companies: Array<{ id: string; name: string; mainAgentId?: string | null }> = [];
@@ -121,7 +122,7 @@ export function registerCompanyAutomationsRoutes(
   // 1. #129 Automations Scheduler & #130 Cron Jobs & #131 Background Tasks Ledger
   // =========================================================================
 
-  app.get<{ Querystring: { companyId?: string; status?: "active" | "paused"; search?: string; cursor?: string; workspace?: "1" } }>(
+  app.get<{ Querystring: { companyId?: string; status?: "active" | "paused"; search?: string; cursor?: string; workspace?: "1"; select?: "1" } }>(
     "/automations/page",
     { schema: { querystring: { type: "object", properties: {
       companyId: { type: "string", minLength: 1 },
@@ -129,18 +130,24 @@ export function registerCompanyAutomationsRoutes(
       search: { type: "string" },
       cursor: { type: "string", maxLength: 512 },
       workspace: { type: "string", enum: ["1"] },
+      select: { type: "string", enum: ["1"] },
     } } } },
     async (r, reply) => {
       try {
         const c = await ctx(auth, r, "workspace:read");
-        const { companyId, status, search, cursor, workspace } = r.query;
+        const { companyId, status, search, cursor, workspace, select } = r.query;
         const after = cursor ? decodeGoalPageCursor(cursor) : undefined;
         if (companyId) await store.getCompany(c, companyId);
-        const companies = !after || !companyId ? await listAutomationCompanies(store, c) : [];
+        const companies = (!select && !after) || !companyId ? await listAutomationCompanies(store, c) : [];
         const companyIds = companyId ? [companyId] : companies.map(company => company.id);
-        const page = repo.listPage(c, companyIds, { status, search: search?.trim(), after }, async (id, agentId) => {
+        const load = (anchor?: typeof after, limit?: number) => repo.listPage(c, companyIds, { status, search: search?.trim(), after: anchor, limit }, async (id, agentId) => {
           return (await store.getCompanyAgent(c, id, agentId).catch(() => null))?.name ?? null;
         });
+        if (select) return await collectBulkRecords(async next => {
+          const { items, nextCursor } = await load(next ? decodeGoalPageCursor(next) : undefined, 100);
+          return { records: items.map(item => ({ id: item.id, ownerId: item.companyId })), nextCursor };
+        });
+        const page = load(after);
         if (after) return await page;
         const [data, overview, agents, campaignOptions, browser] = await Promise.all([
           page,
@@ -156,6 +163,21 @@ export function registerCompanyAutomationsRoutes(
       } catch (e) { return err(reply, e); }
     },
   );
+  app.post<{ Body: BulkDeleteBody }>("/automations/bulk-delete", { schema: bulkDeleteSchema }, async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "business:manage");
+      const companies = new Map<string, Promise<unknown>>();
+      return await deleteBulkRecords(r.body.records, async ({ id, ownerId }) => {
+        let authorized = companies.get(ownerId);
+        if (!authorized) {
+          authorized = store.getCompany(c, ownerId);
+          companies.set(ownerId, authorized);
+        }
+        await authorized;
+        return repo.delete(c, ownerId, id);
+      });
+    } catch (e) { return err(reply, e); }
+  });
 
   // List automations for a company
   app.get<{ Params: { companyId: string } }>(

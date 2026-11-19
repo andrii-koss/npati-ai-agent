@@ -100,6 +100,15 @@ export const en: TranslationSchema = {
     deleteConfirmation: "Delete confirmation",
     confirmation: "Confirmation",
     inputRequired: "Input required",
+    recordSelection: {
+      selectAll: "Select all ({{count}})",
+      deselectAll: "Deselect all",
+      deleting: "Deleting...",
+      selectRecord: "Select {{name}}",
+      confirmMessage: "The selected records ({{count}}) will be permanently removed.",
+      deleted: "Records deleted ({{count}})",
+      deleteFailed: "Some selected records could not be deleted ({{count}}).",
+    },
   },
   nav: {
     chat: "Chat",

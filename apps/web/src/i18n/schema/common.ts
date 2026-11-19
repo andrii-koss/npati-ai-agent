@@ -31,6 +31,15 @@ export interface CommonSchema {
     deleteConfirmation: string;
     confirmation: string;
     inputRequired: string;
+    recordSelection?: {
+      selectAll: string;
+      deselectAll: string;
+      deleting: string;
+      selectRecord: string;
+      confirmMessage: string;
+      deleted: string;
+      deleteFailed: string;
+    };
 };
 
 export interface NavSchema {

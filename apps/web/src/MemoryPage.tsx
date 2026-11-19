@@ -1,6 +1,7 @@
 import { ALL_COMPANIES } from "./company-scope";
 import { useSettingsRecordsPage } from "./use-settings-records-page";
-import { fetchMemoryPage, memoryPageKey, openMemoryPage } from "./memory-page-read";
+import { fetchMemoryPage, memoryPageKey, openMemoryPage, readMemorySelection } from "./memory-page-read";
+import { RecordCheckbox, RecordSelectionToolbar, useRecordSelection } from "./record-selection";
 import type { MemoryCategory, MemoryPageQuery } from "@npati/workspace";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
@@ -77,6 +78,11 @@ export function MemoryPage() {
       return { ...current, items: [...current.items, ...next.items.filter(item => !seen.has(item.id))], nextCursor: next.nextCursor };
     },
     onError: showToast,
+  });
+  const selection = useRecordSelection({
+    resource: "memory", scopeKey: JSON.stringify([filters, search.trim()]),
+    ready: Boolean(page?.items.length) && search.trim() === query,
+    loadAll: () => readMemorySelection(filters), reload: loadMemory,
   });
 
   const openCreateDrawer = () => {
@@ -292,6 +298,8 @@ export function MemoryPage() {
         </div>
       </div>
 
+      <RecordSelectionToolbar selection={selection} matchingTotal={page?.matchingTotal ?? (page && (!filters.search && !filters.category ? counts?.all : page.items.length))} />
+
       {/* Empty States and Grid */}
       {!page ? !failed && (
         <div className="memory-grid" style={{ minHeight: "240px", opacity: 0.5 }}>
@@ -337,7 +345,7 @@ export function MemoryPage() {
             const isChatSource = item.source?.startsWith("chat:");
             const sourceLabel = formatSourceLabel(isChatSource ? "chat_confirmed" : item.source);
             return (
-              <article key={item.id} className="memory-card">
+              <article key={item.id} className={`memory-card${selection.selected.has(item.id) ? " record-selected" : ""}`}>
                 <div className="memory-card-body">
                   <div className="memory-card-top">
                     <div className="memory-card-top-left">
@@ -354,7 +362,10 @@ export function MemoryPage() {
                     </div>
                   </div>
 
-                  <h3 className="memory-card-title">{item.title}</h3>
+                  <div className="biz-card-title-group memory-record-title">
+                    <RecordCheckbox selection={selection} record={{ id: item.id, ownerId: item.businessId }} name={item.title} />
+                    <h3 className="memory-card-title">{item.title}</h3>
+                  </div>
 
                   <div className="memory-card-content">
                     <p>{item.content}</p>

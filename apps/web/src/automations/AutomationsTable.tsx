@@ -1,8 +1,12 @@
+import { History, Pencil, Play, Square, Trash2 } from "lucide-react";
 import { useTranslation } from "../i18n";
+import { RecordCheckbox, type RecordSelectionControls } from "../record-selection";
 import type { CompanyAutomation } from "./types";
+import "./automations-table.css";
 
 export interface AutomationsTableProps {
   loading: boolean;
+  selection: RecordSelectionControls;
   total?: number;
   filteredAutomations: CompanyAutomation[];
   runningNowId: string | null;
@@ -21,6 +25,7 @@ export interface AutomationsTableProps {
 
 export function AutomationsTable({
   loading,
+  selection,
   total,
   filteredAutomations,
   runningNowId,
@@ -37,23 +42,28 @@ export function AutomationsTable({
   deleteAutomation,
 }: AutomationsTableProps) {
   const { t } = useTranslation();
+  const header = (
+    <thead>
+      <tr>
+        <th className="record-selection-cell" scope="col" />
+        <th className="automation-status-column" scope="col">{t("automations.table.colStatus")}</th>
+        <th scope="col">{t("automations.table.colTask")}</th>
+        <th className="automation-schedule-column" scope="col">{t("automations.table.colSchedule")}</th>
+        <th className="automation-agent-column" scope="col">{t("automations.table.colAssignedAgent")}</th>
+        <th className="automation-actions-column" scope="col">{t("automations.table.colActions")}</th>
+      </tr>
+    </thead>
+  );
 
   if (loading) {
     return (
-      <div className="automations-table-container">
-        <table className="automations-table">
-          <thead>
-            <tr>
-              <th style={{ width: "110px" }}>{t("automations.table.colStatus")}</th>
-              <th style={{ minWidth: "260px" }}>{t("automations.table.colTask")}</th>
-              <th style={{ minWidth: "180px" }}>{t("automations.table.colSchedule")}</th>
-              <th style={{ minWidth: "160px" }}>{t("automations.table.colAssignedAgent")}</th>
-              <th style={{ width: "220px", textAlign: "right" }}>{t("automations.table.colActions")}</th>
-            </tr>
-          </thead>
+      <div className="automations-table-container automation-list-container">
+        <table className="automations-table automation-list-table">
+          {header}
           <tbody>
             {Array.from({ length: 4 }).map((_, idx) => (
               <tr key={`skeleton-${idx}`} style={{ opacity: 0.5 }}>
+                <td className="record-selection-cell" />
                 <td>
                   <span style={{ display: "inline-block", width: "70px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} />
                 </td>
@@ -68,9 +78,8 @@ export function AutomationsTable({
                   <span style={{ display: "inline-block", width: "100px", height: "14px", background: "var(--npati-gray-100)", borderRadius: "4px" }} />
                 </td>
                 <td>
-                  <div className="automation-actions-cell" style={{ justifyContent: "flex-end" }}>
-                    <span style={{ display: "inline-block", width: "70px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} />
-                    <span style={{ display: "inline-block", width: "50px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} />
+                  <div className="automation-actions-cell">
+                    <span style={{ display: "inline-block", width: "112px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} />
                   </div>
                 </td>
               </tr>
@@ -112,17 +121,9 @@ export function AutomationsTable({
   }
 
   return (
-    <div className="automations-table-container">
-      <table className="automations-table">
-        <thead>
-          <tr>
-            <th style={{ width: "110px" }}>{t("automations.table.colStatus")}</th>
-            <th style={{ minWidth: "260px" }}>{t("automations.table.colTask")}</th>
-            <th style={{ minWidth: "180px" }}>{t("automations.table.colSchedule")}</th>
-            <th style={{ minWidth: "160px" }}>{t("automations.table.colAssignedAgent")}</th>
-            <th style={{ width: "220px", textAlign: "right" }}>{t("automations.table.colActions")}</th>
-          </tr>
-        </thead>
+    <div className="automations-table-container automation-list-container">
+      <table className="automations-table automation-list-table">
+        {header}
         <tbody>
           {filteredAutomations.map((auto) => {
             const isRunningNow = runningNowId === auto.id;
@@ -130,7 +131,10 @@ export function AutomationsTable({
             const nextDate = auto.status === "active" && auto.nextRunAt ? new Date(auto.nextRunAt) : null;
 
             return (
-              <tr key={auto.id}>
+              <tr key={auto.id} className={selection.selected.has(auto.id) ? "record-selected" : undefined}>
+                <td className="record-selection-cell">
+                  <RecordCheckbox selection={selection} record={{ id: auto.id, ownerId: auto.companyId }} name={auto.name} />
+                </td>
                 <td>
                   <button
                     type="button"
@@ -143,7 +147,7 @@ export function AutomationsTable({
                   </button>
                 </td>
                 <td className="automation-title-cell">
-                  <strong>{auto.name}</strong>
+                  <strong title={auto.name}>{auto.name}</strong>
                   {auto.description && <p>{auto.description}</p>}
                   <div className="automation-prompt-preview" title={auto.prompt}>
                     {t("automations.table.promptPrefix")} {auto.prompt}
@@ -169,7 +173,7 @@ export function AutomationsTable({
                   )}
                 </td>
                 <td>
-                  <span className="automation-agent-badge">
+                  <span className="automation-agent-badge" title={auto.agentName ?? t("automations.table.mainAgent")}>
                     <span>🤖</span>
                     <span>{auto.agentName ?? t("automations.table.mainAgent")}</span>
                   </span>
@@ -181,9 +185,10 @@ export function AutomationsTable({
                       className="automation-action-btn run-btn"
                       disabled={isRunningNow}
                       onClick={() => triggerRunNow(auto)}
-                      title={t("automations.table.runNowTitle")}
+                      title={t(isRunningNow ? "automations.table.running" : "automations.table.runNowTitle")}
+                      aria-label={t(isRunningNow ? "automations.table.running" : "automations.table.runNowTitle")}
                     >
-                      {isRunningNow ? t("automations.table.running") : t("automations.table.runNow")}
+                      <Play size={15} aria-hidden="true" />
                     </button>
                     {stopRun && (isRunningNow || auto.isRunning) && (
                       <button
@@ -192,8 +197,9 @@ export function AutomationsTable({
                         data-testid="automation-stop"
                         onClick={() => stopRun(auto)}
                         title={t("automations.table.stopTitle")}
+                        aria-label={t("automations.table.stopTitle")}
                       >
-                        {t("automations.table.stop")}
+                        <Square size={14} aria-hidden="true" />
                       </button>
                     )}
                     <button
@@ -201,24 +207,27 @@ export function AutomationsTable({
                       className="automation-action-btn"
                       onClick={() => openHistory(auto)}
                       title={t("automations.table.historyTitle")}
+                      aria-label={t("automations.table.historyTitle")}
                     >
-                      {t("automations.table.history")}
+                      <History size={15} aria-hidden="true" />
                     </button>
                     <button
                       type="button"
                       className="automation-action-btn"
                       onClick={() => openEditDrawer(auto)}
                       title={t("automations.table.editTitle")}
+                      aria-label={t("automations.table.editTitle")}
                     >
-                      {t("automations.table.edit")}
+                      <Pencil size={15} aria-hidden="true" />
                     </button>
                     <button
                       type="button"
                       className="automation-action-btn danger"
                       onClick={() => deleteAutomation(auto.id)}
                       title={t("automations.table.deleteTitle")}
+                      aria-label={t("automations.table.deleteTitle")}
                     >
-                      {t("automations.table.delete")}
+                      <Trash2 size={15} aria-hidden="true" />
                     </button>
                   </div>
                 </td>

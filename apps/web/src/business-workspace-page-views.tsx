@@ -1,3 +1,4 @@
+import { BusinessSelectionBar } from "./business-selection-bar";
 import { BusinessSettingsHeader } from "./business-settings-header";
 export { BusinessSettingsHeader } from "./business-settings-header";
 import { SkillsPage } from "./business-workspace-skills-page";
@@ -12,7 +13,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { Business, Goal, MemoryItem, api, Notice, useWorkspace, PageIntro, EmptyBusiness } from "./business-workspace-shared";
 import { BusinessForm } from "./business-workspace-cards";
-import { Search, Calendar, ChevronRight, ChevronDown, ArrowUpDown, LayoutGrid, List, Trash2 } from "lucide-react";
+import { Search, Calendar, ChevronRight, ChevronDown, ArrowUpDown, LayoutGrid, List } from "lucide-react";
 
 function formatBusinessDate(dateStr?: string | null): string {
   if (!dateStr) return "Updated recently";
@@ -453,38 +454,18 @@ export function BusinessPage() {
             </div>
           </div>
 
-          <div className="biz-selection-bar">
-            <label className="biz-select-all-label">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={toggleSelectAll}
-                className="biz-checkbox"
-              />
-              <span>Select all ({visibleItems.length})</span>
-            </label>
-            {selectedIds.size > 0 && (
-              <div className="biz-selection-actions">
-                <span className="biz-selection-count">Selected: {selectedIds.size}</span>
-                <button
-                  type="button"
-                  className="biz-batch-delete-btn"
-                  disabled={deletingBatch}
-                  onClick={removeSelectedBusinesses}
-                >
-                  <Trash2 size={13} />
-                  <span>{deletingBatch ? "Deleting..." : `Delete selected (${selectedIds.size})`}</span>
-                </button>
-                <button
-                  type="button"
-                  className="biz-batch-clear-btn"
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  Deselect all
-                </button>
-              </div>
-            )}
-          </div>
+          <BusinessSelectionBar
+            checked={allVisibleSelected}
+            deleting={deletingBatch}
+            selectedCount={selectedIds.size}
+            selectAllLabel={`Select all (${visibleItems.length})`}
+            selectedLabel={`Selected: ${selectedIds.size}`}
+            deleteLabel={deletingBatch ? "Deleting..." : `Delete selected (${selectedIds.size})`}
+            clearLabel="Deselect all"
+            onToggleAll={toggleSelectAll}
+            onDelete={removeSelectedBusinesses}
+            onClear={() => setSelectedIds(new Set())}
+          />
 
           {visibleItems.length === 0 ? (
             <div className="automations-empty-card" style={{ marginTop: 12 }}>

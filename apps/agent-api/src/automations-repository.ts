@@ -32,6 +32,7 @@ export interface CompanyAutomation {
 }
 
 export type AutomationPageQuery = {
+  limit?: number;
   status?: "active" | "paused";
   search?: string;
   after?: { createdAt: string; id: string };
@@ -40,9 +41,10 @@ export type AutomationPageQuery = {
 type AutomationCounts = { total: number; active: number; paused: number; agentsCount: number };
 type AutomationPageRow = CompanyAutomation & { isRunning: boolean; agentName?: string | null };
 const automationPageSize = 10;
-function automationPage(items: AutomationPageRow[], counts: AutomationCounts | null) {
-  const page = items.slice(0, automationPageSize);
-  return { items: page, counts, nextCursor: items.length > automationPageSize ? goalPageCursor(page.at(-1)!) : null };
+function automationPage(items: AutomationPageRow[], counts: AutomationCounts | null, limit: number, matchingTotal: number | null) {
+  const page = items.slice(0, limit);
+  return { items: page, counts, ...(matchingTotal === null ? {} : { matchingTotal }),
+    nextCursor: items.length > limit ? goalPageCursor(page.at(-1)!) : null };
 }
 
 export interface CompanyAutomationRun {
@@ -104,14 +106,14 @@ export class CompanyAutomationsRepository {
 
   async listPage(ctx: AuthContext, companyIds: string[], query: AutomationPageQuery,
     readAgent: (companyId: string, agentId: string) => Promise<string | null>) {
+    const limit = query.limit ?? automationPageSize;
     if (this.pool) {
-      const result = await this.pool.query<{ items: AutomationPageRow[]; counts: AutomationCounts | null }>(
+      const result = await this.pool.query<{ items: AutomationPageRow[]; counts: AutomationCounts | null; matchingTotal: number | null }>(
         `WITH scope AS MATERIALIZED (
           SELECT id, company_id, agent_id, status, created_at FROM company_automations
           WHERE workspace_id=$1 AND user_id=$2 AND company_id=ANY($3::text[]) AND deleted_at IS NULL AND status<>'deleted'
-        ), page AS (
-          SELECT ${autoCols} FROM company_automations WHERE id IN (
-            SELECT id FROM scope
+        ), matching AS (
+            SELECT id, created_at FROM scope
             WHERE ($4::text IS NULL OR status=$4)
               AND ($5::text IS NULL OR EXISTS (
                 SELECT 1 FROM company_automations AS entry
@@ -121,7 +123,10 @@ export class CompanyAutomationsRepository {
                   OR strpos(lower(entry.prompt),lower($5))>0 OR strpos(lower(entry.cron_expression),lower($5))>0
                   OR strpos(lower(COALESCE(agent.name,'main agent')),lower($5))>0)
               ))
-              AND ($6::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id::text) < ($6,$7::text))
+        ), page AS (
+          SELECT ${autoCols} FROM company_automations WHERE id IN (
+            SELECT id FROM matching
+            WHERE ($6::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id::text) < ($6,$7::text))
             ORDER BY date_trunc('milliseconds',created_at) DESC,id DESC LIMIT $8
           )
         ), display AS (
@@ -133,16 +138,17 @@ export class CompanyAutomationsRepository {
         )
         SELECT
           (SELECT COALESCE(jsonb_agg(to_jsonb(display) ORDER BY date_trunc('milliseconds',"createdAt") DESC,id DESC),'[]'::jsonb) FROM display) AS items,
+          CASE WHEN $6::timestamptz IS NULL THEN (SELECT count(*)::int FROM matching) END AS "matchingTotal",
           CASE WHEN $6::timestamptz IS NULL THEN (
             SELECT jsonb_build_object('total',count(*),'active',count(*) FILTER (WHERE status='active'),
               'paused',count(*) FILTER (WHERE status='paused'),'agentsCount',
               greatest(count(DISTINCT NULLIF(agent_id,'')),sign(count(*)))) FROM scope
           ) END AS counts`,
         [ctx.workspaceId, ctx.userId, companyIds, query.status ?? null, query.search || null,
-          query.after?.createdAt ?? null, query.after?.id ?? null, automationPageSize + 1],
+          query.after?.createdAt ?? null, query.after?.id ?? null, limit + 1],
       );
-      const { items, counts } = result.rows[0]!;
-      return automationPage(items, counts);
+      const { items, counts, matchingTotal } = result.rows[0]!;
+      return automationPage(items, counts, limit, matchingTotal);
     }
     const scope = this.ownedAutomations(ctx, companyIds);
     const needle = query.search?.toLowerCase();
@@ -161,12 +167,16 @@ export class CompanyAutomationsRepository {
       && (!after || item.createdAt < after.createdAt || (item.createdAt === after.createdAt && item.id < after.id)))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
     const items: AutomationPageRow[] = [];
+    let matched = 0;
     for (const item of candidates) {
       const name = await agentName(item);
       if (needle && ![item.name, item.description, item.prompt, item.cronExpression, name ?? "main agent"]
         .some(value => value?.toLowerCase().includes(needle))) continue;
-      items.push({ ...item, agentName: name, isRunning: this.memoryRuns.get(item.id)?.some(run => run.status === "running") ?? false });
-      if (items.length > automationPageSize) break;
+      matched++;
+      if (items.length <= limit) {
+        items.push({ ...item, agentName: name, isRunning: this.memoryRuns.get(item.id)?.some(run => run.status === "running") ?? false });
+      }
+      if (items.length > limit && (!needle || after)) break;
     }
     const counts: AutomationCounts | null = after ? null : {
       total: scope.length,
@@ -174,7 +184,7 @@ export class CompanyAutomationsRepository {
       paused: scope.filter(item => item.status === "paused").length,
       agentsCount: new Set(scope.map(item => item.agentId).filter(Boolean)).size || Number(scope.length > 0),
     };
-    return automationPage(items, counts);
+    return automationPage(items, counts, limit, after ? null : needle ? matched : candidates.length);
   }
 
   async listCampaignOptions(ctx: AuthContext, companyId: string): Promise<Array<Pick<CompanyAutomation, "id" | "name">>> {

@@ -13,9 +13,10 @@ export async function listGoals(pool: Pool, context: AuthContext, businessId: st
   }
 
 export async function listGoalPage(pool: Pool, context: AuthContext, query: GoalPageQuery): Promise<GoalPage> {
+  const limit = query.limit ?? GOALS_PAGE_SIZE;
   if (query.businessId) await getBusiness(pool, context, query.businessId);
   else await assertMember(pool, context);
-  const result = await pool.query<{ goals: Goal[]; counts: GoalCounts | null }>(
+  const result = await pool.query<{ goals: Goal[]; counts: GoalCounts | null; matchingTotal: number | null }>(
     `WITH scope AS MATERIALIZED (
       SELECT id, created_at, status, priority, title, description, target_unit
       FROM goals
@@ -24,21 +25,24 @@ export async function listGoalPage(pool: Pool, context: AuthContext, query: Goal
           AND ${businessCredentialScopeSql(3)}
           AND (($4::text IS NULL AND activation_status='active') OR id=$4)
       )
-    ), page AS (
-      SELECT ${goalColumns}
-      FROM goals WHERE id IN (
-        SELECT id FROM scope
+    ), matching AS (
+        SELECT id, created_at FROM scope
         WHERE ($5::text IS NULL OR status=$5)
           AND ($6::integer IS NULL OR priority=$6)
           AND ($7::text IS NULL OR strpos(lower(title), lower($7)) > 0
             OR strpos(lower(description), lower($7)) > 0
             OR strpos(lower(target_unit), lower($7)) > 0)
-          AND ($8::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) < ($8,$9::text))
+    ), page AS (
+      SELECT ${goalColumns}
+      FROM goals WHERE id IN (
+        SELECT id FROM matching
+        WHERE ($8::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) < ($8,$9::text))
         ORDER BY date_trunc('milliseconds',created_at) DESC, id DESC LIMIT $10
       )
     )
     SELECT
       (SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY date_trunc('milliseconds',"createdAt") DESC, id DESC), '[]'::jsonb) FROM page) AS goals,
+      CASE WHEN $8::timestamptz IS NULL THEN (SELECT count(*)::int FROM matching) END AS "matchingTotal",
       CASE WHEN $8::timestamptz IS NULL THEN (
         SELECT jsonb_build_object('total',count(*),'active',count(*) FILTER (WHERE status='active'),
           'paused',count(*) FILTER (WHERE status='paused'),'completed',count(*) FILTER (WHERE status='completed'),
@@ -46,11 +50,13 @@ export async function listGoalPage(pool: Pool, context: AuthContext, query: Goal
         FROM scope
       ) END AS counts`,
     [context.workspaceId, context.userId, context.companyId ?? null, query.businessId ?? null, query.status ?? null,
-      query.priority ?? null, query.search || null, query.after?.createdAt ?? null, query.after?.id ?? null, GOALS_PAGE_SIZE + 1],
+      query.priority ?? null, query.search || null, query.after?.createdAt ?? null, query.after?.id ?? null, limit + 1],
   );
-  const { goals, counts } = result.rows[0]!;
-  const items = await withAssignedAgents(pool, context, goals.slice(0, GOALS_PAGE_SIZE));
-  return { goals: items, counts, nextCursor: goals.length > GOALS_PAGE_SIZE ? goalPageCursor(items.at(-1)!) : null };
+  const { goals, counts, matchingTotal } = result.rows[0]!;
+  const items = goals.slice(0, limit);
+  return { goals: query.limit ? items : await withAssignedAgents(pool, context, items), counts,
+    ...(matchingTotal === null ? {} : { matchingTotal }),
+    nextCursor: goals.length > limit ? goalPageCursor(items.at(-1)!) : null };
 }
 
 async function withAssignedAgents(pool: Pool, context: AuthContext, goals: Goal[]) {

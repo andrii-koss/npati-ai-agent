@@ -53,11 +53,20 @@ export function requestSettingsRead<T>(key: string, load: () => Promise<T>, pers
   const token = identity;
   const startedAt = epoch;
   const request = Promise.resolve().then(load).then(value => {
-    if (getStoredAuthToken() === token && startedAt === epoch) writeSettingsSnapshot(key, value, persist);
+    if (pending.get(key) === request && getStoredAuthToken() === token && startedAt === epoch) writeSettingsSnapshot(key, value, persist);
     return value;
   }).finally(() => { if (pending.get(key) === request) pending.delete(key); });
   pending.set(key, request);
   return request;
+}
+
+export function removeSettingsSnapshot(key: string) {
+  if (!scope()) return;
+  memory.delete(key);
+  pending.delete(key);
+  clearTimeout(persistence.get(key));
+  persistence.delete(key);
+  try { sessionStorage.removeItem(storagePrefix + key); } catch { /* Storage unavailable. */ }
 }
 
 export function clearSettingsSnapshots() {

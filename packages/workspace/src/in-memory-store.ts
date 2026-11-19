@@ -465,6 +465,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
     async listUserGoals(context: AuthContext) { return listUserGoals(this.companyState(), context); }
   async listGoalPage(context: AuthContext, query: GoalPageQuery): Promise<GoalPage> {
+    const limit = query.limit ?? GOALS_PAGE_SIZE;
     const businesses = query.businessId ? [await this.getBusiness(context, query.businessId)] : await this.listBusinesses(context);
     const ids = new Set(businesses.map(business => business.id));
     const scope = [...this.goals.values()].filter(goal => goal.workspaceId === context.workspaceId && ids.has(goal.businessId));
@@ -483,10 +484,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       && (!after || goal.createdAt < after.createdAt || (goal.createdAt === after.createdAt && goal.id < after.id)))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
     const { agentDisplay } = this.goalState();
-    const goals = rows.slice(0, GOALS_PAGE_SIZE).map(goal => goal.assignedAgentId
+    const goals = rows.slice(0, limit).map(goal => goal.assignedAgentId && !query.limit
       ? { ...goal, assignedAgent: agentDisplay?.(goal.assignedAgentId) ?? null }
       : goal);
-    return { goals, counts, nextCursor: rows.length > GOALS_PAGE_SIZE ? goalPageCursor(goals.at(-1)!) : null };
+    return { goals, counts, ...(!after && { matchingTotal: rows.length }), nextCursor: rows.length > limit ? goalPageCursor(goals.at(-1)!) : null };
   }
 
     async createGoal(context: AuthContext, businessId: string, input: GoalInput) { return createGoal(this.goalState(), context, businessId, input); }
@@ -496,6 +497,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async deleteGoal(context: AuthContext, businessId: string, goalId: string) { return deleteGoal(this.goalState(), context, businessId, goalId); }
   async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) { return listMemory(this.goalState(), context, businessId, query, limit); }
   async listMemoryPage(context: AuthContext, query: MemoryPageQuery): Promise<MemoryPageData> {
+    const limit = query.limit ?? MEMORY_PAGE_SIZE;
     const businesses = query.businessId ? [await this.getBusiness(context, query.businessId)] : await this.listBusinesses(context);
     const ids = new Set(businesses.map(business => business.id));
     const scope = [...this.memories.values()].filter(item => item.workspaceId === context.workspaceId && ids.has(item.businessId));
@@ -509,8 +511,9 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         || [item.title, item.content, item.source].some(value => value?.toLowerCase().includes(search)))
       && (!after || item.updatedAt < after.updatedAt || (item.updatedAt === after.updatedAt && item.id < after.id)))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
-    const items = rows.slice(0, MEMORY_PAGE_SIZE);
-    return { items, counts: after ? null : countMemoryTypes(byType), nextCursor: rows.length > MEMORY_PAGE_SIZE ? memoryPageCursor(items.at(-1)!) : null };
+    const items = rows.slice(0, limit);
+    return { items, counts: after ? null : countMemoryTypes(byType), ...(!after && { matchingTotal: rows.length }),
+      nextCursor: rows.length > limit ? memoryPageCursor(items.at(-1)!) : null };
   }
   async listUserMemories(context: AuthContext, query = "", limit = 100) { return listUserMemories(this.companyState(), context, query, limit); }
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) { return createMemory(this.goalState(), context, businessId, input); }

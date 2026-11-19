@@ -1,6 +1,7 @@
 import { readSettingsSnapshot } from "./settings-page-cache";
 import { ALL_COMPANIES } from "./company-scope";
-import { automationsPageKey, fetchAutomationsPage, openAutomationsPage, type AutomationsPageData } from "./automations-page-read";
+import { automationsPageKey, fetchAutomationsPage, openAutomationsPage, readAutomationsSelection, type AutomationsPageData } from "./automations-page-read";
+import { RecordSelectionToolbar, useRecordSelection } from "./record-selection";
 import { useSettingsRecordsPage } from "./use-settings-records-page";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
@@ -80,6 +81,11 @@ export function AutomationsPage() {
     fetch: fetchAutomationsPage,
     append: (current, next) => ({ ...current, items: [...current.items, ...next.items], nextCursor: next.nextCursor }),
     onError: setNotice,
+  });
+  const selection = useRecordSelection({
+    resource: "automations", scopeKey: JSON.stringify([filters, searchQuery.trim()]),
+    ready: Boolean(page?.items.length) && searchQuery.trim() === search,
+    loadAll: () => readAutomationsSelection(filters), reload: reloadAutomations,
   });
   const metadata = page ?? readSettingsSnapshot<AutomationsPageData>(scope);
   const [knownCompanies, setKnownCompanies] = useState<Company[]>([]);
@@ -540,18 +546,11 @@ export function AutomationsPage() {
         </div>
       )}
 
-      {/* Status summary */}
-      <div className="inspector-table-status">
-        <div className="status-left">
-          <span>
-            {page && stats && t("automations.showingStatus", { count: automations.length, total: stats.total })}
-            {searchQuery ? ` ${t("automations.matchingQuery", { query: searchQuery })}` : ""}
-          </span>
-        </div>
-      </div>
+      <RecordSelectionToolbar selection={selection} matchingTotal={page?.matchingTotal ?? (page && (!filters.search && !filters.status ? stats?.total : automations.length))} />
 
       {(!failed || page) && <AutomationsTable
         loading={!page}
+        selection={selection}
         total={stats?.total}
         filteredAutomations={automations}
         runningNowId={runningNowId}

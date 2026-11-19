@@ -1,5 +1,7 @@
 import { ALL_COMPANIES } from "./company-scope";
 import { useGoalsPage } from "./use-goals-page";
+import { readGoalsSelection } from "./goals-page-read";
+import { RecordCheckbox, RecordSelectionToolbar, useRecordSelection } from "./record-selection";
 import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useState } from "react";
@@ -47,13 +49,20 @@ export function GoalsPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const { page, counts: stats, failed, bottom, reload: loadGoals } = useGoalsPage({
+  const filters = {
     businessId: scopedBusinessId,
     status: statusFilter === "all" ? undefined : statusFilter,
     priority: priorityFilter === "all" ? undefined : Number(priorityFilter),
     search,
-  }, message => setNotice(t("goalsPage.notices.failedToLoad", { message })));
+  };
+  const { page, counts: stats, failed, bottom, reload: loadGoals } = useGoalsPage(filters,
+    message => setNotice(t("goalsPage.notices.failedToLoad", { message })));
   const goals = page?.goals ?? [];
+  const selection = useRecordSelection({
+    resource: "goals", scopeKey: JSON.stringify([filters, searchQuery.trim()]),
+    ready: goals.length > 0 && searchQuery.trim() === search,
+    loadAll: () => readGoalsSelection(filters), reload: loadGoals,
+  });
 
   // Drawer handlers
   const openCreateDrawer = () => {
@@ -382,16 +391,7 @@ export function GoalsPage() {
         </div>
       )}
 
-      {/* Status summary */}
-      <div className="inspector-table-status">
-        <div className="status-left">
-          <span>
-            {page && stats && t("goalsPage.showingGoals", { count: goals.length, total: stats.total })}
-            {page && search ? t("goalsPage.matchingQuery", { query: search }) : ""}
-            {page && priorityFilter !== "all" ? ` (P${priorityFilter})` : ""}
-          </span>
-        </div>
-      </div>
+      <RecordSelectionToolbar selection={selection} matchingTotal={page?.matchingTotal ?? (page && (!filters.search && !filters.status && !filters.priority ? stats?.total : goals.length))} />
 
       {/* Main Content Area */}
       {!page ? (
@@ -435,6 +435,7 @@ export function GoalsPage() {
           <table className="automations-table goals-table">
             <thead>
               <tr>
+                <th className="record-selection-cell" scope="col" />
                 <th style={{ width: "90px" }}>{t("goalsPage.table.status")}</th>
                 <th>{t("goalsPage.table.goalAndOutcome")}</th>
                 <th style={{ width: "135px" }}>{t("goalsPage.table.progress")}</th>
@@ -450,7 +451,10 @@ export function GoalsPage() {
                 const isOverdue = targetDate && goal.status === "active" && targetDate.getTime() < Date.now();
 
                 return (
-                  <tr key={goal.id}>
+                  <tr key={goal.id} className={selection.selected.has(goal.id) ? "record-selected" : undefined}>
+                    <td className="record-selection-cell">
+                      <RecordCheckbox selection={selection} record={{ id: goal.id, ownerId: goal.businessId }} name={goal.title} />
+                    </td>
                     <td>
                       <button
                         type="button"

@@ -100,6 +100,15 @@ export const uk: TranslationSchema = {
     deleteConfirmation: "Підтвердження видалення",
     confirmation: "Підтвердження",
     inputRequired: "Потрібне введення",
+    recordSelection: {
+      selectAll: "Вибрати всі ({{count}})",
+      deselectAll: "Зняти виділення",
+      deleting: "Видалення...",
+      selectRecord: "Вибрати {{name}}",
+      confirmMessage: "Вибрані записи ({{count}}) буде остаточно видалено.",
+      deleted: "Видалено записів ({{count}})",
+      deleteFailed: "Не вдалося видалити деякі вибрані записи ({{count}}).",
+    },
   },
   nav: {
     chat: "Чат",

@@ -1,5 +1,6 @@
 import { getChatMessagesWithProjectCards } from "./project-chat-cards";
 import { registerConversationImportRoute } from "./conversation-import-route";
+import { bulkDeleteSchema, collectBulkRecords, deleteBulkRecords, type BulkDeleteBody } from "./bulk-records";
 import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
 import { decodeGoalPageCursor, decodeMemoryPageCursor, MEMORY_CATEGORIES, type MemoryCategory, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -197,18 +198,31 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   app.get<{ Querystring: Record<string, string | undefined> }>("/goals/page", async (request, reply) => {
     try {
       const context = await authorize(auth, request, "workspace:read");
-      const { businessId, status, priority, search, cursor, workspace } = request.query;
+      const { businessId, status, priority, search, cursor, workspace, select } = request.query;
       if (status !== undefined && status !== "active" && status !== "paused" && status !== "completed" && status !== "cancelled") {
         throw new Error("Invalid goal status filter");
       }
       if (priority && priority !== "1" && priority !== "2" && priority !== "3") throw new Error("Invalid goal priority filter");
-      const page = store.listGoalPage(context, {
-        businessId, status, priority: priority ? Number(priority) : undefined,
-        search: search?.trim(), after: cursor ? decodeGoalPageCursor(cursor) : undefined,
+      const filters: import("@npati/workspace").GoalPageQuery = {
+        businessId, status, priority: priority ? Number(priority) : undefined, search: search?.trim(),
+      };
+      const load = (after?: string, limit?: number) => store.listGoalPage(context, {
+        ...filters, limit, after: after ? decodeGoalPageCursor(after) : undefined,
       });
+      if (select === "1") return await collectBulkRecords(async after => {
+        const { goals, nextCursor } = await load(after, 100);
+        return { records: goals.map(goal => ({ id: goal.id, ownerId: goal.businessId })), nextCursor };
+      });
+      const page = load(cursor);
       if (workspace !== "1" || cursor) return await page;
       const [data, overview] = await Promise.all([page, store.overview(context)]);
       return { ...data, overview };
+    } catch (error) { return errorReply(reply, error); }
+  });
+  app.post<{ Body: BulkDeleteBody }>("/goals/bulk-delete", { schema: bulkDeleteSchema }, async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "business:manage");
+      return await deleteBulkRecords(request.body.records, ({ id, ownerId }) => store.deleteGoal(context, ownerId, id));
     } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/goals", async (request, reply) => {
@@ -238,18 +252,30 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
       searchTypes: { type: "string", maxLength: 200 },
       cursor: { type: "string", maxLength: 512 },
       workspace: { type: "string" },
+      select: { type: "string", enum: ["1"] },
     } } },
   }, async (request, reply) => {
     try {
       const context = await authorize(auth, request, "workspace:read");
-      const { businessId, category, search, searchTypes, cursor, workspace } = request.query;
-      const page = store.listMemoryPage(context, {
+      const { businessId, category, search, searchTypes, cursor, workspace, select } = request.query;
+      const load = (after?: string, limit?: number) => store.listMemoryPage(context, {
         businessId, category: category as MemoryCategory | undefined, search: search?.trim(),
-        searchTypes: searchTypes?.split(","), after: cursor ? decodeMemoryPageCursor(cursor) : undefined,
+        searchTypes: searchTypes?.split(","), limit, after: after ? decodeMemoryPageCursor(after) : undefined,
       });
+      if (select === "1") return await collectBulkRecords(async after => {
+        const { items, nextCursor } = await load(after, 100);
+        return { records: items.map(item => ({ id: item.id, ownerId: item.businessId })), nextCursor };
+      });
+      const page = load(cursor);
       if (workspace !== "1" || cursor) return await page;
       const [data, overview] = await Promise.all([page, store.overview(context)]);
       return { ...data, overview };
+    } catch (error) { return errorReply(reply, error); }
+  });
+  app.post<{ Body: BulkDeleteBody }>("/memory/bulk-delete", { schema: bulkDeleteSchema }, async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "business:manage");
+      return await deleteBulkRecords(request.body.records, ({ id, ownerId }) => store.deleteMemory(context, ownerId, id));
     } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { businessId: string }; Querystring: { search?: string; limit?: string } }>("/businesses/:businessId/memory", async (request, reply) => {

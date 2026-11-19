@@ -14,6 +14,7 @@ export const MEMORY_CATEGORIES = {
 export type MemoryCategory = keyof typeof MEMORY_CATEGORIES;
 export type MemoryCounts = Record<"all" | MemoryCategory, number>;
 export type MemoryPageQuery = {
+  limit?: number;
   businessId?: string;
   category?: MemoryCategory;
   search?: string;
@@ -21,6 +22,7 @@ export type MemoryPageQuery = {
   after?: { updatedAt: string; id: string };
 };
 export type MemoryPageData = {
+  matchingTotal?: number;
   items: MemoryItem[];
   counts: MemoryCounts | null;
   nextCursor: string | null;

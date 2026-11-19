@@ -3,6 +3,7 @@ import type { Goal } from "./types";
 export const GOALS_PAGE_SIZE = 10;
 
 export type GoalPageQuery = {
+  limit?: number;
   businessId?: string;
   status?: Goal["status"];
   priority?: number;
@@ -19,6 +20,7 @@ export type GoalCounts = {
 };
 
 export type GoalPage = {
+  matchingTotal?: number;
   goals: Goal[];
   counts: GoalCounts | null;
   nextCursor: string | null;
