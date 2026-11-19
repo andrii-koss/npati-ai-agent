@@ -50,6 +50,16 @@ beforeEach(() => {
       };
     }
     else if (/\/businesses\/.*\/(goals|memory)$/.test(url)) data = [item];
+    else if (url.startsWith("/api/automations/page")) {
+      const companyId = new URL(url, "http://localhost").searchParams.get("companyId");
+      const ids = companyId ? [companyId] : ["alpha", "beta"];
+      data = {
+        items: ids.map(id => ({ ...item, id: `${id}-item`, companyId: id, name: `Record ${id}` })),
+        counts: { total: ids.length, active: ids.length, paused: 0, agentsCount: 1 },
+        nextCursor: null,
+        companies: fixture.companies,
+      };
+    }
     else if (url.endsWith("/automations")) data = { automations: [item] };
     else if (url.endsWith("/agents")) data = { agents: [] };
     else if (url.endsWith("/browser-targets")) data = { targets: [], emailAccounts: [] };
@@ -184,6 +194,10 @@ it.each([
   if (page === "goals") {
     expect(requests).toEqual(["/api/goals/page?workspace=1"]);
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0"]);
+  }
+  if (page === "automations") {
+    expect(requests).toEqual(["/api/automations/page?workspace=1"]);
+    expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0"]);
   }
   if (page === "memory") {
     expect(requests).toEqual(["/api/memory/page?workspace=1"]);

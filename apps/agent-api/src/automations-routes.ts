@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { WorkspaceAccessError, type WorkspaceStore, type AuthContext } from "@npati/workspace";
+import { decodeGoalPageCursor, WorkspaceAccessError, type WorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
 import { automationRunEndStatus } from "./automations-repository";
@@ -23,6 +23,18 @@ import {
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
 import { deliverWebhook, validateWebhookDestination } from "./webhook-destination-policy";
 import type { ResolverPort } from "./ssrf-policy";
+import type { readBrowserCampaign } from "./browser-credentials-routes";
+
+async function listAutomationCompanies(store: WorkspaceStore, context: AuthContext) {
+  const companies: Array<{ id: string; name: string; mainAgentId?: string | null }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.listCompanies(context, 100, cursor);
+    companies.push(...page.items.map(({ id, name, mainAgentId }) => ({ id, name, mainAgentId })));
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return companies;
+}
 
 /** Real DNS resolver used for webhook destination validation inside this route module. */
 const webhookResolver: ResolverPort = async (host) => {
@@ -98,6 +110,7 @@ export function registerCompanyAutomationsRoutes(
     store: WorkspaceStore;
     repo: CompanyAutomationsRepository;
     scheduler?: AutomationScheduler;
+    readBrowserCampaign?: (context: AuthContext, companyId: string) => ReturnType<typeof readBrowserCampaign>;
     triggerRun?: (automation: CompanyAutomation) => Promise<{ result: string }>;
     stopRuns?: (ctx: import("@npati/workspace").AuthContext, companyId: string, automationId: string) => Promise<number>;
   }
@@ -107,6 +120,42 @@ export function registerCompanyAutomationsRoutes(
   // =========================================================================
   // 1. #129 Automations Scheduler & #130 Cron Jobs & #131 Background Tasks Ledger
   // =========================================================================
+
+  app.get<{ Querystring: { companyId?: string; status?: "active" | "paused"; search?: string; cursor?: string; workspace?: "1" } }>(
+    "/automations/page",
+    { schema: { querystring: { type: "object", properties: {
+      companyId: { type: "string", minLength: 1 },
+      status: { type: "string", enum: ["active", "paused"] },
+      search: { type: "string" },
+      cursor: { type: "string", maxLength: 512 },
+      workspace: { type: "string", enum: ["1"] },
+    } } } },
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "workspace:read");
+        const { companyId, status, search, cursor, workspace } = r.query;
+        const after = cursor ? decodeGoalPageCursor(cursor) : undefined;
+        if (companyId) await store.getCompany(c, companyId);
+        const companies = !after || !companyId ? await listAutomationCompanies(store, c) : [];
+        const companyIds = companyId ? [companyId] : companies.map(company => company.id);
+        const page = repo.listPage(c, companyIds, { status, search: search?.trim(), after }, async (id, agentId) => {
+          return (await store.getCompanyAgent(c, id, agentId).catch(() => null))?.name ?? null;
+        });
+        if (after) return await page;
+        const [data, overview, agents, campaignOptions, browser] = await Promise.all([
+          page,
+          workspace ? store.overview(c) : undefined,
+          companyId ? store.listCompanyAgents(c, companyId) : [],
+          companyId ? repo.listCampaignOptions(c, companyId) : [],
+          companyId ? deps.readBrowserCampaign?.(c, companyId) : undefined,
+        ]);
+        return {
+          ...data, overview, companies, browser, campaignOptions,
+          agents: agents.map(({ id, name, role }) => ({ id, name, role })),
+        };
+      } catch (e) { return err(reply, e); }
+    },
+  );
 
   // List automations for a company
   app.get<{ Params: { companyId: string } }>(

@@ -1,11 +1,10 @@
 import { useTranslation } from "../i18n";
-import type { Agent, CompanyAutomation } from "./types";
+import type { CompanyAutomation } from "./types";
 
 export interface AutomationsTableProps {
   loading: boolean;
-  automations: CompanyAutomation[];
+  total?: number;
   filteredAutomations: CompanyAutomation[];
-  agents: Agent[];
   runningNowId: string | null;
   language: string;
   getCronDescription: (cron: string) => string;
@@ -22,9 +21,8 @@ export interface AutomationsTableProps {
 
 export function AutomationsTable({
   loading,
-  automations,
+  total,
   filteredAutomations,
-  agents,
   runningNowId,
   language,
   getCronDescription,
@@ -40,7 +38,7 @@ export function AutomationsTable({
 }: AutomationsTableProps) {
   const { t } = useTranslation();
 
-  if (loading && automations.length === 0) {
+  if (loading) {
     return (
       <div className="automations-table-container">
         <table className="automations-table">
@@ -83,7 +81,7 @@ export function AutomationsTable({
     );
   }
 
-  if (automations.length === 0) {
+  if (total === 0) {
     return (
       <div className="automations-empty-card">
         <div className="automations-empty-icon">⏱️</div>
@@ -127,7 +125,6 @@ export function AutomationsTable({
         </thead>
         <tbody>
           {filteredAutomations.map((auto) => {
-            const assignedAgent = agents.find((a) => a.id === auto.agentId);
             const isRunningNow = runningNowId === auto.id;
             // A paused automation keeps its stored slot for resuming but has no next run (V6 step 12).
             const nextDate = auto.status === "active" && auto.nextRunAt ? new Date(auto.nextRunAt) : null;
@@ -174,7 +171,7 @@ export function AutomationsTable({
                 <td>
                   <span className="automation-agent-badge">
                     <span>🤖</span>
-                    <span>{assignedAgent ? assignedAgent.name : t("automations.table.mainAgent")}</span>
+                    <span>{auto.agentName ?? t("automations.table.mainAgent")}</span>
                   </span>
                 </td>
                 <td>

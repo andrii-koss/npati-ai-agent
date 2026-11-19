@@ -12,7 +12,7 @@ import { CompanyAutomationsRepository } from "./automations-repository";
 import { registerCompanyAutomationsRoutes } from "./automations-routes";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
-import { registerBrowserCredentialsRoutes } from "./browser-credentials-routes";
+import { readBrowserCampaign, registerBrowserCredentialsRoutes } from "./browser-credentials-routes";
 import { BrowserUseClient } from "./browser-tool";
 import { isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicCompanyRunMessage } from "./chat-public-errors";
@@ -335,6 +335,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     store: workspaceStore,
     repo: automationsRepo,
     scheduler: automationScheduler,
+    readBrowserCampaign: browserCredentials ? (context, companyId) => readBrowserCampaign(context, companyId, browserCredentials, emailInboxRepo) : undefined,
     triggerRun: (automation) => runAutomation(automation, `automation:manual:${automation.id}:${Date.now()}`),
     // Stop on the Automations page (V6 step 12, owner decision): every company run started for this automation is
     // keyed "automation:…<automationId>…"; each active one is cancelled like a chat "stop" (runtime, then the queue).

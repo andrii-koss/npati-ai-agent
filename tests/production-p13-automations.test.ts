@@ -25,7 +25,7 @@ import {
 import {
   WebhookRetryDeliveryEngine,
 } from "../apps/agent-api/src/evaluation-and-webhook-retries";
-import type { AuthContext } from "@npati/workspace";
+import { decodeGoalPageCursor, type AuthContext } from "@npati/workspace";
 
 const mockAuth: AuthContext = {
   workspaceId: "ws-p13-test",
@@ -67,6 +67,29 @@ describe("Milestone P1.3 — Automations, Triggers, and Durable Tasks Suite", ()
   // 2. #129: Automations Scheduler & #130: Cron Jobs
   // =========================================================================
   describe("#129 & #130: Automations Scheduler & Cron Jobs", () => {
+    it("reads the latest ten automations and complete company totals together", async () => {
+      const repo = new CompanyAutomationsRepository();
+      const companies = ["alpha", "beta"];
+      const input = { name: "Task", prompt: "Prepare the report", cronExpression: "0 9 * * *" };
+      const rows = await Promise.all(Array.from({ length: 13 }, (_, index) => repo.create(mockAuth, companies[index % 2]!, {
+        ...input, name: `Task ${index}`, status: index === 0 ? "paused" : "active", agentId: index === 0 ? "agent" : undefined,
+      })));
+      await repo.create({ ...mockAuth, userId: "other" }, "alpha", input);
+      await repo.create(mockAuth, "outside", input);
+      const agentName = async () => "Report Agent";
+      const page = await repo.listPage(mockAuth, companies, {}, agentName);
+      const ordered = [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+      expect(page.items.map(item => item.id)).toEqual(ordered.slice(0, 10).map(item => item.id));
+      expect(page.counts).toEqual({ total: 13, active: 12, paused: 1, agentsCount: 1 });
+      const next = await repo.listPage(mockAuth, companies, { after: decodeGoalPageCursor(page.nextCursor!) }, agentName);
+      expect(next.items.map(item => item.id)).toEqual(ordered.slice(10).map(item => item.id));
+      expect(next.counts).toBeNull();
+      expect(next.nextCursor).toBeNull();
+      const filtered = await repo.listPage(mockAuth, companies, { status: "paused", search: "report agent" }, agentName);
+      expect(filtered.items).toMatchObject([{ id: rows[0]!.id, agentName: "Report Agent" }]);
+      expect(filtered.counts).toEqual(page.counts);
+    });
+
     it("validates 5-part cron expressions and presets correctly", () => {
       expect(isValidCronExpression("0 9 * * *")).toBe(true);
       expect(isValidCronExpression("*/15 * * * *")).toBe(true);

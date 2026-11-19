@@ -6,10 +6,12 @@ import { chatOpen, isChatPage } from "./chat-open";
 import { api } from "./workspace-api";
 import { openGoalsPage } from "./goals-page-read";
 import { openMemoryPage } from "./memory-page-read";
+import { openAutomationsPage } from "./automations-page-read";
 
-const settingsRecordOpeners: Record<string, typeof openGoalsPage | typeof openMemoryPage> = {
+const settingsRecordOpeners: Record<string, typeof openGoalsPage | typeof openMemoryPage | typeof openAutomationsPage> = {
   "/settings/goals": openGoalsPage, "/goals": openGoalsPage,
   "/settings/memory": openMemoryPage, "/memory": openMemoryPage,
+  "/settings/automations": openAutomationsPage,
 };
 
 export type Business = {
@@ -77,10 +79,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // Opening a chat page reads the overview from its single open request instead of a request of its own.
       const opened = initial && isChatPage() ? await chatOpen().catch(() => null) : null;
       const path = window.location.pathname.replace(/\/$/, "");
-      const businessId = new URLSearchParams(window.location.search).get("business");
+      const scopeId = new URLSearchParams(window.location.search).get(path === "/settings/automations" ? "company" : "business");
       const openRecords = settingsRecordOpeners[path];
       const records = initial && openRecords
-        ? await openRecords(businessId && businessId !== "all" ? businessId : undefined, "workspace").catch(() => null)
+        ? await openRecords(scopeId && scopeId !== "all" ? scopeId : undefined, "workspace").catch(() => null)
         : null;
       const nextOverview = opened?.overview ?? records?.overview
         ?? await requestSettingsRead("business:overview", () => api<WorkspaceOverview>("/workspace/context"));

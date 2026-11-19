@@ -1,10 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import type { AuthProvider } from "./auth";
-import type { WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import type { BrowserUseClient } from "./browser-tool";
 import type { EmailInboxRepository } from "./email-inbox-repository";
 import type { CompanyAutomationsRepository } from "./automations-repository";
+
+export async function readBrowserCampaign(ctx: AuthContext, companyId: string, repo: BrowserCredentialsRepository, email: EmailInboxRepository) {
+  const [targets, accounts] = await Promise.all([repo.listTargets(ctx, companyId), email.listAccounts(ctx, companyId)]);
+  return {
+    targets,
+    emailAccounts: accounts.map(({ id, emailAddress, displayName, status }) => ({ id, emailAddress, displayName, status })),
+  };
+}
 
 export function registerBrowserCredentialsRoutes(app: FastifyInstance, deps: { auth: AuthProvider; store: WorkspaceStore; repo: BrowserCredentialsRepository; browser?: BrowserUseClient; email: EmailInboxRepository; automations: CompanyAutomationsRepository }) {
   const context = async (request: any, companyId: string, write = false) => {
@@ -31,16 +39,7 @@ export function registerBrowserCredentialsRoutes(app: FastifyInstance, deps: { a
   });
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/browser-targets", async (request) => {
     const ctx = await context(request, request.params.companyId);
-    const [targets, accounts] = await Promise.all([
-      deps.repo.listTargets(ctx, request.params.companyId),
-      deps.email.listAccounts(ctx, request.params.companyId),
-    ]);
-    return {
-      targets,
-      emailAccounts: accounts.map((account) => ({
-        id: account.id, emailAddress: account.emailAddress, displayName: account.displayName, status: account.status,
-      })),
-    };
+    return readBrowserCampaign(ctx, request.params.companyId, deps.repo, deps.email);
   });
   app.post<{ Params: { companyId: string }; Body: {
     automationId?: string | null; emailAccountId?: string | null; siteName: string; registrationUrl: string;

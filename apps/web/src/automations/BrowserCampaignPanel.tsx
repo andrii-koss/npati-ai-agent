@@ -7,7 +7,7 @@ import type {
 } from "./types";
 
 export interface BrowserCampaignPanelProps {
-  automations: CompanyAutomation[];
+  automations: Array<Pick<CompanyAutomation, "id" | "name">>;
   browserTargets: BrowserCampaignTarget[];
   browserEmails: BrowserEmailAccount[];
   browserSaving: boolean;

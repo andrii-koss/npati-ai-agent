@@ -1,7 +1,7 @@
 export interface Company {
   id: string;
   name: string;
-  mainAgentId?: string;
+  mainAgentId?: string | null;
 }
 
 export interface Agent {
@@ -15,6 +15,7 @@ export interface CompanyAutomation {
   workspaceId: string;
   companyId: string;
   agentId?: string | null;
+  agentName?: string | null;
   name: string;
   description?: string | null;
   prompt: string;
