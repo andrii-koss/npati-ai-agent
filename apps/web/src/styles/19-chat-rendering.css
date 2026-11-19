@@ -85,6 +85,15 @@
     gap: 10px !important;
   }
 
+  .automations-header h1:has(> .page-guide-link) {
+    flex-wrap: nowrap !important;
+  }
+
+  .automations-header h1:has(> .page-guide-link) > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .automations-header .hero-copy {
     font-size: 14px !important;
     line-height: 1.5 !important;
