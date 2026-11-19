@@ -21,11 +21,11 @@ export type { Goal };
 export function GoalsPage() {
   const { t, language } = useTranslation();
   const { overview, switchBusiness } = useWorkspace();
-  const business = useLinkedBusiness(overview, switchBusiness);
+  useLinkedBusiness(overview, switchBusiness);
   const [scopeParams] = useSearchParams();
   const [companyScope, setCompanyScope] = useState(() => scopeParams.get("business") || ALL_COMPANIES);
   const scopedBusinessId = companyScope === ALL_COMPANIES ? undefined : companyScope;
-  const businessId = scopedBusinessId ?? business?.id;
+  const selectCompanyTitle = scopedBusinessId ? undefined : t("automations.selectCompanyAria");
   const [notice, setNotice] = useState<string | null>(null);
 
   // Search & Filter State
@@ -57,7 +57,7 @@ export function GoalsPage() {
 
   // Drawer handlers
   const openCreateDrawer = () => {
-    if (companyScope === ALL_COMPANIES && businessId) setCompanyScope(businessId);
+    if (!scopedBusinessId) return;
     setEditingGoal(null);
     setForm(initialForm);
     setDrawerOpen(true);
@@ -80,7 +80,8 @@ export function GoalsPage() {
 
   const saveGoal = async (e: FormEvent) => {
     e.preventDefault();
-    if (!businessId) return;
+    const targetBusinessId = editingGoal?.businessId ?? scopedBusinessId;
+    if (!targetBusinessId) return;
 
     if (!form.title.trim()) {
       setNotice(t("goalsPage.notices.titleRequired"));
@@ -103,13 +104,13 @@ export function GoalsPage() {
 
     try {
       if (editingGoal) {
-        await api(`/businesses/${editingGoal.businessId}/goals/${editingGoal.id}`, {
+        await api(`/businesses/${targetBusinessId}/goals/${editingGoal.id}`, {
           method: "PATCH",
           body: JSON.stringify(payload),
         });
         setNotice(t("goalsPage.notices.updatedSuccess", { title: payload.title }));
       } else {
-        await api(`/businesses/${businessId}/goals`, {
+        await api(`/businesses/${targetBusinessId}/goals`, {
           method: "POST",
           body: JSON.stringify(payload),
         });
@@ -125,7 +126,6 @@ export function GoalsPage() {
   };
 
   const deleteGoal = async (goal: Goal) => {
-    if (!businessId) return;
     const confirmed = await confirmModal({
       title: t("goalsPage.dialogs.deleteTitle"),
       message: t("goalsPage.dialogs.deleteMessage", { title: goal.title }),
@@ -147,7 +147,6 @@ export function GoalsPage() {
   };
 
   const updateGoalStatus = async (goal: Goal, newStatus: Goal["status"]) => {
-    if (!businessId) return;
     const statusLabels: Record<Goal["status"], string> = {
       active: t("goalsPage.statuses.active"),
       paused: t("goalsPage.statuses.paused"),
@@ -258,6 +257,8 @@ export function GoalsPage() {
               type="button"
               className="button-primary automations-action-primary goals-action-primary"
               onClick={openCreateDrawer}
+              disabled={!scopedBusinessId}
+              title={selectCompanyTitle}
             >
               {t("goalsPage.newGoal")}
             </button>
@@ -406,6 +407,8 @@ export function GoalsPage() {
             type="button"
             className="button-primary automations-action-primary goals-action-primary"
             onClick={openCreateDrawer}
+            disabled={!scopedBusinessId}
+            title={selectCompanyTitle}
           >
             {t("goalsPage.empty.createFirstGoal")}
           </button>

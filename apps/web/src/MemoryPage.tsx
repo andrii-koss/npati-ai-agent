@@ -25,12 +25,12 @@ const tabs = ["all", "facts", "audience", "brand", "decisions", "product", "othe
 
 export function MemoryPage() {
   const { t, language } = useTranslation();
-  const { overview, refresh, switchBusiness } = useWorkspace();
-  const business = useLinkedBusiness(overview, switchBusiness);
+  const { overview, switchBusiness } = useWorkspace();
+  useLinkedBusiness(overview, switchBusiness);
   const [scopeParams] = useSearchParams();
   const [companyScope, setCompanyScope] = useState(() => scopeParams.get("business") || ALL_COMPANIES);
   const scopedBusinessId = companyScope === ALL_COMPANIES ? undefined : companyScope;
-  const businessId = scopedBusinessId ?? business?.id;
+  const selectCompanyTitle = scopedBusinessId ? undefined : t("automations.selectCompanyAria");
   const businessName = scopedBusinessId
     ? overview?.businesses.find(item => item.id === scopedBusinessId)?.name
     : language === "uk" ? "Усі компанії" : "All companies";
@@ -80,7 +80,7 @@ export function MemoryPage() {
   });
 
   const openCreateDrawer = () => {
-    if (companyScope === ALL_COMPANIES && businessId) setCompanyScope(businessId);
+    if (!scopedBusinessId) return;
     setEditingItem(null);
     setForm(initialForm);
     setFormError("");
@@ -107,7 +107,6 @@ export function MemoryPage() {
   };
 
   const handleDeleteItem = async (item: MemoryItem) => {
-    if (!businessId) return;
     const confirmed = await confirmModal({
       title: t("memoryPage.dialogs.deleteTitle"),
       message: t("memoryPage.dialogs.deleteMessage", { title: item.title }),
@@ -129,6 +128,8 @@ export function MemoryPage() {
 
   const saveMemoryForm = async (e: FormEvent) => {
     e.preventDefault();
+    const targetBusinessId = editingItem?.businessId ?? scopedBusinessId;
+    if (!targetBusinessId) return;
     if (!form.title.trim()) {
       setFormError(t("memoryPage.drawer.errors.titleRequired"));
       return;
@@ -142,22 +143,6 @@ export function MemoryPage() {
     setFormError("");
 
     try {
-      let targetBusinessId = editingItem?.businessId || businessId;
-
-      // If user has no business created yet, automatically initialize one
-      if (!targetBusinessId) {
-        const created = await api<{ id: string }>("/businesses", {
-          method: "POST",
-          body: JSON.stringify({
-            name: t("memoryPage.drawer.defaultBusinessName"),
-            businessType: "starting",
-            businessStage: "idea",
-          }),
-        });
-        targetBusinessId = created.id;
-        await refresh();
-      }
-
       const payload = {
         type: form.type,
         title: form.title.trim(),
@@ -253,7 +238,8 @@ export function MemoryPage() {
               type="button"
               className="button-primary automations-action-primary"
               onClick={openCreateDrawer}
-              title={t("memoryPage.addFactTitle")}
+              disabled={!scopedBusinessId}
+              title={selectCompanyTitle ?? t("memoryPage.addFactTitle")}
             >
               {t("memoryPage.addFactBtn")}
             </button>
@@ -322,6 +308,8 @@ export function MemoryPage() {
             type="button"
             className="button-primary automations-action-primary"
             onClick={openCreateDrawer}
+            disabled={!scopedBusinessId}
+            title={selectCompanyTitle}
           >
             {t("memoryPage.empty.addFirstBtn")}
           </button>

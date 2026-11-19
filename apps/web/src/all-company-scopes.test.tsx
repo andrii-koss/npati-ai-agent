@@ -187,11 +187,15 @@ it.each([
 ] as const)("%s defaults to all companies, aggregates records and filters to one company", async (page, Component, first, second) => {
   await act(async () => root.render(<MemoryRouter initialEntries={[`/settings/${page}`]}><Component /></MemoryRouter>));
   const selector = host.querySelector<HTMLButtonElement>(".company-scope-trigger")!;
+  const create = page === "goals" || page === "memory"
+    ? host.querySelector<HTMLButtonElement>(".automations-header-actions .button-primary")
+    : null;
   expect(selector?.textContent).toBe("All companies");
   expect(host.textContent).toContain(first);
   expect(host.textContent).toContain(second);
   expect(requests.some(url => url.includes("/companies/all/") || url.includes("/businesses/all/"))).toBe(false);
   if (page === "goals") {
+    expect(create?.disabled).toBe(true);
     expect(requests).toEqual(["/api/goals/page?workspace=1"]);
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0"]);
   }
@@ -200,6 +204,7 @@ it.each([
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0"]);
   }
   if (page === "memory") {
+    expect(create?.disabled).toBe(true);
     expect(requests).toEqual(["/api/memory/page?workspace=1"]);
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0", "0", "0", "0"]);
     const source = host.querySelector(".memory-source-tag");
@@ -212,4 +217,9 @@ it.each([
   expect(selector.textContent).toBe("Beta Company");
   expect(host.textContent).toContain(second);
   expect(page === "business" ? host.querySelector(".biz-cards-grid, .biz-cards-list")?.textContent : host.textContent).not.toContain(first);
+  if (create) {
+    expect(create.disabled).toBe(false);
+    await act(async () => create.click());
+    expect(host.querySelector(`.${page}-drawer form`)).not.toBeNull();
+  }
 });
