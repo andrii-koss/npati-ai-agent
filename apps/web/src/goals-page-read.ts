@@ -1,8 +1,7 @@
 import type { GoalCounts, GoalPageQuery } from "@npati/workspace";
 import type { WorkspaceOverview } from "./business-workspace-shared";
 import { api, type Goal } from "./goals-types";
-import { requestSettingsRead } from "./settings-page-cache";
-import { getStoredAuthToken } from "./AuthContext";
+import { createSettingsRecordsOpener } from "./settings-records-page-read";
 
 export type GoalsPageData = {
   goals: Goal[];
@@ -12,8 +11,6 @@ export type GoalsPageData = {
 };
 
 type GoalsFilters = Omit<GoalPageQuery, "after">;
-type Consumer = "page" | "workspace";
-let opening: { token: string | null; key: string; consumer: Consumer; request: Promise<GoalsPageData> } | undefined;
 
 export const goalsPageKey = (businessId?: string) => `goals:page:${businessId ?? "all"}`;
 
@@ -28,16 +25,4 @@ export function fetchGoalsPage(filters: GoalsFilters, cursor?: string, includeWo
   return api<GoalsPageData>(params.size ? `/goals/page?${params}` : "/goals/page");
 }
 
-export function openGoalsPage(businessId?: string, consumer: Consumer = "page") {
-  const token = getStoredAuthToken();
-  const key = goalsPageKey(businessId);
-  // The lazy route and the workspace may mount at different times during auth restoration.
-  if (opening?.token === token && opening.key === key && opening.consumer !== consumer) {
-    const { request } = opening;
-    opening = undefined;
-    return request;
-  }
-  const request = requestSettingsRead(key, () => fetchGoalsPage({ businessId }, undefined, true));
-  opening = { token, key, consumer, request };
-  return request;
-}
+export const openGoalsPage = createSettingsRecordsOpener(goalsPageKey, businessId => fetchGoalsPage({ businessId }, undefined, true));

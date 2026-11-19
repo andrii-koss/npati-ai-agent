@@ -35,11 +35,16 @@ beforeEach(() => {
     const id = url.match(/\/(?:companies|businesses)\/(alpha|beta)/)?.[1] ?? "alpha";
     const item = { id: `${id}-item`, companyId: id, businessId: id, title: `Record ${id}`, name: `Record ${id}`, description: "Details", content: "Content", source: "user", type: "business_fact", confidence: 1, status: "active", priority: 2, prompt: "Task", cronExpression: "0 9 * * *", createdAt: "2026-11-16", updatedAt: "2026-11-16" };
     let data: unknown = {};
-    if (url.startsWith("/api/goals/page")) {
+    if (url.startsWith("/api/goals/page") || url.startsWith("/api/memory/page")) {
       const businessId = new URL(url, "http://localhost").searchParams.get("businessId");
       const ids = businessId ? [businessId] : ["alpha", "beta"];
-      data = {
-        goals: ids.map(id => ({ ...item, id: `${id}-item`, businessId: id, title: `Record ${id}` })),
+      const records = ids.map(id => ({ ...item, id: `${id}-item`, businessId: id, title: `Record ${id}` }));
+      data = url.startsWith("/api/memory/") ? {
+        items: records,
+        counts: { all: ids.length, facts: ids.length, audience: 0, brand: 0, decisions: 0, product: 0, other: 0 },
+        nextCursor: null,
+      } : {
+        goals: records,
         counts: { total: ids.length, active: ids.length, paused: 0, completed: 0, highPriority: 0 },
         nextCursor: null,
       };
@@ -179,6 +184,10 @@ it.each([
   if (page === "goals") {
     expect(requests).toEqual(["/api/goals/page?workspace=1"]);
     expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0"]);
+  }
+  if (page === "memory") {
+    expect(requests).toEqual(["/api/memory/page?workspace=1"]);
+    expect([...host.querySelectorAll(".tab-count")].map(count => count.textContent)).toEqual(["2", "2", "0", "0", "0", "0", "0"]);
   }
   await act(async () => selector.click());
   expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe("All companies");

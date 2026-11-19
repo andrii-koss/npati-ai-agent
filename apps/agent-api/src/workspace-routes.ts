@@ -1,7 +1,7 @@
 import { getChatMessagesWithProjectCards } from "./project-chat-cards";
 import { registerConversationImportRoute } from "./conversation-import-route";
 import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
-import { decodeGoalPageCursor, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
+import { decodeGoalPageCursor, decodeMemoryPageCursor, MEMORY_CATEGORIES, type MemoryCategory, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { isChatCapableModel } from "@npati/omniroute-adapter";
@@ -229,6 +229,28 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
 
   app.get<{ Querystring: { search?: string; limit?: string } }>("/memory", async (request, reply) => {
     try { return await store.listUserMemories(await auth.authenticate(request), request.query.search, Number(request.query.limit ?? 100)); } catch (error) { return errorReply(reply, error); }
+  });
+  app.get<{ Querystring: Record<string, string | undefined> }>("/memory/page", {
+    schema: { querystring: { type: "object", properties: {
+      businessId: { type: "string", minLength: 1 },
+      category: { type: "string", enum: Object.keys(MEMORY_CATEGORIES) },
+      search: { type: "string" },
+      searchTypes: { type: "string", maxLength: 200 },
+      cursor: { type: "string", maxLength: 512 },
+      workspace: { type: "string" },
+    } } },
+  }, async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "workspace:read");
+      const { businessId, category, search, searchTypes, cursor, workspace } = request.query;
+      const page = store.listMemoryPage(context, {
+        businessId, category: category as MemoryCategory | undefined, search: search?.trim(),
+        searchTypes: searchTypes?.split(","), after: cursor ? decodeMemoryPageCursor(cursor) : undefined,
+      });
+      if (workspace !== "1" || cursor) return await page;
+      const [data, overview] = await Promise.all([page, store.overview(context)]);
+      return { ...data, overview };
+    } catch (error) { return errorReply(reply, error); }
   });
   app.get<{ Params: { businessId: string }; Querystring: { search?: string; limit?: string } }>("/businesses/:businessId/memory", async (request, reply) => {
     try { return await store.listMemory(await auth.authenticate(request), request.params.businessId, request.query.search, Number(request.query.limit ?? 100)); } catch (error) { return errorReply(reply, error); }

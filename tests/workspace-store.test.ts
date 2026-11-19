@@ -1,7 +1,7 @@
 import { ContextBuilder } from "@npati/agent";
 import type { HubClient } from "@npati/hub-connector";
 import { defaultSkillRegistry } from "@npati/skills";
-import { decodeGoalPageCursor, InMemoryWorkspaceStore, WorkspaceAccessError, type AuthContext } from "@npati/workspace";
+import { decodeGoalPageCursor, decodeMemoryPageCursor, InMemoryWorkspaceStore, WorkspaceAccessError, type AuthContext } from "@npati/workspace";
 import { describe, expect, it } from "vitest";
 
 const owner: AuthContext = { userId: "user-a", workspaceId: "workspace-a", permissions: ["owner"] };
@@ -102,6 +102,29 @@ describe("business workspace repository", () => {
     expect(filtered.goals).toEqual([goals[0]]);
     expect(filtered.counts).toEqual(start.counts);
     await expect(store.listGoalPage(owner, { businessId: privateBusiness.id })).rejects.toBeInstanceOf(WorkspaceAccessError);
+  });
+
+  it("paginates memory across owned businesses and counts all records in each tab", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const first = await store.createBusiness(owner, { name: "First business" });
+    const second = await store.createBusiness(owner, { name: "Second business" });
+    const colleague = { ...owner, userId: "user-c" };
+    const privateBusiness = await store.createBusiness(colleague, { name: "Colleague's business" });
+    await store.createMemory(colleague, privateBusiness.id, { type: "brand", title: "Private", content: "Private note" });
+    const items = await Promise.all(Array.from({ length: 13 }, (_, index) => store.createMemory(owner,
+      index % 2 ? first.id : second.id,
+      { type: index === 0 ? "channel" : "business_fact", title: `Memory ${index}`, content: "Note" },
+    )));
+    const ordered = [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
+    const page = await store.listMemoryPage(owner, {});
+    expect(page.items).toEqual(ordered.slice(0, 10));
+    expect(page.counts).toEqual({ all: 13, facts: 12, audience: 1, brand: 0, decisions: 0, product: 0, other: 0 });
+    const next = await store.listMemoryPage(owner, { after: decodeMemoryPageCursor(page.nextCursor!) });
+    expect(next).toEqual({ items: ordered.slice(10), counts: null, nextCursor: null });
+    const filtered = await store.listMemoryPage(owner, { category: "audience", search: "localized label", searchTypes: ["channel"] });
+    expect(filtered.items).toEqual([items[0]]);
+    expect(filtered.counts).toEqual(page.counts);
+    await expect(store.listMemoryPage(owner, { businessId: privateBusiness.id })).rejects.toBeInstanceOf(WorkspaceAccessError);
   });
 
   it("persists goals and memory while rejecting secrets", async () => {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { countMemoryTypes, MEMORY_CATEGORIES, MEMORY_PAGE_SIZE, memoryPageCursor, type MemoryPageData, type MemoryPageQuery } from "./memory-page";
 import { GOALS_PAGE_SIZE, goalPageCursor, type GoalCounts, type GoalPage, type GoalPageQuery } from "./goals-page";
 import { InMemoryConversationResearch } from "./conversation-research-evidence";
 import { codeChildSessionId } from "./code-child-session-id";
@@ -494,6 +495,23 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) { return updateGoal(this.goalState(), context, businessId, goalId, input); }
   async deleteGoal(context: AuthContext, businessId: string, goalId: string) { return deleteGoal(this.goalState(), context, businessId, goalId); }
   async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) { return listMemory(this.goalState(), context, businessId, query, limit); }
+  async listMemoryPage(context: AuthContext, query: MemoryPageQuery): Promise<MemoryPageData> {
+    const businesses = query.businessId ? [await this.getBusiness(context, query.businessId)] : await this.listBusinesses(context);
+    const ids = new Set(businesses.map(business => business.id));
+    const scope = [...this.memories.values()].filter(item => item.workspaceId === context.workspaceId && ids.has(item.businessId));
+    const { after } = query;
+    const byType = new Map<string, number>();
+    if (!after) for (const item of scope) byType.set(item.type, (byType.get(item.type) ?? 0) + 1);
+    const category: readonly string[] | undefined = query.category && MEMORY_CATEGORIES[query.category];
+    const search = query.search?.toLowerCase();
+    const rows = scope.filter(item => (!category || category.includes(item.type))
+      && (!search || query.searchTypes?.includes(item.type)
+        || [item.title, item.content, item.source].some(value => value?.toLowerCase().includes(search)))
+      && (!after || item.updatedAt < after.updatedAt || (item.updatedAt === after.updatedAt && item.id < after.id)))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
+    const items = rows.slice(0, MEMORY_PAGE_SIZE);
+    return { items, counts: after ? null : countMemoryTypes(byType), nextCursor: rows.length > MEMORY_PAGE_SIZE ? memoryPageCursor(items.at(-1)!) : null };
+  }
   async listUserMemories(context: AuthContext, query = "", limit = 100) { return listUserMemories(this.companyState(), context, query, limit); }
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) { return createMemory(this.goalState(), context, businessId, input); }
   async linkMemory(context: AuthContext, businessId: string, memoryId: string) { return linkMemory(this.collaborationState(), context, businessId, memoryId); }

@@ -418,6 +418,7 @@ export interface WorkspaceStore {
   deleteGoal(context: AuthContext, businessId: string, goalId: string): Promise<boolean>;
   listMemory(context: AuthContext, businessId: string, query?: string, limit?: number): Promise<MemoryItem[]>;
   listUserMemories(context: AuthContext, query?: string, limit?: number): Promise<MemoryItem[]>;
+  listMemoryPage(context: AuthContext, query: import("./memory-page").MemoryPageQuery): Promise<import("./memory-page").MemoryPageData>;
   createMemory(context: AuthContext, businessId: string, input: MemoryInput): Promise<MemoryItem>;
   linkMemory(context: AuthContext, businessId: string, memoryId: string): Promise<MemoryItem>;
   updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>): Promise<MemoryItem>;

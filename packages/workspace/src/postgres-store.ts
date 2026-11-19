@@ -8,6 +8,8 @@ import * as governance from "./postgres-governance-repositories";
 import * as onboarding from "./postgres-onboarding-repositories";
 import * as collab from "./postgres-collaboration-repositories";
 import { listGoalPage } from "./postgres-goal-repositories";
+import { listMemoryPage } from "./postgres-memory-page";
+import type { MemoryPageQuery } from "./memory-page";
 import type { GoalPageQuery } from "./goals-page";
 import { readNeutralMessagePage, readChatSidebarPage } from "./postgres-chat-pages";
 import { PostgresSessionRepositories } from "./postgres-session-repositories";
@@ -316,6 +318,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) { return collab.updateGoal(this.pool, context, businessId, goalId, input); }
   async deleteGoal(context: AuthContext, businessId: string, goalId: string) { return collab.deleteGoal(this.pool, context, businessId, goalId); }
   async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) { return collab.listMemory(this.pool, context, businessId, query, limit); }
+  async listMemoryPage(context: AuthContext, query: MemoryPageQuery) { return listMemoryPage(this.pool, context, query); }
   async listUserMemories(context: AuthContext, query = "", limit = 100) { return collab.listUserMemories(this.pool, context, query, limit); }
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) { return collab.createMemory(this.pool, context, businessId, input); }
   async linkMemory(context: AuthContext, businessId: string, memoryId: string) { return collab.linkMemory(this.pool, context, businessId, memoryId); }

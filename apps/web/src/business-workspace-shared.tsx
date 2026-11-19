@@ -3,7 +3,14 @@ import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from
 import { ReactNode, createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { chatOpen, isChatPage } from "./chat-open";
+import { api } from "./workspace-api";
 import { openGoalsPage } from "./goals-page-read";
+import { openMemoryPage } from "./memory-page-read";
+
+const settingsRecordOpeners: Record<string, typeof openGoalsPage | typeof openMemoryPage> = {
+  "/settings/goals": openGoalsPage, "/goals": openGoalsPage,
+  "/settings/memory": openMemoryPage, "/memory": openMemoryPage,
+};
 
 export type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -15,28 +22,7 @@ export type Business = {
 export type Goal = { id: string; title: string; description?: string; status: string; priority: number; targetDate?: string };
 export type MemoryItem = { id: string; type: string; title: string; content: string; source: string; updatedAt: string };
 export type Company = { id: string; name: string; businessId?: string; revision: number; status: string };
-export async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const token = getStoredAuthToken();
-  const headers: Record<string, string> = {
-    ...(init?.body ? { "content-type": "application/json" } : {}),
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
-    ...(init?.headers as Record<string, string> | undefined),
-  };
-  const response = await fetch(`/api${url}`, {
-    ...init,
-    headers,
-  });
-  if (response.status === 401) {
-    window.dispatchEvent(new Event("npati:unauthorized"));
-  }
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
-    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
-    Object.assign(error, { code: payload?.error?.code, status: response.status });
-    throw error;
-  }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
-}
+export { api } from "./workspace-api";
 export const blankBusiness = {
   name: "", businessType: "", industry: "", niche: "", country: "", market: "", website: "",
   businessStage: "starting", teamType: "solo", businessModel: "", presenceType: "online",
@@ -91,11 +77,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       // Opening a chat page reads the overview from its single open request instead of a request of its own.
       const opened = initial && isChatPage() ? await chatOpen().catch(() => null) : null;
       const path = window.location.pathname.replace(/\/$/, "");
-      const goalBusiness = new URLSearchParams(window.location.search).get("business");
-      const goals = initial && (path === "/settings/goals" || path === "/goals")
-        ? await openGoalsPage(goalBusiness && goalBusiness !== "all" ? goalBusiness : undefined, "workspace").catch(() => null)
+      const businessId = new URLSearchParams(window.location.search).get("business");
+      const openRecords = settingsRecordOpeners[path];
+      const records = initial && openRecords
+        ? await openRecords(businessId && businessId !== "all" ? businessId : undefined, "workspace").catch(() => null)
         : null;
-      const nextOverview = opened?.overview ?? goals?.overview
+      const nextOverview = opened?.overview ?? records?.overview
         ?? await requestSettingsRead("business:overview", () => api<WorkspaceOverview>("/workspace/context"));
       if (getStoredAuthToken() !== token) return;
       updateCachedWorkspaceOverview(nextOverview);
