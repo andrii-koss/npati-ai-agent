@@ -37,3 +37,9 @@ export interface Routing {
   warningPercent: number;
   stopPaidWhenLimitReached: boolean;
 }
+
+export interface MarketplaceOpeningData {
+  library: { addedModels: Model[]; routing: Routing };
+  catalog: MarketplaceData | null;
+  catalogError?: string;
+}

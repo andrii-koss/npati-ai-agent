@@ -2,7 +2,7 @@ import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import type { MarketplaceData, Model, Provider, Routing } from "./ai-marketplace-types";
+import type { MarketplaceData, MarketplaceOpeningData, Model, Provider, Routing } from "./ai-marketplace-types";
 import { alertModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { getLocalizedProviderDescription } from "./i18n/providerDescriptions";
@@ -222,31 +222,6 @@ export function ProviderCard({ provider, busy, onOpen, onConnect, actionLabel }:
   </article>;
 }
 
-const ROUTING_CACHE_KEY = "npati_ai_routing_cache_v1";
-const MODELS_CACHE_KEY = "npati_ai_models_cache_v1";
-
-function getCachedRouting(): Routing | null {
-  try {
-    const raw = localStorage.getItem(ROUTING_CACHE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.mode) return parsed;
-    }
-  } catch { /* storage unavailable */ }
-  return null;
-}
-
-function getCachedModels(): Model[] {
-  try {
-    const raw = localStorage.getItem(MODELS_CACHE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch { /* storage unavailable */ }
-  return [];
-}
-
 function chatRoutableModel(model: Model): boolean {
   const capabilities = new Set(model.capabilities.map((value) => value.toLowerCase()));
   return ["chat", "text", "coding"].some((value) => capabilities.has(value))
@@ -278,6 +253,7 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
   }, [routing?.monthlyBudgetUsd, routing?.warningPercent]);
 
   async function save(patch: Partial<Routing>) {
+    if (!routing) return;
     setSaving(true);
     try {
       const modeToSave = models.some(chatRoutableModel) ? "manual" : "automatic";
@@ -286,7 +262,6 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
         body: JSON.stringify({ mode: modeToSave, defaultModelId: activeRouting.defaultModelId, ...patch }),
       });
       onChange(updated);
-      try { localStorage.setItem(ROUTING_CACHE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
     } catch (error) {
       await alertModal({
         title: t("common.error"),
@@ -314,14 +289,14 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
         <label><input type="checkbox" checked={activeRouting.preferFree} disabled /><span><strong>{t("aiMarketplace.routing.preferFreeTitle")}</strong><small>{t("aiMarketplace.routing.preferFreeDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.fallbackOnFailure} disabled /><span><strong>{t("aiMarketplace.routing.fallbackTitle")}</strong><small>{t("aiMarketplace.routing.fallbackDesc")}</small></span></label>
         <label><input type="checkbox" checked={activeRouting.balanceQualityCost} disabled /><span><strong>{t("aiMarketplace.routing.balanceTitle")}</strong><small>{t("aiMarketplace.routing.balanceDesc")}</small></span></label>
-        <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>{t("aiMarketplace.routing.compressionTitle")}</strong><small>{t("aiMarketplace.routing.compressionDesc")}</small></span></label>
+        <label><input type="checkbox" checked={activeRouting.compression === "stacked"} disabled={!routing || saving} onChange={(event) => save({ compression: event.target.checked ? "stacked" : "off" })} /><span><strong>{t("aiMarketplace.routing.compressionTitle")}</strong><small>{t("aiMarketplace.routing.compressionDesc")}</small></span></label>
       </div>
       <form className="ai-budget-settings" onSubmit={saveBudget}>
         <p className="section-kicker">{t("aiMarketplace.budget.kicker")}</p>
         <label><span>{t("aiMarketplace.budget.monthlyBudget")}</span><input type="number" min="0" step="1" value={monthlyBudget} onChange={(event) => setMonthlyBudget(event.target.value)} /></label>
         <label><span>{t("aiMarketplace.budget.warningPercent")}</span><input type="number" min="1" max="100" step="1" value={warningPercent} onChange={(event) => setWarningPercent(event.target.value)} /></label>
         <label className="budget-stop"><input type="checkbox" checked={false} disabled onChange={(event) => save({ stopPaidWhenLimitReached: event.target.checked })} /><span>{t("aiMarketplace.budget.stopPaid")}</span></label>
-        <button className="button-secondary" disabled={saving}>{t("aiMarketplace.budget.save")}</button>
+        <button className="button-secondary" disabled={!routing || saving}>{t("aiMarketplace.budget.save")}</button>
         <small>{t("aiMarketplace.budget.note")}</small>
       </form>
     </div>
@@ -502,13 +477,15 @@ export function AIProviderMarketplace() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true); const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(""); const [selected, setSelected] = useState<Provider | null>(null);
-  const [models, setModels] = useState<Model[]>(() => getCachedModels());
-  const [routing, setRouting] = useState<Routing | null>(() => getCachedRouting());
+  const [models, setModels] = useState<Model[]>([]);
+  const [routing, setRouting] = useState<Routing | null>(null);
   const [version, setVersion] = useState(0);
+  const libraryVersion = useRef<number | null>(null);
+  const requestId = useRef(0);
+  const pendingReads = useRef(new Map<string, Promise<MarketplaceData | MarketplaceOpeningData>>());
 
   const providerSentinelRef = useRef<HTMLDivElement>(null);
   const providerGridRef = useRef<HTMLDivElement>(null);
-  const loadingNextProvidersRef = useRef(false);
 
   const cacheRef = useRef<Map<string, { data: MarketplaceData; providers: Provider[] }>>(new Map());
 
@@ -520,16 +497,6 @@ export function AIProviderMarketplace() {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 220);
     return () => window.clearTimeout(timer);
   }, [search]);
-
-  const loadLibrary = useCallback(async () => {
-    const [added, route] = await Promise.all([api<Model[]>("/api/ai/models/added"), api<Routing>("/api/ai/routing")]);
-    setModels(added);
-    setRouting(route);
-    try {
-      localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(added));
-      localStorage.setItem(ROUTING_CACHE_KEY, JSON.stringify(route));
-    } catch { /* storage unavailable */ }
-  }, []);
 
   const switchTab = useCallback((nextTab: (typeof tabs)[number]) => {
     setTab(nextTab);
@@ -544,15 +511,19 @@ export function AIProviderMarketplace() {
   }, [debouncedSearch, type, auth, cost, capability, getCacheKey]);
 
   const load = useCallback(async (offset = 0, refresh = false) => {
+    const id = ++requestId.current;
     if (refresh) {
       cacheRef.current.clear();
     }
     const key = getCacheKey(tab, debouncedSearch, tab === "all" ? type : "", tab === "all" ? auth : "", tab === "all" ? cost : "", tab === "all" ? capability : "", offset);
-    if (!refresh && offset === 0 && cacheRef.current.has(key)) {
+    const includeLibrary = offset === 0 && libraryVersion.current !== version;
+    if (!refresh && !includeLibrary && offset === 0 && cacheRef.current.has(key)) {
       const cached = cacheRef.current.get(key)!;
       setData(cached.data);
       setProviders(cached.providers);
       setLoading(false);
+      setLoadingMore(false);
+      setError("");
       return;
     }
 
@@ -563,6 +534,7 @@ export function AIProviderMarketplace() {
         connectableOnly: "true",
         offset: String(offset),
         limit: "24",
+        ...(includeLibrary ? { includeLibrary: "true" } : {}),
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(tab === "all" && type ? { type } : {}),
         ...(tab === "all" && auth ? { auth } : {}),
@@ -570,7 +542,26 @@ export function AIProviderMarketplace() {
         ...(tab === "all" && capability ? { capability } : {}),
         ...(refresh ? { refresh: "true" } : {})
       });
-      const result = await api<MarketplaceData>(`/api/ai/marketplace?${query}`);
+      const pendingKey = `${version}:${query}`;
+      let read = pendingReads.current.get(pendingKey);
+      if (!read) {
+        read = api<MarketplaceData | MarketplaceOpeningData>(`/api/ai/marketplace?${query}`)
+          .finally(() => pendingReads.current.delete(pendingKey));
+        pendingReads.current.set(pendingKey, read);
+      }
+      const response = await read;
+      if (id !== requestId.current) return;
+      let result: MarketplaceData;
+      if ("library" in response) {
+        libraryVersion.current = version;
+        setModels(response.library.addedModels);
+        setRouting(response.library.routing);
+        if (!response.catalog) {
+          setError(response.catalogError ?? "AI Engine unavailable");
+          return;
+        }
+        result = response.catalog;
+      } else result = response;
       const resultProviders = debouncedSearch ? sortSearchResults(result.providers, debouncedSearch) : (tab === "recommended" ? sortRecommended(result.providers) : result.providers);
       const normalizedResult = { ...result, providers: resultProviders };
       setData(normalizedResult);
@@ -580,53 +571,37 @@ export function AIProviderMarketplace() {
           localStorage.setItem(OVERVIEW_CACHE_KEY, JSON.stringify(result.overview));
         } catch { /* storage unavailable */ }
       }
-      setProviders((current) => {
-        const next = offset ? [...current, ...resultProviders] : resultProviders;
-        cacheRef.current.set(key, { data: normalizedResult, providers: next });
-        return next;
-      });
-
-      // Pre-warm default tabs so switching between all/recommended/free/connected is instant without any flicker
-      if (offset === 0 && !debouncedSearch && !type && !auth && !cost && !capability) {
-        const others = tabs.filter((t) => t !== tab);
-        for (const other of others) {
-          const otherKey = getCacheKey(other, "", "", "", "", "", 0);
-          if (!cacheRef.current.has(otherKey)) {
-            api<MarketplaceData>(`/api/ai/marketplace?tab=${other}&connectableOnly=true&offset=0&limit=24`)
-              .then((res) => {
-                const resProviders = other === "recommended" ? sortRecommended(res.providers) : res.providers;
-                cacheRef.current.set(otherKey, { data: { ...res, providers: resProviders }, providers: resProviders });
-              })
-              .catch(() => undefined);
-          }
-        }
-      }
+      if (offset === 0) cacheRef.current.set(key, { data: normalizedResult, providers: resultProviders });
+      setProviders(current => offset ? [...current, ...resultProviders] : resultProviders);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "AI Engine unavailable");
+      if (id === requestId.current) setError(reason instanceof Error ? reason.message : "AI Engine unavailable");
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (id === requestId.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [tab, debouncedSearch, type, auth, cost, capability, getCacheKey]);
+  }, [tab, debouncedSearch, type, auth, cost, capability, getCacheKey, version]);
 
   useEffect(() => {
     void load();
-  }, [load, version]);
+    return () => { requestId.current++; };
+  }, [load]);
 
   useEffect(() => {
     const sentinel = providerSentinelRef.current;
     if (!sentinel || !data?.pagination.hasMore || loading || loadingMore || error || !globalThis.IntersectionObserver) return;
     let active = true;
+    let pending = false;
     const observer = new IntersectionObserver(entries => {
-      if (!active || !entries.some(entry => entry.isIntersecting) || loadingNextProvidersRef.current) return;
-      loadingNextProvidersRef.current = true;
-      void load(providers.length).finally(() => { loadingNextProvidersRef.current = false; });
+      if (!active || pending || !entries.some(entry => entry.isIntersecting)) return;
+      pending = true;
+      void load(providers.length).finally(() => { pending = false; });
     }, { rootMargin: "0px 0px 240px 0px" });
     observer.observe(sentinel);
     return () => { active = false; observer.disconnect(); };
   }, [data?.pagination.hasMore, loading, loadingMore, error, load, providers.length]);
 
-  useEffect(() => { void loadLibrary().catch(() => undefined); }, [loadLibrary, version]);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (event.data === "npati-oauth-success") {
@@ -671,7 +646,7 @@ export function AIProviderMarketplace() {
       <div><strong>{overview ? overview.addedModels : (data ? data.overview.addedModels : "—")}</strong><span>{t("aiMarketplace.stats.modelsAdded")}</span></div>
     </section>
     <RoutingPanel routing={routing} models={models.filter(chatRoutableModel)} onChange={setRouting} />
-    {(overview?.connectedProviders || data?.overview.connectedProviders || models.length > 0) ? <MyModels models={models} routing={routing} onChanged={changed} /> : null}
+    {routing && (overview?.connectedProviders || data?.overview.connectedProviders || models.length > 0) ? <MyModels models={models} routing={routing} onChanged={changed} /> : null}
     <section className="explore-section">
       <div className="section-heading"><div><p className="section-kicker">{t("aiMarketplace.explore.kicker")}</p><h2>{t("aiMarketplace.explore.heading")}</h2></div></div>
       <div className="marketplace-controls">

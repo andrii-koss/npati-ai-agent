@@ -6,12 +6,14 @@ import { AIPreferencesStore, type AICompressionMode, type AIMode } from "./ai-pr
 import type { AuthProvider } from "./auth";
 import { ResilientEmbeddingPipeline } from "./resilient-inference-pipeline";
 
+const publicMarketplaceMessage = (error: unknown) => error instanceof Error ? error.message.replace(/OmniRoute/gi, "NPATI AI") : "Unexpected AI marketplace error";
+
 function sendError(reply: FastifyReply, error: unknown) {
   if (error instanceof OmniRouteError) {
     return reply.code(error.status).send({ error: { code: error.code, message: error.message.replace(/OmniRoute/gi, "NPATI AI") } });
   }
   if (error instanceof AIAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
-  const message = error instanceof Error ? error.message.replace(/OmniRoute/gi, "NPATI AI") : "Unexpected AI marketplace error";
+  const message = publicMarketplaceMessage(error);
   const explicitStatus = Number((error as { status?: unknown; statusCode?: unknown } | undefined)?.status ?? (error as { statusCode?: unknown } | undefined)?.statusCode);
   const status = Number.isInteger(explicitStatus) && explicitStatus >= 400 && explicitStatus <= 599
     ? explicitStatus
@@ -189,7 +191,15 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
         limit: Number.parseInt(request.query.limit ?? "24", 10) || 24,
         refresh: request.query.refresh === "true",
       };
-      return await marketplace.marketplace(query, stored.addedModels.map((model) => model.id));
+      const addedModelIds = stored.addedModels.map((model) => model.id);
+      if (request.query.includeLibrary !== "true" || query.offset !== 0) return await marketplace.marketplace(query, addedModelIds);
+      reply.header("cache-control", "private, no-store");
+      try {
+        return { library: stored, catalog: await marketplace.marketplace(query, addedModelIds) };
+      } catch (error) {
+        // The personal library remains available if the provider catalog temporarily fails.
+        return { library: stored, catalog: null, catalogError: publicMarketplaceMessage(error) };
+      }
     } catch (error) { return sendError(reply, error); }
   });
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "./i18n";
 import { AIProviderMarketplace } from "./AIProviderMarketplace";
 import { CodeAgentsPage } from "./CodeAgentsPage";
-import type { MarketplaceData, Provider } from "./ai-marketplace-types";
+import type { MarketplaceData, MarketplaceOpeningData, Provider } from "./ai-marketplace-types";
 
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => null }));
 
@@ -24,6 +24,10 @@ const page = (offset: number): MarketplaceData => ({
   providers: providers.slice(offset, offset + 24),
   pagination: { offset, limit: 24, returned: Math.min(24, 25 - offset), total: 25, hasMore: offset === 0 },
 });
+const library: MarketplaceOpeningData["library"] = {
+  addedModels: [{ id: "added-model", upstreamId: "added-model", providerId: "provider-0", providerName: "Provider 0", name: "Saved model", capabilities: ["text"], added: true, local: false, freeStatus: "paid" }],
+  routing: { mode: "manual", defaultModelId: "added-model", automaticModel: "auto", preferFree: true, fallbackOnFailure: false, balanceQualityCost: true, compression: "stacked", monthlyBudgetUsd: 0, warningPercent: 80, stopPaidWhenLimitReached: false },
+};
 type Observer = { callback: (entries: { isIntersecting: boolean }[]) => void; active: boolean };
 let observers: Observer[];
 let root: Root;
@@ -43,8 +47,6 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://localhost");
-    if (url.pathname === "/api/ai/models/added") return new Response("[]");
-    if (url.pathname === "/api/ai/routing") return new Response("null");
     if (url.pathname === "/api/code/agents") return new Response(JSON.stringify({
       providers, preferences: { activeAgentId: "npati", activeAgentName: "Npati Code", enabledAgentIds: ["npati"] },
     }));
@@ -53,12 +55,23 @@ beforeEach(() => {
       nextRequests++;
       return new Promise<Response>(resolve => { releaseNext = resolve; });
     }
-    return new Response(JSON.stringify(page(offset)));
+    return new Response(JSON.stringify(url.searchParams.has("includeLibrary") ? { library, catalog: page(offset) } : page(offset)));
   }));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function render(Page = AIProviderMarketplace) { await act(async () => root.render(<I18nProvider><MemoryRouter><Page /></MemoryRouter></I18nProvider>)); }
+
+it("opens the library and the first provider page in one request", async () => {
+  await act(async () => root.render(<React.StrictMode><I18nProvider><MemoryRouter><AIProviderMarketplace /></MemoryRouter></I18nProvider></React.StrictMode>));
+  const reads = vi.mocked(fetch).mock.calls.map(([request]) => new URL(String(request), "http://localhost")).filter(url => url.pathname.startsWith("/api/ai/"));
+  expect(reads).toHaveLength(1);
+  expect(reads[0]?.pathname).toBe("/api/ai/marketplace");
+  expect(reads[0]?.searchParams.get("includeLibrary")).toBe("true");
+  expect(host.querySelectorAll(".provider-card")).toHaveLength(24);
+  expect(host.querySelector(".my-model-row")?.textContent).toContain("Saved model");
+  expect(host.querySelector(".my-model-row .ai-badge.red")).not.toBeNull();
+});
 
 it("appends providers near the end, prevents duplicate requests, and stops on the last page", async () => {
   await render();
@@ -68,6 +81,8 @@ it("appends providers near the end, prevents duplicate requests, and stops on th
   const observed = [...observers].reverse().find(observer => observer.active)!;
   await act(async () => { intersect(); intersect(); });
   expect(nextRequests).toBe(1);
+  const next = vi.mocked(fetch).mock.calls.map(([request]) => new URL(String(request), "http://localhost")).find(url => url.searchParams.get("offset") === "24");
+  expect(next?.searchParams.has("includeLibrary")).toBe(false);
   expect(host.querySelector('[role="status"]')).not.toBeNull();
   await act(async () => releaseNext(new Response(JSON.stringify(page(24)))));
   expect(host.querySelectorAll(".provider-card")).toHaveLength(25);
