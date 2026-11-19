@@ -181,7 +181,14 @@ it("keeps company summary cards unchanged through pending, rapid, and cached sta
 });
 
 it("loads workspace and schema only on opening a database, uses its own company, and returns real bulk row counts", async () => {
-  await render(); await click(host.querySelectorAll<HTMLButtonElement>(".ds-name-link")[1]!);
+  await render();
+  const row = rows().item(1);
+  const name = row.querySelector(".ds-name-link");
+  expect(name?.getAttribute("title")).toBe("Database 1");
+  const actions = [...row.querySelectorAll<HTMLButtonElement>(".automation-action-btn")];
+  expect(actions.map(action => action.getAttribute("aria-label"))).toEqual(["Open", "Archive", "Delete now"]);
+  expect(actions.every(action => action.querySelector("svg") && !action.textContent?.trim())).toBe(true);
+  await click(actions[0]!);
   expect(host.querySelector('[data-testid="url"]')?.textContent).toBe("/settings/data-studio/Database%201");
   expect(urls()).toHaveLength(3);
   expect(urls()[1]).toBe("/api/companies/c1/data-backends/b1/workspace");

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Archive, ArchiveRestore, FolderOpen, Trash2 } from "lucide-react";
 import type {
   BackendEnvironment,
   BackendSummary,
@@ -202,6 +203,38 @@ export function DatabasesListView({
     setSelectedIds(new Set());
   };
 
+  const labels = {
+    name: isUk ? "Назва" : "Name",
+    company: isUk ? "Компанія" : "Company",
+    provider: isUk ? "Провайдер" : "Provider",
+    status: isUk ? "Статус" : "Status",
+    environments: "dev / prod",
+    tables: isUk ? "Таблиць" : "Tables",
+    projects: isUk ? "Проєктів" : "Projects",
+    actions: isUk ? "Дії" : "Actions",
+  };
+  const openLabel = isUk ? "Відкрити" : "Open";
+  const deleteLabel = isUk ? "Видалити зараз" : "Delete now";
+  const tableHead = (
+    <thead>
+      <tr>
+        <th scope="col">
+          <input
+            type="checkbox"
+            aria-label={isUk ? "Вибрати всі бази даних" : "Select all databases"}
+            checked={allFilteredSelected}
+            disabled={selectionBusy}
+            ref={(el) => {
+              if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+            }}
+            onChange={handleToggleSelectAll}
+          />
+        </th>
+        {Object.values(labels).map(label => <th key={label} scope="col">{label}</th>)}
+      </tr>
+    </thead>
+  );
+
   return (
     <main className="automations-container">
       <header className="inspector-header automations-header">
@@ -369,27 +402,13 @@ export function DatabasesListView({
       </div>
 
       {backendsLoading && backends.length === 0 ? (
-        <div className="automations-table-container">
-          <table className="automations-table">
-            <thead>
-              <tr>
-                <th style={{ width: "40px", textAlign: "center" }}>
-                  <input type="checkbox" disabled aria-label="Select all" />
-                </th>
-                <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
-                <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
-                <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
-                <th style={{ width: "130px" }}>{isUk ? "Статус" : "Status"}</th>
-                <th style={{ width: "220px" }}>dev / prod</th>
-                <th style={{ width: "100px" }}>{isUk ? "Таблиць" : "Tables"}</th>
-                <th style={{ width: "100px" }}>{isUk ? "Проєктів" : "Projects"}</th>
-                <th style={{ width: "260px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
-              </tr>
-            </thead>
+        <div className="automations-table-container data-studio-catalog-table-container">
+          <table className="automations-table data-studio-catalog-table">
+            {tableHead}
             <tbody>
               {Array.from({ length: 10 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} style={{ opacity: 0.5 }}>
-                  <td style={{ textAlign: "center", width: "40px" }}><span style={{ display: "inline-block", width: "16px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "3px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "16px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "3px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "160px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "110px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "90px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
@@ -397,7 +416,7 @@ export function DatabasesListView({
                   <td><span style={{ display: "inline-block", width: "140px", height: "24px", background: "var(--npati-gray-100)", borderRadius: "999px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "40px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "40px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
-                  <td><span style={{ display: "inline-block", width: "120px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} /></td>
+                  <td><span style={{ display: "inline-block", width: "92px", height: "28px", background: "var(--npati-gray-100)", borderRadius: "6px" }} /></td>
                 </tr>
               ))}
             </tbody>
@@ -426,40 +445,20 @@ export function DatabasesListView({
           </button>
         </div>
       ) : (
-        <div className="automations-table-container">
-          <table className="automations-table">
-            <thead>
-              <tr>
-                <th style={{ width: "40px", textAlign: "center" }}>
-                  <input
-                    type="checkbox"
-                    aria-label={isUk ? "Вибрати всі бази даних" : "Select all databases"}
-                    checked={allFilteredSelected}
-                    disabled={selectionBusy}
-                    ref={(el) => {
-                      if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
-                    }}
-                    onChange={handleToggleSelectAll}
-                  />
-                </th>
-                <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
-                <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
-                <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
-                <th style={{ width: "130px" }}>{isUk ? "Статус" : "Status"}</th>
-                <th style={{ minWidth: "200px" }}>dev / prod</th>
-                <th style={{ width: "100px" }}>{isUk ? "Таблиць" : "Tables"}</th>
-                <th style={{ width: "100px" }}>{isUk ? "Проєктів" : "Projects"}</th>
-                <th style={{ width: "300px", textAlign: "right" }}>{isUk ? "Дії" : "Actions"}</th>
-              </tr>
-            </thead>
+        <div className="automations-table-container data-studio-catalog-table-container">
+          <table className="automations-table data-studio-catalog-table">
+            {tableHead}
             <tbody>
               {filteredBackends.map((backend) => {
                 const list = environments[backend.id] ?? [];
                 const attached = backend.attachedProjectCount ?? projects.filter((item) => item.dataBackendId === backend.id).length;
                 const isSelected = selectedIds.has(backend.id);
+                const canArchive = backend.status === "ready";
+                const archiveLabel = canArchive ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate");
+                const ArchiveIcon = canArchive ? Archive : ArchiveRestore;
                 return (
                   <tr key={backend.id} className={isSelected ? "row-selected" : undefined}>
-                    <td style={{ textAlign: "center", width: "40px" }}>
+                    <td>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -469,14 +468,14 @@ export function DatabasesListView({
                       />
                     </td>
                     <td className="automation-title-cell">
-                      <button type="button" className="ds-name-link" onClick={() => setDetailId(backend.id)}>{backend.name}</button>
+                      <button type="button" className="ds-name-link" title={backend.name} onClick={() => setDetailId(backend.id)}>{backend.name}</button>
                       <p>{isUk ? "Оновлено" : "Updated"}: {backend.updatedAt ? new Date(backend.updatedAt).toLocaleDateString(isUk ? "uk-UA" : "en-US") : "—"}</p>
                     </td>
-                    <td>
-                      <span className="data-studio-badge" title={isUk ? "Компанія-власник бази" : "Owning company"}>{backend.companyName}</span>
+                    <td data-label={labels.company}>
+                      <span className="data-studio-badge ds-catalog-company-name" title={backend.companyName}>{backend.companyName}</span>
                     </td>
-                    <td>{backend.provider === "external_postgres" ? (isUk ? "Зовнішня" : "External") : "NPATI Postgres"}</td>
-                    <td>
+                    <td data-label={labels.provider}>{backend.provider === "external_postgres" ? (isUk ? "Зовнішня" : "External") : "NPATI Postgres"}</td>
+                    <td data-label={labels.status}>
                       <span className={`status-pill ${statusPillClass(backend.status)}`}>
                         {backend.status === "deleting" ? (isUk ? "Очікує видалення" : "Pending deletion") : backend.status}
                       </span>
@@ -484,26 +483,28 @@ export function DatabasesListView({
                         <small className="ds-muted">{isUk ? " Після " : " After "}{new Date(backend.removeAfter).toLocaleString(isUk ? "uk-UA" : "en-US")}</small>
                       )}
                     </td>
-                    <td>
-                      {list.length === 0 && <span className="ds-muted">—</span>}
-                      {list.map((env) => (
-                        <span key={env.environment} className={`status-pill ${syncPillClass(env.syncStatus)}`} title={`${env.environment}: ${env.status}`}>
-                          {env.environment}: {env.syncStatus}
-                        </span>
-                      ))}
+                    <td data-label={labels.environments}>
+                      <div className="ds-catalog-environments">
+                        {list.length === 0 && <span className="ds-muted">—</span>}
+                        {list.map((env) => (
+                          <span key={env.environment} className={`status-pill ${syncPillClass(env.syncStatus)}`} title={`${env.environment}: ${env.status}`}>
+                            {env.environment}: {env.syncStatus}
+                          </span>
+                        ))}
+                      </div>
                     </td>
-                    <td>{tableCounts[backend.id] === undefined ? "—" : tableCounts[backend.id] === null ? (isUk ? "н/д" : "n/a") : tableCounts[backend.id]}</td>
-                    <td>{attached}</td>
+                    <td data-label={labels.tables}>{tableCounts[backend.id] === undefined ? "—" : tableCounts[backend.id] === null ? (isUk ? "н/д" : "n/a") : tableCounts[backend.id]}</td>
+                    <td data-label={labels.projects}>{attached}</td>
                     <td>
                       <div className="automation-actions-cell">
-                        <button type="button" className="automation-action-btn run-btn" onClick={() => setDetailId(backend.id)}>
-                          {isUk ? "Відкрити" : "Open"}
+                        <button type="button" className="automation-action-btn run-btn" title={openLabel} aria-label={openLabel} onClick={() => setDetailId(backend.id)}>
+                          <FolderOpen size={15} aria-hidden="true" />
                         </button>
-                        <button type="button" className="automation-action-btn" disabled={backendBusy || backend.status === "deleting"} onClick={() => void toggleArchive(backend)}>
-                          {backend.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
+                        <button type="button" className="automation-action-btn" title={archiveLabel} aria-label={archiveLabel} disabled={backendBusy || backend.status === "deleting"} onClick={() => void toggleArchive(backend)}>
+                          <ArchiveIcon size={15} aria-hidden="true" />
                         </button>
-                        <button type="button" className="automation-action-btn danger" disabled={backendBusy} onClick={() => void deleteDatabase(backend)}>
-                          {isUk ? "Видалити зараз" : "Delete now"}
+                        <button type="button" className="automation-action-btn danger" title={deleteLabel} aria-label={deleteLabel} disabled={backendBusy} onClick={() => void deleteDatabase(backend)}>
+                          <Trash2 size={15} aria-hidden="true" />
                         </button>
                       </div>
                     </td>
