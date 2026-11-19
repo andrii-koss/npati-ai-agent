@@ -8,7 +8,13 @@ import { getCachedWebsites, updateCachedWebsites } from "./website-builder-cache
 const authState = vi.hoisted(() => ({ token: "test", serial: 0 }));
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => authState.token, getStoredAuthUser: () => ({ id: "test" }) }));
 vi.mock("./i18n", () => ({ useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
-vi.mock("./website-builder-card", () => ({ WebsiteProjectCard: ({ site, companyId }: { site: { name: string }; companyId: string }) => <article data-project data-company={companyId}>{site.name}</article>, invalidateWebsitePreviewCache: vi.fn() }));
+vi.mock("./ConfirmDialog", () => ({ confirmModal: async () => true, promptModal: async () => null }));
+vi.mock("./website-builder-card", () => ({
+  WebsiteProjectCard: ({ site, companyId, handleDelete }: { site: { name: string }; companyId: string; handleDelete: (site: { name: string }) => void }) => (
+    <article data-project data-company={companyId}>{site.name}<button data-delete-project onClick={() => handleDelete(site)} /></article>
+  ),
+  invalidateWebsitePreviewCache: vi.fn(),
+}));
 vi.mock("./website-builder-drawer", () => ({ CreateWebsiteDrawer: () => null }));
 let root: Root, host: HTMLDivElement;
 beforeEach(() => { authState.token = "test-" + ++authState.serial; localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
@@ -17,6 +23,35 @@ const project = (id: string, companyId: string) => ({ id, companyId, name: id, t
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
 describe("Projects catalog company scope and freshness", () => {
+  it("removes only the deleted card and keeps the order, mounted cards and continuation", async () => {
+    let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+    vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });
+    const fetch = vi.fn(async (url: string, options?: RequestInit) => {
+      if (options?.method === "DELETE") return new Response(null, { status: 204 });
+      const offset = url.includes("cursor=third") ? 12 : url.includes("cursor=second") ? 6 : 0;
+      return new Response(JSON.stringify(url.includes("/projects/catalog") ? {
+        projects: Array.from({ length: 6 }, (_, index) => project(`site-${offset + index}`, "company")),
+        pagination: { nextCursor: offset === 0 ? "second" : offset === 6 ? "third" : null },
+      } : { companies: [], pagination: { nextCursor: null } }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    await render();
+    await act(async () => document.dispatchEvent(new Event("wheel")));
+    await act(async () => intersect([{ isIntersecting: true }]));
+    const cards = [...host.querySelectorAll("[data-project]")];
+    expect(cards).toHaveLength(12);
+    await act(async () => cards[2]!.querySelector<HTMLButtonElement>("[data-delete-project]")!.click());
+    expect(fetch.mock.calls.filter(([, options]) => options?.method === "DELETE").map(([url]) => url))
+      .toEqual(["/api/companies/company/projects/site-2"]);
+    expect(fetch.mock.calls.filter(([url]) => url.includes("/projects/catalog") && !url.includes("cursor="))).toHaveLength(1);
+    expect([...host.querySelectorAll("[data-project]")]).toEqual(cards.filter((_, index) => index !== 2));
+
+    await act(async () => intersect([{ isIntersecting: true }]));
+    expect([...host.querySelectorAll("[data-project]")].map(card => card.textContent)).toEqual(
+      Array.from({ length: 18 }, (_, index) => `site-${index}`).filter(name => name !== "site-2"),
+    );
+  });
+
   it("keeps scrolled cards mounted and the pagination cursor when returning from another tab", async () => {
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);

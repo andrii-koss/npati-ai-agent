@@ -40,7 +40,7 @@ import {
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
-import { cachedCatalog, invalidateProjectCatalog, mergeCatalogRefresh, requestCatalog } from "./project-catalog-client";
+import { cachedCatalog, invalidateProjectCatalog, mergeCatalogRefresh, removeProjectFromCatalog, requestCatalog } from "./project-catalog-client";
 import { CatalogScrollToTop } from "./CatalogScrollToTop";
 
 export function WebsiteBuilderDashboard() {
@@ -195,6 +195,10 @@ export function WebsiteBuilderDashboard() {
       document.removeEventListener("keydown", onKey);
     };
   }, []);
+
+  useEffect(() => {
+    if (websites.length === 0 && nextCursor && !loading && !error) void loadWebsites(undefined, nextCursor);
+  }, [websites.length, nextCursor, loading, error, loadWebsites]);
 
   useEffect(() => {
     if (!nextCursor || loading || error || !scrollStarted) return;
@@ -530,18 +534,21 @@ export function WebsiteBuilderDashboard() {
   }, [companyId, loadWebsites, t.archivePrompt]);
 
   const handleDelete = useCallback(async (site: WebsiteProject) => {
+    const owner = getStoredAuthToken();
     // The dialog names the project, so the user confirms this one and not "this project" in general.
-    if (!(await confirmModal({ title: site.name, message: t.deletePrompt, isDanger: true }))) return;
+    if (!(await confirmModal({ title: site.name, message: t.deletePrompt, isDanger: true })) || owner !== getStoredAuthToken()) return;
     try {
       await apiFetch(
         `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,
         { method: "DELETE" }
       );
-      await loadWebsites(companyId);
+      if (owner !== getStoredAuthToken()) return;
+      removeProjectFromCatalog(site.id);
+      setWebsites(previous => previous.filter(project => project.id !== site.id));
     } catch (err: any) {
       alert(err.message || "Failed to delete website");
     }
-  }, [companyId, loadWebsites, t.deletePrompt]);
+  }, [t.deletePrompt]);
 
   return (
     <main className="company-refined company-page">

@@ -3,7 +3,7 @@ import { apiFetch, type WebsiteProject } from "./website-builder-cache";
 export interface CatalogPage { projects: WebsiteProject[]; pagination: { nextCursor: string | null } }
 export interface CatalogFilters { companyId: string; search: string; status: string; framework: string; kind: string }
 const cache = new Map<string, CatalogPage>();
-const pending = new Map<string, { controller: AbortController; promise: Promise<CatalogPage>; users: number }>();
+const pending = new Map<string, { controller: AbortController; promise: Promise<CatalogPage>; users: number; removed: Set<string> }>();
 let identity: string | null | undefined;
 function key(filters: CatalogFilters, cursor?: string) {
   const token = JSON.stringify([getStoredAuthToken(), getStoredAuthUser()?.id ?? null]);
@@ -12,6 +12,16 @@ function key(filters: CatalogFilters, cursor?: string) {
 }
 export function cachedCatalog(filters: CatalogFilters) { return cache.get(key(filters)); }
 export function invalidateProjectCatalog() { cache.clear(); }
+
+export function removeProjectFromCatalog(projectId: string) {
+  for (const [query, page] of cache) {
+    if (page.projects.some(project => project.id === projectId)) {
+      cache.set(query, { ...page, projects: page.projects.filter(project => project.id !== projectId) });
+    }
+  }
+  // Responses already on their way may still contain the deleted project.
+  for (const entry of pending.values()) entry.removed.add(projectId);
+}
 /** Refresh the head without unmounting older pages already being read. */
 export function mergeCatalogRefresh(previous: WebsiteProject[], page: CatalogPage): WebsiteProject[] {
   const known = new Map(previous.map(item => [item.id, item]));
@@ -40,16 +50,18 @@ export function requestCatalog(filters: CatalogFilters, cursor?: string, preserv
   let entry = pending.get(query);
   if (!entry) {
     const controller = new AbortController();
+    const removed = new Set<string>();
     const params = new URLSearchParams(query);
     if (!filters.companyId) params.delete("companyId");
-    const promise = apiFetch<CatalogPage>(`/projects/catalog?${params}`, { signal: controller.signal }).then(page => {
+    const promise = apiFetch<CatalogPage>(`/projects/catalog?${params}`, { signal: controller.signal }).then(response => {
+      const page = removed.size ? { ...response, projects: response.projects.filter(project => !removed.has(project.id)) } : response;
       if (!controller.signal.aborted) {
         if (cache.size >= 40) cache.delete(cache.keys().next().value!);
         cache.set(query, page);
       }
       return page;
     }).finally(() => { if (pending.get(query)?.controller === controller) pending.delete(query); });
-    entry = { controller, promise, users: 0 }; pending.set(query, entry);
+    entry = { controller, promise, users: 0, removed }; pending.set(query, entry);
   }
   entry.users++;
   const shared = entry;

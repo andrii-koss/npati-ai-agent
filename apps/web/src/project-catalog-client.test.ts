@@ -2,10 +2,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 let token = "one";
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => token, getStoredAuthUser: () => ({ id: token }) }));
-import { cachedCatalog, mergeCatalogRefresh, requestCatalog } from "./project-catalog-client";
+import { cachedCatalog, mergeCatalogRefresh, removeProjectFromCatalog, requestCatalog } from "./project-catalog-client";
 const filters = { companyId: "", search: "", status: "all", framework: "all", kind: "all" };
 beforeEach(() => { token = crypto.randomUUID(); });
 describe("catalog request cache", () => {
+  it("evicts a deleted project from cached pages and ignores it in a response already in flight", async () => {
+    const page = { projects: [{ id: "other" }, { id: "deleted" }], pagination: { nextCursor: "next" } };
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(page)))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })));
+    const head = requestCatalog(filters);
+    await head.promise;
+    head.release();
+    const next = requestCatalog(filters, "next");
+    removeProjectFromCatalog("deleted");
+    const expected = { ...page, projects: [{ id: "other" }] };
+    expect(cachedCatalog(filters)).toEqual(expected);
+    finish(new Response(JSON.stringify(page)));
+    expect(await next.promise).toEqual(expected);
+    next.release();
+  });
+
   it("keeps prefetched pages during a background refresh", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ projects: [], pagination: { nextCursor: "next" } })));
     vi.stubGlobal("fetch", fetch);
