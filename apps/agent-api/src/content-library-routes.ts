@@ -1,16 +1,25 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError } from "@npati/workspace";
-import type { AuthProvider } from "./auth";
+import { AuthenticationError, type AuthProvider } from "./auth";
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
 
 function failure(reply: FastifyReply, error: unknown) {
+  if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Content library request failed";
   return reply.code(/not found/i.test(message) ? 404 : 400).send({ error: { code: "CONTENT_LIBRARY_ERROR", message } });
 }
 
 export function registerContentLibraryRoutes(app: FastifyInstance, auth: AuthProvider, workspace: WorkspaceStore, content: ContentLibraryStore) {
+  app.get("/content/open", async (request, reply) => {
+    try {
+      const context = await auth.authenticate(request);
+      if (!context.permissions.includes("workspace:read")) throw new WorkspaceAccessError("Missing permission: workspace:read");
+      return reply.header("cache-control", "private, no-store").send(await content.open(context));
+    } catch (error) { return failure(reply, error); }
+  });
+
   app.get("/content/overrides", async (request, reply) => {
     try {
       const context = await auth.authenticate(request);

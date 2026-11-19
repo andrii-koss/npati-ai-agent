@@ -11,7 +11,6 @@ export interface ContentItem {
 
 export const STORAGE_DELETED_KEY = "npati_content_deleted_ids_v1";
 export const STORAGE_EDITS_KEY = "npati_content_edits_v1";
-export const STORAGE_CONTENT_ITEMS_KEY = "npati_content_items_cache_v1";
 
 export function getDeletedIds(): string[] {
   try {
@@ -29,25 +28,6 @@ export function getEditsMap(): Record<string, Partial<ContentItem>> {
   } catch {
     return {};
   }
-}
-
-export function getCachedContentItems(): ContentItem[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_CONTENT_ITEMS_KEY) || localStorage.getItem(STORAGE_CONTENT_ITEMS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as ContentItem[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return [];
-}
-
-export function updateCachedContentItems(items: ContentItem[]) {
-  try {
-    const serialized = JSON.stringify(items);
-    sessionStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
-    localStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
-  } catch {}
 }
 
 export function parseChatContentTask(task: string): { title?: string; type?: ContentItem["type"]; task: string } {

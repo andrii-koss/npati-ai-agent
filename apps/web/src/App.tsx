@@ -624,10 +624,12 @@ async function findProjectCompany(projectId: string): Promise<string | null> {
 }
 
 export function App() {
+  const { pathname } = useLocation();
+  const route = pathname.replace(/\/$/, "");
   return (
     <I18nProvider>
       <AuthProvider>
-        <WorkspaceProvider>
+        <WorkspaceProvider deferInitialOverview={route === "/settings/content" || route === "/content"}>
           <ConfirmDialogContainer />
           <Suspense fallback={<div className="workspace" />}>
           <Routes>

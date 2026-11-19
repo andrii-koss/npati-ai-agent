@@ -1,6 +1,6 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
 import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from "./settings-page-cache";
-import { ReactNode, createContext, useContext, useEffect, useState } from "react";
+import { ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { chatOpen, isChatPage } from "./chat-open";
 import { api } from "./workspace-api";
@@ -64,11 +64,12 @@ export function EmptyBusiness({ feature }: { feature: string }) {
   return <Notice><strong>Set up a business first.</strong><span>{feature} are isolated per business, so NPATI needs an active business workspace.</span><Link to="/business">Set up business →</Link></Notice>;
 }
 export const WorkspaceContext = createContext<WorkspaceValue | null>(null);
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+export function WorkspaceProvider({ children, deferInitialOverview = false }: { children: ReactNode; deferInitialOverview?: boolean }) {
   const { token, isLoading: authLoading } = useAuth();
   const [overview, setOverview] = useState<WorkspaceOverview | null>(getInitialWorkspaceOverview);
   const [loading, setLoading] = useState(() => getInitialWorkspaceOverview() === null);
   const [error, setError] = useState("");
+  const initializedToken = useRef<string | null>(null);
   async function refresh(initial = false) {
     const cached = getInitialWorkspaceOverview();
     if (cached) setOverview(previous => previous ?? cached);
@@ -100,12 +101,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     finally { setLoading(false); }
   }
   useEffect(() => {
-    if (authLoading || !token) return;
-    void refresh(true);
+    if (!token) initializedToken.current = null;
+    if (authLoading || !token || deferInitialOverview) return;
+    if (initializedToken.current !== token) {
+      initializedToken.current = token;
+      void refresh(true);
+    }
     const handleBusinessChanged = () => { void refresh(); };
     window.addEventListener("npati:business-changed", handleBusinessChanged);
     return () => window.removeEventListener("npati:business-changed", handleBusinessChanged);
-  }, [authLoading, token]);
+  }, [authLoading, token, deferInitialOverview]);
   async function switchBusiness(id: string) {
     await api("/workspace/current-business", { method: "PUT", body: JSON.stringify({ businessId: id }) });
     await refresh();

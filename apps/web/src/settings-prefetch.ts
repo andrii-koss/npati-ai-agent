@@ -26,6 +26,7 @@ export function prefetchSettingsPage(href: string) {
     "/settings/email": () => import("./EmailSettingsPage"), "/settings/code": () => import("./CodeAgentsPage"),
     "/settings/business": () => import("./business-workspace-page-views"), "/settings/goals": () => import("./GoalsPage"),
     "/settings/memory": () => import("./MemoryPage"), "/settings/automations": () => import("./AutomationsPage"),
+    "/settings/content": () => import("./ContentPage"),
     "/settings/activity": () => import("./ActivityPage"),
     "/settings/email/inbox": () => import("./EmailInboxPage"),
   };
@@ -38,7 +39,7 @@ export function prefetchSettingsPage(href: string) {
       }
       return;
     }
-    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations") return;
+    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content") return;
     const companies = await listProjectCompanies();
     if (getStoredAuthToken() !== token) return;
     writeCachedCompanies(companies);

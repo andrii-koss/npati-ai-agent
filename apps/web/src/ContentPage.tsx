@@ -1,5 +1,5 @@
 import { PageGuideLink } from "./PageGuideLink";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
@@ -8,15 +8,11 @@ import {
   type ContentItem,
   STORAGE_DELETED_KEY,
   STORAGE_EDITS_KEY,
-  STORAGE_CONTENT_ITEMS_KEY,
   getDeletedIds,
   getEditsMap,
-  getCachedContentItems,
-  updateCachedContentItems,
-  parseChatContentTask,
 } from "./content-page-types";
 import { ContentPageViewer } from "./content-page-viewer";
-import { listProjectCompanies } from "./website-builder-cache";
+import { getCachedContentItems, readContentItems, updateCachedContentItems } from "./content-page-read";
 
 export type { ContentItem };
 
@@ -31,6 +27,8 @@ export function ContentPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<ContentItem[]>(getCachedContentItems);
   const [loading, setLoading] = useState(() => getCachedContentItems().length === 0);
+  const [loadError, setLoadError] = useState("");
+  const contentVersion = useRef(0);
   const [search, setSearch] = useState("");
   const [selectedType, setSelectedType] = useState<"all" | "article" | "seo_structure" | "social_post" | "brief">("all");
   const [selectedItem, setSelectedItem] = useState<ContentItem | null>(() => getCachedContentItems()[0] || null);
@@ -46,79 +44,20 @@ export function ContentPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    const headers: HeadersInit = {};
+    let active = true;
     const token = getStoredAuthToken();
-    if (token) headers["authorization"] = `Bearer ${token}`;
-
-    // Every company page: content of a company beyond the first ones must stay visible, editable and exportable.
-    listProjectCompanies()
-      .then(async (companies) => {
-        const deletedIds = new Set(getDeletedIds());
-        const editsMap = getEditsMap();
-        const overridesResponse = await fetch("/api/content/overrides", { headers });
-        const overrides = overridesResponse.ok
-          ? ((await overridesResponse.json()) as { overrides?: Record<string, { title?: string; type?: ContentItem["type"]; content?: string; deleted?: boolean }> }).overrides ?? {}
-          : {};
-
-        const loadCompanyContent = async (company: { id: string; name: string }) => {
-          try {
-            const runRes = await fetch(`/api/companies/${company.id}/runs?limit=100&content=1`, { headers });
-            if (!runRes.ok) return [];
-            const runData = (await runRes.json()) as {
-              runs?: Array<{ id: string; task: string; result?: string; createdAt: string; status: string }>;
-            };
-            const rows: ContentItem[] = [];
-            for (const r of runData.runs ?? []) {
-              if (r.result && r.status === "completed") {
-                if (deletedIds.has(r.id) || overrides[r.id]?.deleted) continue;
-
-                const chatContent = parseChatContentTask(r.task);
-                let type: ContentItem["type"] = chatContent.type ?? "article";
-                const lowerTask = chatContent.task.toLowerCase();
-                if (lowerTask.includes("seo") || lowerTask.includes("keyword") || lowerTask.includes("structure")) {
-                  type = "seo_structure";
-                } else if (lowerTask.includes("social") || lowerTask.includes("post") || lowerTask.includes("tweet") || lowerTask.includes("linkedin")) {
-                  type = "social_post";
-                } else if (lowerTask.includes("brief") || lowerTask.includes("plan") || lowerTask.includes("strategy") || lowerTask.includes("roadmap")) {
-                  type = "brief";
-                }
-
-                const edited = { ...editsMap[r.id], ...overrides[r.id] };
-                rows.push({
-                  id: r.id,
-                  title: edited?.title || chatContent.title || (chatContent.task.length > 70 ? `${chatContent.task.slice(0, 70)}…` : chatContent.task),
-                  type: (edited?.type as ContentItem["type"]) || type,
-                  content: edited?.content !== undefined ? edited.content : r.result,
-                  sourceRunId: r.id,
-                  companyId: company.id,
-                  companyName: company.name,
-                  createdAt: r.createdAt,
-                });
-              }
-            }
-            return rows;
-          } catch {
-            return [];
-          }
-        };
-
-        const allResults: ContentItem[][] = [];
-        for (let offset = 0; offset < companies.length; offset += 4) {
-          allResults.push(...await Promise.all(companies.slice(offset, offset + 4).map(loadCompanyContent)));
-        }
-        const contentRows = allResults.flat();
-
-        setItems(contentRows);
-        updateCachedContentItems(contentRows);
-        setSelectedItem((prev) => {
-          if (prev && contentRows.some((c) => c.id === prev.id)) {
-            return contentRows.find((c) => c.id === prev.id) || prev;
-          }
-          return contentRows[0] || null;
-        });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const version = contentVersion.current;
+    void readContentItems().then(rows => {
+      if (!active || getStoredAuthToken() !== token || version !== contentVersion.current) return;
+      setItems(rows);
+      updateCachedContentItems(rows);
+      setSelectedItem(current => rows.find(row => row.id === current?.id) ?? rows[0] ?? null);
+    }).catch(error => {
+      if (active && getStoredAuthToken() === token) setLoadError(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, []);
 
   // Synchronize edit fields when selectedItem changes
@@ -131,6 +70,8 @@ export function ContentPage() {
     setIsEditing(false);
     setIsExpanded(false);
   }, [selectedItem?.id]);
+
+  const showCounts = items.length > 0 || (!loading && !loadError);
 
   // Category counts
   const categoryCounts = useMemo(() => {
@@ -216,6 +157,7 @@ export function ContentPage() {
         body: JSON.stringify({ title: trimmedTitle, type: editType, content: editContent }),
       });
       if (!response.ok) throw new Error("Could not save content changes");
+      contentVersion.current++;
       setItems((prev) => {
         const next = prev.map((i) => (i.id === selectedItem.id ? updated : i));
         updateCachedContentItems(next);
@@ -258,6 +200,7 @@ export function ContentPage() {
         headers: getStoredAuthToken() ? { authorization: `Bearer ${getStoredAuthToken()}` } : {},
       });
       if (!response.ok) throw new Error("Could not delete content");
+      contentVersion.current++;
     } catch {
       setToast(t("contentPage.toast.deleteError"));
       setTimeout(() => setToast(null), 2500);
@@ -305,7 +248,7 @@ export function ContentPage() {
   };
 
   return (
-    <main className="content-hub-container">
+    <main className="content-hub-container" aria-busy={loading}>
       {/* Toast Notification */}
       {toast && (
         <div className="content-toast" role="status" aria-live="polite">
@@ -367,7 +310,7 @@ export function ContentPage() {
             className={`content-type-pill ${selectedType === "all" ? "active" : ""}`}
             onClick={() => setSelectedType("all")}
           >
-            {t("contentPage.tabs.all")} <span className="pill-counter">{categoryCounts.all}</span>
+            {t("contentPage.tabs.all")} {showCounts && <span className="pill-counter">{categoryCounts.all}</span>}
           </button>
           <button
             type="button"
@@ -376,7 +319,7 @@ export function ContentPage() {
             className={`content-type-pill ${selectedType === "article" ? "active" : ""}`}
             onClick={() => setSelectedType("article")}
           >
-            {t("contentPage.tabs.articles")} <span className="pill-counter">{categoryCounts.article}</span>
+            {t("contentPage.tabs.articles")} {showCounts && <span className="pill-counter">{categoryCounts.article}</span>}
           </button>
           <button
             type="button"
@@ -385,7 +328,7 @@ export function ContentPage() {
             className={`content-type-pill ${selectedType === "seo_structure" ? "active" : ""}`}
             onClick={() => setSelectedType("seo_structure")}
           >
-            {t("contentPage.tabs.seoBlueprints")} <span className="pill-counter">{categoryCounts.seo_structure}</span>
+            {t("contentPage.tabs.seoBlueprints")} {showCounts && <span className="pill-counter">{categoryCounts.seo_structure}</span>}
           </button>
           <button
             type="button"
@@ -394,7 +337,7 @@ export function ContentPage() {
             className={`content-type-pill ${selectedType === "social_post" ? "active" : ""}`}
             onClick={() => setSelectedType("social_post")}
           >
-            {t("contentPage.tabs.socialPosts")} <span className="pill-counter">{categoryCounts.social_post}</span>
+            {t("contentPage.tabs.socialPosts")} {showCounts && <span className="pill-counter">{categoryCounts.social_post}</span>}
           </button>
           <button
             type="button"
@@ -403,7 +346,7 @@ export function ContentPage() {
             className={`content-type-pill ${selectedType === "brief" ? "active" : ""}`}
             onClick={() => setSelectedType("brief")}
           >
-            {t("contentPage.tabs.briefsPlans")} <span className="pill-counter">{categoryCounts.brief}</span>
+            {t("contentPage.tabs.briefsPlans")} {showCounts && <span className="pill-counter">{categoryCounts.brief}</span>}
           </button>
         </div>
 
@@ -432,11 +375,8 @@ export function ContentPage() {
         </div>
       </div>
 
-      {items.length === 0 && loading ? (
-        <div role="status" aria-live="polite" style={{ padding: "16px 0", color: "var(--npati-gray-500)", fontSize: 13 }}>
-          {t("common.loading")}
-        </div>
-      ) : items.length === 0 ? (
+      {loadError && <div className="workspace-notice error" role="alert">{loadError}</div>}
+      {items.length === 0 && (loading || loadError) ? null : items.length === 0 ? (
         <div className="automations-empty-card content-empty-card">
           <div className="automations-empty-icon">📝</div>
           <h3>{t("contentPage.empty.readyTitle")}</h3>

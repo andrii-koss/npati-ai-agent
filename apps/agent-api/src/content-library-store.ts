@@ -29,6 +29,17 @@ function parse(value: unknown): Record<string, ContentLibraryOverride> {
 export class ContentLibraryStore {
   constructor(private readonly store: WorkspaceStore) {}
 
+  async open(context: AuthContext) {
+    const { runs, overrides } = await this.store.readContentLibrary(context, settingKey);
+    const saved = parse(overrides);
+    return { runs: runs.flatMap(run => {
+      const override = saved[run.id];
+      if (override?.companyId !== run.companyId) return [run];
+      if (override.deleted) return [];
+      return [{ ...run, override: { title: override.title, type: override.type, content: override.content } }];
+    }) };
+  }
+
   async list(context: AuthContext): Promise<Record<string, ContentLibraryOverride>> {
     return parse((await this.store.getUserSetting(context, settingKey))?.value);
   }

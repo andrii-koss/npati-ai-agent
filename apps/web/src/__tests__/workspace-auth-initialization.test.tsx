@@ -22,3 +22,25 @@ it("waits for sign-in restoration, then loads workspace with the restored token"
   expect(fetch.mock.calls[0]).toEqual(["/api/workspace/context", expect.objectContaining({ headers: { authorization: "Bearer restored-test-token" } })]);
   expect(host.textContent).toBe("ready");
 });
+
+it("defers the workspace read on Content and initializes it when leaving", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  auth.token = "content-only-test-token";
+  auth.isLoading = false;
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ businesses: [], currentBusiness: null })));
+  vi.stubGlobal("fetch", fetch);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  cleanup = () => act(async () => root.unmount());
+  const render = (defer: boolean) => act(async () => {
+    root.render(<WorkspaceProvider deferInitialOverview={defer}><div /></WorkspaceProvider>);
+  });
+  await render(true);
+  expect(fetch).not.toHaveBeenCalled();
+  await render(false);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await render(true);
+  await render(false);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});

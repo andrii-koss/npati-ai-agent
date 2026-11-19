@@ -378,8 +378,10 @@ describe("workspace resources from chat", () => {
     const company = await store.createCompany(alice, { name: "Content API Studio" }, "content-api-company");
     const agent = await store.createCompanyAgent(alice, company.id, { name: "Writer", role: "Writer" }, "content-api-agent");
     await store.setCompanyMainAgent(alice, company.id, agent.id, company.revision);
-    const created = await store.createCompanyAgentRun(alice, company.id, { task: "Write article", requestedMode: "auto" }, "content-api-run");
+    const created = await store.createCompanyAgentRun(alice, company.id, { task: "[NPATI_CONTENT:article:VGl0bGU] Write article", requestedMode: "auto" }, "content-api-run");
     await store.updateCompanyAgentRun(alice, company.id, created.run.id, { status: "completed", result: "Original" });
+    const chat = await store.createCompanyAgentRun(alice, company.id, { task: "Answer a delegated question", requestedMode: "auto" }, "content-api-chat");
+    await store.updateCompanyAgentRun(alice, company.id, chat.run.id, { status: "completed", result: "Chat answer" });
     const aiEngine: AIEngine = {
       chat: async () => ({ content: "ok" }), async *stream() { yield "ok"; }, listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
@@ -392,10 +394,17 @@ describe("workspace resources from chat", () => {
       expect(update.statusCode).toBe(200);
       const list = await app.inject({ method: "GET", url: "/content/overrides" });
       expect(list.json().overrides[created.run.id]).toEqual(expect.objectContaining({ title: "Edited", type: "seo_structure", content: "Revised", deleted: false }));
+      const open = await app.inject({ method: "GET", url: "/content/open" });
+      expect(open.statusCode).toBe(200);
+      expect(open.json().runs).toEqual([expect.objectContaining({
+        id: created.run.id, companyId: company.id, companyName: company.name,
+        override: { title: "Edited", type: "seo_structure", content: "Revised" },
+      })]);
       const remove = await app.inject({ method: "DELETE", url: `/companies/${company.id}/content/${created.run.id}` });
       expect(remove.statusCode).toBe(204);
       const after = await app.inject({ method: "GET", url: "/content/overrides" });
       expect(after.json().overrides[created.run.id].deleted).toBe(true);
+      expect((await app.inject({ method: "GET", url: "/content/open" })).json()).toEqual({ runs: [] });
     } finally { await app.close(); }
   });
 

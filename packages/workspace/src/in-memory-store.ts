@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { contentRunsPerCompany, type ContentLibraryRead } from "./content-library-read";
 import { countMemoryTypes, MEMORY_CATEGORIES, MEMORY_PAGE_SIZE, memoryPageCursor, type MemoryPageData, type MemoryPageQuery } from "./memory-page";
 import { GOALS_PAGE_SIZE, goalPageCursor, type GoalCounts, type GoalPage, type GoalPageQuery } from "./goals-page";
 import { InMemoryConversationResearch } from "./conversation-research-evidence";
@@ -271,6 +272,27 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async health() { return "ok" as const; }
 
     async getUserSetting(context: AuthContext, key: string) { return getUserSetting(this.companyState(), context, key); }
+  async readContentLibrary(context: AuthContext, settingsKey: string): Promise<ContentLibraryRead> {
+    const settings = await this.getUserSetting(context, settingsKey);
+    const companies = [...this.companies.values()]
+      .filter(company => company.workspaceId === context.workspaceId && company.userId === context.userId
+        && (!context.companyId || company.id === context.companyId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const byCompany = new Map<string, CompanyAgentRun[]>();
+    for (const run of this.companyRuns.values()) {
+      if (run.workspaceId !== context.workspaceId || !run.task.startsWith("[NPATI_CONTENT:")) continue;
+      const runs = byCompany.get(run.companyId);
+      if (runs) runs.push(run);
+      else byCompany.set(run.companyId, [run]);
+    }
+    const runs = companies.flatMap(company => (byCompany.get(company.id) ?? [])
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, contentRunsPerCompany)
+      .flatMap(run => run.status === "completed" && run.result ? [{
+        id: run.id, companyId: company.id, companyName: company.name, task: run.task, result: run.result, createdAt: run.createdAt,
+      }] : []));
+    return { runs, overrides: settings?.value ?? null };
+  }
 
     async setUserSetting(context: AuthContext, key: string, value: unknown, expectedRevision: number) { return setUserSetting(this.companyState(), context, key, value, expectedRevision); }
 
