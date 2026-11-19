@@ -23,9 +23,10 @@ async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<t
     if (url.endsWith("/sessions/s")) return json({ id: "s", status: "active", mode: "edit", revision: 7 });
     if (url.includes("/sessions?")) return json({ sessions: [{ id: "s", projectId: "pr", mode: "edit", status: "active" }] });
     if (url.endsWith("/active-context")) return json({ persisted: true });
-    if (url.includes("/files/tree")) return json({ files: [{ path: "a.ts", type: "file" }, { path: "b.ts", type: "file" }] });
+    if (url.includes("/files/tree")) return json({ files: [{ path: "a.ts", type: "file" }, { path: "b.ts", type: "file" }, { path: "index.html", type: "file" }] });
     if (url.includes("/files/read")) {
       if (url.includes("a.ts")) return new Promise(resolve => { releaseA = () => resolve(json({ path: "a.ts", content: "LATE_A_CONTENT", revision: "a-revision" })); });
+      if (url.includes("index.html")) return json({ path: "index.html", content: "<h1>Site entry point</h1>", revision: "index-revision" });
       return json({ path: "b.ts", content: "CURRENT_B_CONTENT", revision: "b-revision" });
     }
     if (url.endsWith("/files/write")) return json({ error: { code: "revision_conflict", message: "File changed by agent" } }, 409);
@@ -102,4 +103,21 @@ it("opens the file named in the address after a reload", async () => {
     expect(fetcher.mock.calls.some(([url]) => String(url).includes("/files/read") && String(url).includes("b.ts"))).toBe(true);
     expect(host.querySelector<HTMLTextAreaElement>(".project-file-browser-textarea")?.value ?? host.textContent).toContain("CURRENT_B_CONTENT");
   }, "/code/co/pr?session=s&run=r&file=b.ts");
+});
+
+it("opens the Files & Code section with the site's entry point selected", async () => {
+  await view(async ({ host }) => {
+    expect(button(host, "Files & Code").getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
+    expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
+  }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
+});
+
+it("shows the selected terminal at the top of the workspace content", async () => {
+  await view(async ({ host, fetcher }) => {
+    expect(button(host, "Code changes").getAttribute("aria-selected")).toBe("true");
+    expect(button(host, "Terminal").getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector(".code-file-tree")).toBeNull();
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith("/projects/pr/terminal/events"))).toBe(true);
+  }, "/code/co/pr?session=s&run=r&tab=terminal");
 });

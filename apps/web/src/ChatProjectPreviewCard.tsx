@@ -726,6 +726,7 @@ export function ChatProjectPreviewCard({
               previewUrl={previewUrl}
               isUk={isUk}
               codeWorkspaceUrl={codeWorkspaceUrl}
+              projectFramework={card.framework}
               terminalUrl={terminalUrl}
               deviceMode={deviceMode}
               setDeviceMode={setDeviceMode}

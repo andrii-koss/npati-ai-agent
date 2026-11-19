@@ -24,6 +24,7 @@ export type DeviceMode = "desktop" | "tablet" | "mobile";
 
 export interface LivePreviewHeaderProps {
   projectName: string;
+  projectFramework?: string;
   runtimeStatus: PreviewRuntimeStatus;
   statusLabel?: string;
   previewUrl: string | null;
@@ -40,6 +41,7 @@ export interface LivePreviewHeaderProps {
 
 export function LivePreviewHeader({
   projectName,
+  projectFramework,
   runtimeStatus,
   statusLabel,
   previewUrl,
@@ -108,9 +110,12 @@ export function LivePreviewHeader({
   }
 
   function handleOpenCode() {
-    if (codeWorkspaceUrl) {
-      navigate(codeWorkspaceUrl);
-    }
+    if (!codeWorkspaceUrl) return;
+    const [path, query] = codeWorkspaceUrl.split("?");
+    const params = new URLSearchParams(query);
+    params.set("view", "files");
+    if (/^(?:HTML\/CSS|static)$/i.test(projectFramework ?? "")) params.set("file", "index.html");
+    navigate(`${path}?${params}`);
   }
 
   function handleOpenTerminal() {

@@ -98,7 +98,10 @@ function CodeWorkspaceContent() {
     return () => { active = false; window.clearInterval(timer); };
   }, [tab, companyId, projectId]);
   const [mobileView, setMobileView] = useState<MobileView>("all");
-  const [activeTab, setActiveTab] = useState<"all" | "workspace" | "files" | "changes" | "metrics">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "workspace" | "files" | "changes" | "metrics">(() => {
+    if (searchParams.get("tab") === "terminal") return "changes";
+    return searchParams.get("view") === "files" ? "files" : "all";
+  });
 
   const [changes, setChanges] = useState<ChangesResponse | null>(null);
   const [changesError, setChangesError] = useState<string | null>(null);

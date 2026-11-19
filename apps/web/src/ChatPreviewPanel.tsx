@@ -142,7 +142,7 @@ function PreviewPanel({ card, open, busy, thumbnail, onClose }: { card: PreviewP
     <div className={open ? `project-chat-preview-layer ${isFullscreen ? "is-fullscreen" : ""}` : "project-chat-preview-warm"} aria-hidden={!open}>
       <aside className={`project-chat-preview-drawer ${isFullscreen ? "is-fullscreen" : ""}`} role="complementary" aria-label={`Preview of ${card.name}`}>
         {open && !isFullscreen && <LivePreviewSplitResizer />}
-        <LivePreviewHeader projectName={card.name} runtimeStatus={status} previewUrl={urlRef.current || null} isUk={isUk} codeWorkspaceUrl={code} terminalUrl={`${code}${code.includes("?") ? "&" : "?"}tab=terminal`} deviceMode={deviceMode} setDeviceMode={setDeviceMode} isFullscreen={isFullscreen} setIsFullscreen={setIsFullscreen} onRefresh={refresh} onClose={onClose} />
+        <LivePreviewHeader projectName={card.name} projectFramework={card.framework} runtimeStatus={status} previewUrl={urlRef.current || null} isUk={isUk} codeWorkspaceUrl={code} terminalUrl={`${code}${code.includes("?") ? "&" : "?"}tab=terminal`} deviceMode={deviceMode} setDeviceMode={setDeviceMode} isFullscreen={isFullscreen} setIsFullscreen={setIsFullscreen} onRefresh={refresh} onClose={onClose} />
         <div className="project-chat-preview-body" data-device-mode={deviceMode}>
           {notice && !error && <div className="project-chat-preview-notice" role="status">{notice}</div>}
           <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>

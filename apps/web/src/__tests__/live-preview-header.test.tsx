@@ -127,13 +127,13 @@ describe("LivePreviewHeader", () => {
   });
 
   it("navigates to code workspace and terminal", async () => {
-    await renderHeader();
+    await renderHeader({ projectFramework: "HTML/CSS", codeWorkspaceUrl: "/settings/code/comp1/proj1?session=session1" });
 
     const codeBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Open project code"]')!;
     await act(async () => {
       codeBtn.click();
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/settings/code/comp1/proj1");
+    expect(mockNavigate).toHaveBeenCalledWith("/settings/code/comp1/proj1?session=session1&view=files&file=index.html");
 
     const terminalBtn = host.querySelector<HTMLButtonElement>('button[aria-label="Open project terminal"]')!;
     await act(async () => {
