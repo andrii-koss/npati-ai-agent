@@ -4,7 +4,6 @@ import { writeCachedCompanies } from "./active-company";
 import { loadCompanyScopes } from "./company-scope";
 import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from "./settings-page-cache";
 import type { WorkspaceOverview } from "./business-workspace-shared";
-import { inboxThreadsKey, readInboxThreads, type InboxFilters } from "./inbox-cache";
 
 type Row = Record<string, unknown>;
 const warming = new Map<string, number>();
@@ -39,19 +38,12 @@ export function prefetchSettingsPage(href: string) {
       }
       return;
     }
-    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content" || path === "/settings/email") return;
+    if (path === "/settings/goals" || path === "/settings/memory" || path === "/settings/automations" || path === "/settings/content" || path === "/settings/email" || path === "/settings/email/inbox") return;
     const companies = await listProjectCompanies();
     if (getStoredAuthToken() !== token) return;
     writeCachedCompanies(companies);
     const ids = companies.slice(0, 4).map(company => company.id);
-    if (path === "/settings/email/inbox") {
-      const filters: InboxFilters = { companyId: requestedCompany, folder: "inbox", accountId: "all", status: "all", priority: "all", search: "" };
-      const key = inboxThreadsKey(filters);
-      if (readSettingsSnapshot(key)) return;
-      await readInboxThreads(requestedCompany === "all" ? ids : [requestedCompany], filters, {
-        isActive: () => getStoredAuthToken() === token, onProgress: threads => merge(key, threads as unknown as Row[]),
-      });
-    } else if (path === "/settings/code") {
+    if (path === "/settings/code") {
       if (readSettingsSnapshot("code:all")) return;
       await loadCompanyScopes(ids, async id => {
         const [projects, sessions] = await Promise.all([apiFetch<{ projects: Row[] }>(`/companies/${id}/code/projects?includeArchived=true`), apiFetch<{ sessions: Row[] }>(`/companies/${id}/code/sessions`)]);

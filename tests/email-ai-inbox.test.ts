@@ -754,7 +754,11 @@ describe("Email / AI Inbox Module", () => {
     const app = Fastify();
     registerEmailInboxRoutes(app, {
       auth: { authenticate: async () => mockAuth },
-      store: { getCompany: async () => ({ id: "compose-company", name: "Compose Company" }) } as any,
+      store: {
+        getCompany: async () => ({ id: "compose-company", name: "Compose Company" }),
+        listCompanies: async () => ({ items: [{ id: "compose-company", name: "Compose Company" }], nextCursor: null }),
+        listCompanyAgentRuns: async () => [],
+      } as any,
       repo: isolatedRepo,
     });
 
@@ -814,6 +818,17 @@ describe("Email / AI Inbox Module", () => {
     });
     expect(countsResponse.statusCode).toBe(200);
     expect(countsResponse.json().counts).toMatchObject({ inbox: 2, sent: 1 });
+
+    const open = await app.inject({ method: "GET", url: "/email/inbox/open" });
+    expect(open.statusCode).toBe(200);
+    expect(open.json()).toMatchObject({
+      companies: [{ id: "compose-company", name: "Compose Company" }],
+      accounts: [{ id: account.id, companyId: "compose-company" }],
+      counts: { inbox: 2, sent: 1, drafts: 0, archived: 0, spam: 0 },
+      threads: [{ id: composed.thread.id }],
+      detail: { thread: { id: composed.thread.id }, messages: history, logs: [] },
+    });
+    expect(open.json().accounts[0]).not.toHaveProperty("imapConfig");
 
     const deleted = await app.inject({
       method: "DELETE", url: `/companies/compose-company/email-inbox/threads/${composed.thread.id}`,

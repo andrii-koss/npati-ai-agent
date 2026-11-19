@@ -1,13 +1,10 @@
 import { readSettingsSnapshot, requestSettingsRead, writeSettingsSnapshot } from "./settings-page-cache";
-import { emptyInboxCounts, inboxThreadsKey, inboxCountsKey, readInboxThreads, readInboxCounts, sumInboxCounts, type InboxFilters, type InboxCountPage } from "./inbox-cache";
+import { inboxThreadsKey, inboxCountsKey, inboxDetailKey, readInboxOpen, type InboxFilters, type InboxFolderCounts, type InboxDetail } from "./inbox-cache";
 import { ALL_COMPANIES } from "./company-scope";
-import { readEmailCollection } from "./email-company-scope";
-import { listProjectCompanies } from "./website-builder-cache";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
-import { useWorkspace } from "./BusinessWorkspace";
+import { readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { Company, EmailAccount, EmailThread, EmailMessage, ContactDetails, getStatusLabel, sanitizeEmailHtml, CustomerContext, EmailNotification, EmailAuditEntry, api, fileToEmailAttachment, EmailImageAttachment } from "./email-inbox-shared";
@@ -28,15 +25,14 @@ import {
   useInboxResizing,
 } from "./email-inbox";
 
+const FOLDER_PREFETCH_DELAY_MS = 120;
+const FOLDER_PREFETCH_MAX_AGE_MS = 4_000;
 
 export function EmailInboxPage() {
   const { t, language } = useTranslation();
-  const { overview } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCompanies = useMemo(() => readCachedCompanies<Company>(), []);
   const [companies, setCompanies] = useState<Company[]>(initialCompanies);
-  const [companiesReady, setCompaniesReady] = useState(initialCompanies.length > 0);
-  const companyIdsKey = companies.map(company => company.id).join("\0");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
     const requested = searchParams.get("company");
     return requested || ALL_COMPANIES;
@@ -47,10 +43,9 @@ export function EmailInboxPage() {
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
 
   const [folder, setFolder] = useState<EmailFolder>("inbox");
-  const [folderCounts, setFolderCounts] = useState(() => sumInboxCounts(readSettingsSnapshot<InboxCountPage[]>(inboxCountsKey(selectedCompanyId, "all")) ?? []));
+  const [folderCounts, setFolderCounts] = useState(() => readSettingsSnapshot<InboxFolderCounts>(inboxCountsKey(selectedCompanyId, "all")) ?? null);
   const [threads, setThreads] = useState<EmailThread[]>(initialThreads ?? []);
   const [threadsLoading, setThreadsLoading] = useState(!initialThreads);
-  const threadsRef = useRef(threads); threadsRef.current = threads;
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreads?.[0]?.id ?? null);
   const selectedThreadRef = useRef(selectedThreadId); selectedThreadRef.current = selectedThreadId;
   const threadCompanyId = threads.find(thread => thread.id === selectedThreadId)?.companyId || (selectedCompanyId === ALL_COMPANIES ? "" : selectedCompanyId);
@@ -60,7 +55,6 @@ export function EmailInboxPage() {
   const [customerContext, setCustomerContext] = useState<CustomerContext>({ previousThreads: [], tasks: [] });
   const [notifications, setNotifications] = useState<EmailNotification[]>(() => readSettingsSnapshot<EmailNotification[]>(`inbox-notifications:${selectedCompanyId}`) ?? []);
   const [auditHistory, setAuditHistory] = useState<EmailAuditEntry[]>([]);
-  const [mailboxRefreshVersion, setMailboxRefreshVersion] = useState(0);
   const [threadOpenVersion, setThreadOpenVersion] = useState(0);
   const [imagePreview, setImagePreview] = useState<{ source: string; filename: string } | null>(null);
   const threadRequestIdRef = useRef(0);
@@ -73,9 +67,18 @@ export function EmailInboxPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const filters: InboxFilters = { companyId: selectedCompanyId, folder, accountId: selectedAccountId, status: statusFilter, priority: priorityFilter, search: searchQuery };
   const threadSnapshotKey = inboxThreadsKey(filters);
-  const loadedThreadsKey = useRef(threadSnapshotKey);
-  const previousCompanyScope = useRef(selectedCompanyId);
-  const accountCompanyId = selectedAccountId === "all" ? "" : accounts.find(account => account.id === selectedAccountId)?.companyId ?? "";
+  const [readyFilter, setReadyFilter] = useState<string | null>(null);
+  const readyFilterRef = useRef(readyFilter);
+  const providedDetail = useRef<string | null>(null);
+  const pendingMailbox = useRef<string | null>(null);
+  const folderHoverTimer = useRef<number | undefined>(undefined);
+  const prefetchedFolder = useRef<{
+    key: string;
+    owner: ReturnType<typeof getStoredAuthToken>;
+    startedAt: number;
+    response: ReturnType<typeof readInboxOpen>;
+  } | null>(null);
+  const locationQuery = useRef(searchParams); locationQuery.current = searchParams;
 
   // Composer State
   const [replyText, setReplyText] = useState("");
@@ -83,6 +86,7 @@ export function EmailInboxPage() {
   const [composerMode, setComposerMode] = useState<"reply" | "reply_all" | "forward">("reply");
   const [forwardTo, setForwardTo] = useState("");
   const [draftEditing, setDraftEditing] = useState(false);
+  const draftEditingRef = useRef(draftEditing); draftEditingRef.current = draftEditing;
   const [draftText, setDraftText] = useState("");
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
   const [draftIsAiGenerated, setDraftIsAiGenerated] = useState(false);
@@ -225,65 +229,6 @@ export function EmailInboxPage() {
     }
   }
 
-  // Load companies
-  useEffect(() => {
-    listProjectCompanies()
-      .then((list) => {
-        setCompanies(list); setCompaniesReady(true);
-        writeCachedCompanies(list);
-        const requested = searchParams.get("company");
-        const sel = requested === "personal"
-          ? "personal"
-          : requested && requested !== ALL_COMPANIES ? chooseAvailableCompanyId(list, { requested, fallback: "personal" }) : ALL_COMPANIES;
-        if (sel !== selectedCompanyId) {
-          setSelectedCompanyId(sel);
-          if (sel !== ALL_COMPANIES) writeActiveCompanyId(sel === "personal" ? "" : sel);
-        }
-        if (requested) {
-          const next = new URLSearchParams(searchParams);
-          next.delete("company");
-          setSearchParams(next, { replace: true });
-        }
-      })
-      .catch((e) => setNotice(e.message));
-  }, []);
-
-  // Mailbox choices render independently of notification reads.
-  useEffect(() => {
-    if (!selectedCompanyId || !companiesReady) return;
-    let active = true;
-    const ids = selectedCompanyId === ALL_COMPANIES ? companies.map(company => company.id) : [selectedCompanyId];
-    const cached = readSettingsSnapshot<EmailAccount[]>(`email-accounts:${selectedCompanyId}`);
-    setAccounts(cached ?? []);
-    const publish = (records: EmailAccount[], complete = false) => {
-      if (!active) return;
-      setAccounts(records); writeSettingsSnapshot(`email-accounts:${selectedCompanyId}`, records);
-      const requested = searchParams.get("account");
-      if (requested && !records.some(account => account.id === requested) && !complete) return;
-      const initial = requested && records.some(account => account.id === requested) ? requested : records[0]?.id;
-      if (initial) setComposeAccountId(previous => previous || initial);
-      if (initial && searchParams.get("compose") === "1") { setComposeOpen(true); setSearchParams({}, { replace: true }); }
-    };
-    void readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts", { initial: cached, isActive: () => active, onProgress: records => publish(records) })
-      .then(records => publish(records, true)).catch(error => { if (active && error.name !== "AbortError") setNotice(error.message); });
-    return () => { active = false; };
-  }, [selectedCompanyId, companyIdsKey, companiesReady]);
-
-  useEffect(() => {
-    if (!selectedCompanyId || !companiesReady) return;
-    let active = true;
-    const ids = selectedCompanyId === ALL_COMPANIES ? companies.map(company => company.id) : [selectedCompanyId];
-    const key = `inbox-notifications:${selectedCompanyId}`;
-    const cached = readSettingsSnapshot<EmailNotification[]>(key);
-    setNotifications(cached ?? []);
-    const publish = (records: EmailNotification[]) => { if (active) { setNotifications(records); writeSettingsSnapshot(key, records); } };
-    const timer = setTimeout(() => {
-      void readEmailCollection<EmailNotification>(ids, "email-inbox/notifications", "notifications", { initial: cached, isActive: () => active, onProgress: publish })
-        .then(publish).catch(() => undefined);
-    }, 200);
-    return () => { active = false; clearTimeout(timer); };
-  }, [selectedCompanyId, companyIdsKey, companiesReady]);
-
   async function openNotification(notification: EmailNotification) {
     if (notification.threadId) {
       if (!threads.some(thread => thread.id === notification.threadId) && notification.companyId) setSelectedCompanyId(notification.companyId);
@@ -298,7 +243,7 @@ export function EmailInboxPage() {
   function openThread(thread: EmailThread) {
     setSelectedThreadId(thread.id);
     setThreadOpenVersion((current) => current + 1);
-    setMailboxRefreshVersion((current) => current + 1);
+
     if (thread.unreadCount <= 0) return;
     const unreadCount = thread.unreadCount;
     setThreads((current) => {
@@ -306,7 +251,7 @@ export function EmailInboxPage() {
       writeSettingsSnapshot(inboxThreadsKey(filters), next);
       return next;
     });
-    setFolderCounts((current) => ({ ...current, inbox: Math.max(0, current.inbox - unreadCount) }));
+    setFolderCounts((current) => current && ({ ...current, inbox: Math.max(0, current.inbox - unreadCount) }));
     void api<{ thread: EmailThread }>(
       `/companies/${thread.companyId || selectedCompanyId}/email-inbox/threads/${thread.id}`,
       { method: "PATCH", body: JSON.stringify({ unreadCount: 0 }) }
@@ -318,13 +263,20 @@ export function EmailInboxPage() {
     });
   }
 
-  // Reset thread selection when mailbox scope / company changes
-  useEffect(() => {
-    if (previousCompanyScope.current === selectedCompanyId) return;
-    previousCompanyScope.current = selectedCompanyId;
-    threadRequestIdRef.current += 1;
-    deletedThreadIdsRef.current.clear();
-    setSelectedThreadId(null);
+  function applyDetail(result: InboxDetail, companyId: string, preserveDraft = false) {
+    setActiveThread({ ...result.thread, companyId });
+    setMessages(result.messages);
+    setContact(result.contact);
+    setCustomerContext(result.customerContext);
+    setAuditHistory(result.logs);
+    if (preserveDraft) return;
+    const draft = [...result.messages].reverse().find(message => message.isDraft);
+    setDraftMessageId(draft?.id ?? null);
+    setDraftText(draft?.bodyText ?? "");
+    setDraftIsAiGenerated(draft?.isAiGenerated ?? false);
+  }
+
+  function clearDetail() {
     setActiveThread(null);
     setMessages([]);
     setContact(null);
@@ -332,91 +284,149 @@ export function EmailInboxPage() {
     setAuditHistory([]);
     setDraftMessageId(null);
     setDraftText("");
-  }, [selectedCompanyId]);
+    setDraftIsAiGenerated(false);
+  }
 
-  // Paint ready companies now; folder counters and other companies refresh independently.
+  function cancelFolderHover() {
+    window.clearTimeout(folderHoverTimer.current);
+  }
+
+  function prefetchFolder(nextFolder: EmailFolder) {
+    cancelFolderHover();
+    if (nextFolder === folder || readyFilter !== threadSnapshotKey) return;
+    const nextFilters = { ...filters, folder: nextFolder };
+    const key = inboxThreadsKey(nextFilters);
+    if (readSettingsSnapshot<EmailThread[]>(key)) return;
+
+    folderHoverTimer.current = window.setTimeout(() => {
+      const owner = getStoredAuthToken();
+      const startedAt = Date.now();
+      const cached = prefetchedFolder.current;
+      if (cached?.key === key && cached.owner === owner && startedAt - cached.startedAt < FOLDER_PREFETCH_MAX_AGE_MS) return;
+      const response = readInboxOpen(nextFilters);
+      prefetchedFolder.current = { key, owner, startedAt, response };
+      void response.catch(() => {
+        if (prefetchedFolder.current?.response === response) prefetchedFolder.current = null;
+      });
+    }, FOLDER_PREFETCH_DELAY_MS);
+  }
+
   async function loadThreads() {
-    if (!selectedCompanyId || !companiesReady) return;
-    const requestId = ++threadRequestIdRef.current, owner = getStoredAuthToken();
-    const current = () => requestId === threadRequestIdRef.current && owner === getStoredAuthToken();
     const snapshotKey = inboxThreadsKey(filters);
-    const changedFilter = loadedThreadsKey.current !== snapshotKey;
-    loadedThreadsKey.current = snapshotKey;
-    const cached = readSettingsSnapshot<EmailThread[]>(snapshotKey);
-    if (changedFilter) { setThreads(cached ?? []); setSelectedThreadId(cached?.[0]?.id ?? null); }
-    setThreadsLoading(!cached && (!threadsRef.current.length || changedFilter));
-    const ids = selectedCompanyId === ALL_COMPANIES ? companies.map(company => company.id) : [selectedCompanyId];
-    const scopeIds = selectedAccountId === "all" ? ids : ids.filter(id => accounts.some(account => account.id === selectedAccountId && (account.companyId || selectedCompanyId) === id));
-    const selectedAtStart = selectedThreadRef.current;
-    const previousSelected = threadsRef.current.find(thread => thread.id === selectedAtStart);
-    const publish = (records: EmailThread[], complete = false) => {
-      if (!current()) return;
-      const visible = records.filter(thread => !deletedThreadIdsRef.current.has(thread.id));
-      threadsRef.current = visible; setThreads(visible); writeSettingsSnapshot(snapshotKey, visible);
-      if (visible.length || complete) setThreadsLoading(false);
-      setSelectedThreadId(previous => previous && visible.some(thread => thread.id === previous) ? previous
-        : previous && !complete && !changedFilter ? previous : visible[0]?.id ?? null);
-      if (complete) {
-        const selected = visible.find(thread => thread.id === selectedAtStart);
-        if (selected && previousSelected && JSON.stringify(selected) !== JSON.stringify(previousSelected)) setMailboxRefreshVersion(version => version + 1);
-      }
-    };
+    const requestId = ++threadRequestIdRef.current;
+    const owner = getStoredAuthToken();
+    const current = () => requestId === threadRequestIdRef.current && owner === getStoredAuthToken();
+    const changedFilter = readyFilterRef.current !== snapshotKey;
     const countsKey = inboxCountsKey(selectedCompanyId, selectedAccountId);
-    const cachedCounts = readSettingsSnapshot<InboxCountPage[]>(countsKey);
-    if (changedFilter) setFolderCounts(sumInboxCounts(cachedCounts ?? []));
-    const publishCounts = (pages: InboxCountPage[]) => { if (current()) { setFolderCounts(sumInboxCounts(pages)); writeSettingsSnapshot(countsKey, pages); } };
-    void readInboxCounts(scopeIds, selectedAccountId, { initial: cachedCounts, isActive: current, onProgress: publishCounts })
-      .then(publishCounts).catch(error => { if (current() && error.name !== "AbortError") setNotice(error.message); });
+    const cached = readSettingsSnapshot<EmailThread[]>(snapshotKey);
+    const selectedAtStart = changedFilter ? cached?.[0]?.id : selectedThreadRef.current;
+
+    pendingMailbox.current = snapshotKey;
+    if (changedFilter) {
+      setThreads(cached ?? []);
+      setSelectedThreadId(selectedAtStart ?? null);
+      setFolderCounts(readSettingsSnapshot<InboxFolderCounts>(countsKey) ?? null);
+      setThreadsLoading(!cached);
+    }
+
     try {
-      const records = await readInboxThreads(scopeIds, filters, { initial: cached, isActive: current, onProgress: records => publish(records) });
-      publish(records, true);
+      const prefetched = prefetchedFolder.current;
+      const canReuse = changedFilter && !cached && prefetched?.key === snapshotKey &&
+        prefetched.owner === owner && Date.now() - prefetched.startedAt < FOLDER_PREFETCH_MAX_AGE_MS;
+      if (canReuse) prefetchedFolder.current = null;
+      const result = await (canReuse ? prefetched.response : readInboxOpen(filters, selectedAtStart));
+      if (!current()) return;
+      const visible = result.threads.filter(thread => !deletedThreadIdsRef.current.has(thread.id));
+      const requested = changedFilter ? selectedAtStart : selectedThreadRef.current;
+      const nextId = visible.some(thread => thread.id === requested) ? requested : visible[0]?.id;
+      const detail = result.detail;
+      providedDetail.current = null;
+      if (detail && detail.thread.id === nextId) {
+        const companyId = detail.thread.companyId || selectedCompanyId;
+        const key = inboxDetailKey(companyId, detail.thread.id);
+        const previous = readSettingsSnapshot<InboxDetail>(key);
+        providedDetail.current = key;
+        writeSettingsSnapshot(key, detail, false);
+        if (changedFilter || nextId !== selectedThreadRef.current || JSON.stringify(detail) !== JSON.stringify(previous)) {
+          applyDetail(detail, companyId, !changedFilter && nextId === selectedThreadRef.current && draftEditingRef.current);
+        }
+      }
+      readyFilterRef.current = snapshotKey;
+      setReadyFilter(snapshotKey);
+      writeCachedCompanies(result.companies);
+      writeSettingsSnapshot(snapshotKey, visible);
+      writeSettingsSnapshot(countsKey, result.counts);
+      writeSettingsSnapshot(`email-accounts:${selectedCompanyId}`, result.accounts);
+      writeSettingsSnapshot(`inbox-notifications:${selectedCompanyId}`, result.notifications);
+      setCompanies(result.companies);
+      setAccounts(result.accounts);
+      setFolderCounts(result.counts);
+      setNotifications(result.notifications);
+      setThreads(visible);
+      setSelectedThreadId(nextId ?? null);
+      setThreadsLoading(false);
+
+      const params = locationQuery.current;
+      const account = params.get("account");
+      const initial = result.accounts.find(item => item.id === account)?.id ?? result.accounts[0]?.id;
+      if (initial) setComposeAccountId(previous => previous || initial);
+      if (initial && params.get("compose") === "1") {
+        setComposeAccountId(initial);
+        setComposeOpen(true);
+        setSearchParams({}, { replace: true });
+      } else if (params.has("company")) {
+        const next = new URLSearchParams(params);
+        next.delete("company");
+        setSearchParams(next, { replace: true });
+      }
     } catch (error) {
-      if (current()) { setThreadsLoading(false); if ((error as Error).name !== "AbortError") setNotice((error as Error).message); }
+      if (current()) {
+        setThreadsLoading(false);
+        if ((error as Error).name !== "AbortError") setNotice((error as Error).message);
+      }
+    } finally {
+      if (current()) pendingMailbox.current = null;
     }
   }
 
   useEffect(() => {
     void loadThreads();
-    const timer = window.setInterval(() => { if (!document.hidden) void loadThreads(); }, 15_000);
-    const refresh = () => { if (!document.hidden) void loadThreads(); };
+    const refresh = () => {
+      if (!document.hidden && !pendingMailbox.current) void loadThreads();
+    };
+    const timer = window.setInterval(refresh, 15_000);
     window.addEventListener("focus", refresh);
-    return () => { ++threadRequestIdRef.current; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [selectedCompanyId, companyIdsKey, companiesReady, folder, selectedAccountId, accountCompanyId, statusFilter, priorityFilter, searchQuery]);
+    return () => {
+      ++threadRequestIdRef.current;
+      pendingMailbox.current = null;
+      cancelFolderHover();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [threadSnapshotKey]);
 
-  // Load thread detail
+  // The mailbox response includes the initial conversation. Fetch detail only for another selection.
   useEffect(() => {
     if (!threadCompanyId || !selectedThreadId) {
-      setActiveThread(null);
-      setMessages([]);
-      setContact(null);
-      setCustomerContext({ previousThreads: [], tasks: [] });
-      setAuditHistory([]);
+      clearDetail();
       return;
     }
+
+    const key = inboxDetailKey(threadCompanyId, selectedThreadId);
+    if (providedDetail.current === key) return;
+    const cached = readSettingsSnapshot<InboxDetail>(key);
+    if (cached) applyDetail(cached, threadCompanyId);
+    else clearDetail();
+    if (readyFilter !== threadSnapshotKey) return;
 
     let active = true;
     const owner = getStoredAuthToken();
     const current = () => active && getStoredAuthToken() === owner;
-    type Detail = { thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null; customerContext: CustomerContext };
-    const key = `inbox-detail:${threadCompanyId}:${selectedThreadId}`;
-    const apply = (result: Detail) => {
-      if (!current()) return;
-      setActiveThread({ ...result.thread, companyId: threadCompanyId }); setMessages(result.messages); setContact(result.contact);
-      setCustomerContext(result.customerContext || { previousThreads: [], tasks: [] });
-      const draft = [...result.messages].reverse().find(message => message.isDraft);
-      setDraftMessageId(draft?.id ?? null); setDraftText(draft?.bodyText ?? ""); setDraftIsAiGenerated(draft?.isAiGenerated ?? false);
-    };
-    const cached = readSettingsSnapshot<Detail>(key);
-    if (cached) apply(cached);
-    else { setActiveThread(null); setMessages([]); setContact(null); setCustomerContext({ previousThreads: [], tasks: [] }); setDraftMessageId(null); setDraftText(""); }
-    void requestSettingsRead(key, () => api<Detail>(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}`), false)
-      .then(apply).catch(error => { if (current() && error.name !== "AbortError") setNotice(error.message); });
-    const auditKey = `inbox-audit:${threadCompanyId}:${selectedThreadId}`;
-    setAuditHistory(readSettingsSnapshot<{ logs: EmailAuditEntry[] }>(auditKey)?.logs ?? []);
-    void requestSettingsRead(auditKey, () => api<{ logs: EmailAuditEntry[] }>(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/audit`), false)
-      .then(result => { if (current()) setAuditHistory(result.logs); }).catch(() => undefined);
+    void requestSettingsRead(key, () => api<InboxDetail>(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}?includeAudit=true`), false)
+      .then(result => { if (current()) applyDetail(result, threadCompanyId); })
+      .catch(error => { if (current() && error.name !== "AbortError") setNotice(error.message); });
     return () => { active = false; };
-  }, [threadCompanyId, selectedThreadId, mailboxRefreshVersion]);
+  }, [threadCompanyId, selectedThreadId, readyFilter, threadSnapshotKey]);
 
   // Handle Acquire Lock when typing reply
   async function onReplyFocus() {
@@ -635,6 +645,8 @@ export function EmailInboxPage() {
           accounts={accounts}
           folder={folder}
           onSelectFolder={(f) => setFolder(f)}
+          onFolderHover={prefetchFolder}
+          onFolderLeave={cancelFolderHover}
           folderCounts={folderCounts}
         />
 

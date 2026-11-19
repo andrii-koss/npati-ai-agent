@@ -371,22 +371,28 @@ export async function createNotification(host: EmailInboxJobsHost, ctx: AuthCont
     return notification;
   }
 
-export async function listNotifications(host: EmailInboxJobsHost, ctx: AuthContext, companyId: string, limit = 50): Promise<CompanyEmailNotification[]> {
+export async function listNotifications(host: EmailInboxJobsHost, ctx: AuthContext, companyId: string | string[], limit = 50): Promise<CompanyEmailNotification[]> {
+    const companyIds = typeof companyId === "string" ? [companyId] : companyId;
+    if (!companyIds.length) return [];
 
     if (host.pool) {
       return (await host.pool.query<CompanyEmailNotification>(
-        `SELECT id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
-           thread_id AS "threadId", notification_type AS "notificationType", title, body,
-           is_read AS "isRead", created_at AS "createdAt"
-         FROM company_email_notifications
-         WHERE workspace_id=$1 AND company_id=$2 AND (user_id IS NULL OR user_id=$3)
-         ORDER BY created_at DESC LIMIT $4`,
-        [ctx.workspaceId, companyId, ctx.userId, Math.max(1, Math.min(limit, 100))]
+        `SELECT latest.* FROM unnest($2::text[]) AS scope(id) CROSS JOIN LATERAL (
+           SELECT notifications.id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
+             thread_id AS "threadId", notification_type AS "notificationType", title, body,
+             is_read AS "isRead", created_at AS "createdAt"
+           FROM company_email_notifications AS notifications
+           WHERE workspace_id=$1 AND company_id=scope.id AND (user_id IS NULL OR user_id=$3)
+           ORDER BY created_at DESC, notifications.id LIMIT $4
+         ) AS latest`,
+        [ctx.workspaceId, companyIds, ctx.userId, Math.max(1, Math.min(limit, 100))]
       )).rows;
     }
-    return Array.from(host.memoryNotifications.values()).filter((item) => item.workspaceId === ctx.workspaceId
-      && item.companyId === companyId && (!item.userId || item.userId === ctx.userId))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+
+    const notifications = Array.from(host.memoryNotifications.values()).filter(item => item.workspaceId === ctx.workspaceId
+      && companyIds.includes(item.companyId) && (!item.userId || item.userId === ctx.userId));
+    return companyIds.flatMap(id => notifications.filter(item => item.companyId === id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit));
   }
 
 export async function markNotificationRead(host: EmailInboxJobsHost, ctx: AuthContext, companyId: string, notificationId: string): Promise<void> {

@@ -251,7 +251,7 @@ export class EmailInboxRepository {
 
     async listThreads(
     ctx: AuthContext,
-    companyId: string,
+    companyId: string | string[],
     filter: {
       folder?: EmailFolder;
       status?: EmailThreadStatus;
@@ -267,7 +267,7 @@ export class EmailInboxRepository {
 
     async getFolderCounts(
     ctx: AuthContext,
-    companyId: string,
+    companyId: string | string[],
     accountId?: string
   ): Promise<Record<EmailFolder, number>> {
     return getFolderCounts(this.threadHost(), ctx, companyId, accountId);
@@ -567,7 +567,7 @@ export class EmailInboxRepository {
     return createNotification(this.jobsHost(), ctx, companyId, input);
   }
 
-  async listNotifications(ctx: AuthContext, companyId: string, limit = 50): Promise<CompanyEmailNotification[]> {
+  async listNotifications(ctx: AuthContext, companyId: string | string[], limit = 50): Promise<CompanyEmailNotification[]> {
     return listNotifications(this.jobsHost(), ctx, companyId, limit);
   }
 

@@ -127,10 +127,8 @@ export function ThreadListColumn({
       </div>
 
       {/* Threads Scroll List */}
-      <div className="email-inbox-threads-scroll">
-        {threads.length === 0 && loading ? (
-          <div role="status" style={{ padding: "40px 20px", textAlign: "center" }}>{language === "uk" ? "Завантаження листування…" : "Loading conversations..."}</div>
-        ) : threads.length === 0 ? (
+      <div className="email-inbox-threads-scroll" aria-busy={loading}>
+        {threads.length === 0 ? !loading && (
           <div style={{ padding: "40px 20px", textAlign: "center" }}>
             <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
             <strong style={{ display: "block", marginBottom: 4, color: "#1e293b" }}>

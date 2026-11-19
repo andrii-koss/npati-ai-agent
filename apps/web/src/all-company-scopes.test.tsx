@@ -75,11 +75,21 @@ beforeEach(() => {
       data = { accounts, companies: fixture.companies, agents: [], analytics: [] };
     }
     else if (url.endsWith("/email-inbox/analytics")) data = { analytics: null };
-    else if (url.includes("/email-inbox/threads?")) data = { threads: [{ ...item, subject: `Record ${id}`, customerEmail: `${id}@example.com`, folder: "inbox", unreadCount: 0, lastMessageAt: "2026-11-16", priority: "normal", status: "new" }] };
-    else if (url.includes("/email-inbox/folder-counts")) data = { counts: { inbox: 1, sent: 0, drafts: 0, archived: 0, spam: 0 } };
-    else if (url.endsWith("/notifications")) data = { notifications: [] };
-    else if (url.includes("/email-inbox/threads/") && !url.endsWith("/audit")) data = { thread: { ...item, subject: `Record ${id}`, customerEmail: `${id}@example.com`, folder: "inbox", unreadCount: 0, lastMessageAt: "2026-11-16", priority: "normal", status: "new" }, messages: [], contact: null, customerContext: { previousThreads: [], tasks: [] } };
-    else if (url.endsWith("/audit")) data = { logs: [] };
+    else if (url.startsWith("/api/email/inbox/open") || url.includes("/email-inbox/threads/")) {
+      const params = new URL(url, "http://localhost").searchParams;
+      const company = params.get("company");
+      const owners = url.includes("/email-inbox/threads/") ? [id] : company && company !== "all" ? [company] : ["alpha", "beta"];
+      const threads = owners.map(owner => ({
+        ...item, id: `${owner}-item`, companyId: owner,
+        subject: params.get("search") === "new" ? "Newest result" : params.get("search") === "old" ? "Obsolete result" : `Record ${owner}`,
+        customerEmail: `${owner}@example.com`, folder: "inbox", unreadCount: 0, lastMessageAt: "2026-11-16", priority: "normal", status: "new",
+      }));
+      const detail = { thread: threads[0], messages: [], contact: null, customerContext: { previousThreads: [], tasks: [] }, logs: [] };
+      data = url.startsWith("/api/email/inbox/open") ? {
+        companies: fixture.companies, accounts: [], threads, detail,
+        counts: { inbox: owners.length, sent: 4, drafts: 1, archived: 3, spam: 0 }, notifications: [],
+      } : detail;
+    }
     return new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
   }));
 });
@@ -130,21 +140,25 @@ it("mounts the first business cards immediately and loads more on demand without
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-it("shows a ready Inbox conversation and its body before slow companies, counts, notifications and audit finish", async () => {
+it("loads Inbox conversations, detail and folder totals in one request", async () => {
   const original = vi.mocked(fetch).getMockImplementation()!;
   let release!: () => void;
-  const slow = new Promise<void>(resolve => { release = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
   vi.mocked(fetch).mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.includes("/beta/email-inbox/threads?") || url.includes("/folder-counts") || url.endsWith("/notifications") || url.endsWith("/audit")) await slow;
+    if (String(input).startsWith("/api/email/inbox/open")) await pending;
     return original(input, init);
   });
   await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
-  expect(host.querySelector(".email-inbox-thread-card")?.textContent).toContain("Record alpha");
-  expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record alpha");
-  expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).not.toContain("Record beta");
+  expect(host.querySelector(".email-folder-count")).toBeNull();
   await act(async () => release());
+  expect(requests).toEqual(["/api/email/inbox/open?company=all&folder=inbox"]);
+  expect([...host.querySelectorAll(".email-folder-count")].map(item => item.textContent)).toEqual(["(2)", "(4)", "(1)", "(3)", "(0)"]);
   expect(host.querySelector(".email-inbox-threads-scroll")?.textContent).toContain("Record beta");
+  expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record alpha");
+
+  await act(async () => host.querySelectorAll<HTMLElement>(".email-inbox-thread-card").item(1).click());
+  expect(requests.slice(1)).toEqual(["/api/companies/beta/email-inbox/threads/beta-item?includeAudit=true"]);
+  expect(host.querySelector(".email-inbox-detail-header")?.textContent).toContain("Record beta");
 });
 
 it("restores Inbox conversations and the selected body immediately while the refresh is pending", async () => {
@@ -161,18 +175,42 @@ it("restores Inbox conversations and the selected body immediately while the ref
   await act(async () => release());
 });
 
+it("reuses a prefetched Inbox folder and switches without a loading message", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  let sentReads = 0;
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (String(input).includes("folder=sent")) {
+      sentReads++;
+      await pending;
+    }
+    return original(input, init);
+  });
+  await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));
+
+  const sent = host.querySelector<HTMLButtonElement>(".email-inbox-folder-btn:nth-of-type(2)")!;
+  const hover = Object.assign(new MouseEvent("pointerover", { bubbles: true }), { pointerType: "mouse" });
+  await act(async () => { sent.dispatchEvent(hover); });
+  await vi.waitFor(() => expect(sentReads).toBe(1));
+  await act(async () => sent.click());
+  const list = host.querySelector(".email-inbox-threads-scroll")!;
+  expect(list.getAttribute("aria-busy")).toBe("true");
+  expect(list.textContent?.trim()).toBe("");
+
+  await act(async () => release());
+  expect(list.getAttribute("aria-busy")).toBe("false");
+  expect(list.querySelectorAll(".email-inbox-thread-card")).toHaveLength(2);
+  expect(sentReads).toBe(1);
+});
+
 it("ignores delayed Inbox search results after the query changes", async () => {
   const original = vi.mocked(fetch).getMockImplementation()!;
   let release!: () => void;
   const oldQuery = new Promise<void>(resolve => { release = resolve; });
   vi.mocked(fetch).mockImplementation(async (input, init) => {
     const url = String(input);
-    if (url.includes("/threads?") && (url.includes("search=old") || url.includes("search=new"))) {
-      const old = url.includes("search=old");
-      if (old) await oldQuery;
-      const id = url.includes("/alpha/") ? "alpha" : "beta";
-      return new Response(JSON.stringify({ threads: [{ id: `${id}-${old ? "old" : "new"}`, companyId: id, subject: old ? "Obsolete result" : "Newest result", customerEmail: `${id}@example.com`, unreadCount: 0, lastMessageAt: "2026-11-16", folder: "inbox", status: "new", priority: "normal" }] }));
-    }
+    if (url.startsWith("/api/email/inbox/open") && url.includes("search=old")) await oldQuery;
     return original(input, init);
   });
   await act(async () => root.render(<MemoryRouter><EmailInboxPage /></MemoryRouter>));

@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import type { AuthContext } from "@npati/workspace";
 import type {
+  CompanyEmailThread,
   EmailAttachment,
   EmailFolder,
   EmailPriority,
@@ -11,6 +13,7 @@ import {
   err,
   resolveEmailScope,
   PERSONAL_EMAIL_SCOPE,
+  hasEmailPermission,
   type EmailPermission,
 } from "./email-routes-context";
 
@@ -23,6 +26,95 @@ export function registerEmailThreadRoutes(
   // =========================================================================
   // 2. Email Inbox Threads & Messages (Items 6, 7, 8)
   // =========================================================================
+
+  async function readThreadDetail(c: AuthContext, companyId: string, thread: CompanyEmailThread) {
+    const [messages, contact, matchingThreads, runs] = await Promise.all([
+      repo.listMessages(c, companyId, thread.id),
+      repo.getContact(c, companyId, thread.customerEmail),
+      repo.listThreads(c, companyId, { search: thread.customerEmail, limit: 50 }),
+      companyId.startsWith(`${PERSONAL_EMAIL_SCOPE}:`) ? [] : store.listCompanyAgentRuns(c, companyId, 100),
+    ]);
+    const previousThreads = matchingThreads
+      .filter(item => item.id !== thread.id && item.customerEmail === thread.customerEmail)
+      .map(({ id, subject, status, priority, lastMessageAt }) => ({ id, subject, status, priority, lastMessageAt }));
+    const tasks = runs
+      .filter(run => run.task.includes(thread.customerEmail) || run.task.includes(thread.id))
+      .slice(0, 20)
+      .map(({ id, task, status, createdAt }) => ({ id, task, status, createdAt }));
+    return { thread, messages, contact, customerContext: { previousThreads, tasks } };
+  }
+
+  async function readThreadAudit(c: AuthContext, companyId: string, threadId: string) {
+    return auditRepo ? auditRepo.listResourceLogs(c, companyId, "company_email_thread", threadId) : [];
+  }
+
+  app.get<{ Querystring: {
+    company?: string; accountId?: string; folder?: EmailFolder; status?: EmailThreadStatus;
+    priority?: EmailPriority; search?: string; threadId?: string;
+  } }>("/email/inbox/open", {
+    schema: { querystring: { type: "object", properties: {
+      company: { type: "string", maxLength: 128 },
+      accountId: { type: "string", maxLength: 128 },
+      folder: { type: "string", enum: ["inbox", "sent", "drafts", "archived", "spam"] },
+      status: { type: "string", maxLength: 64 },
+      priority: { type: "string", maxLength: 64 },
+      search: { type: "string" },
+      threadId: { type: "string", maxLength: 128 },
+    } } },
+  }, async (r, reply) => {
+    try {
+      const c = await ctx(auth, r, "email:read_messages");
+      const company = r.query.company || "all";
+      const companies: Array<{ id: string; name: string }> = [];
+      if (c.permissions.includes("workspace:read")) {
+        let cursor: string | undefined;
+        do {
+          const page = await store.listCompanies(c, 100, cursor);
+          companies.push(...page.items.map(({ id, name }) => ({ id, name })));
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+      }
+
+      const companyIds = company === "all" ? companies.map(({ id }) => id)
+        : [companies.some(({ id }) => id === company) ? company : await resolveEmailScope(store, c, company)];
+      const presentScope = (companyId: string) => company === PERSONAL_EMAIL_SCOPE ? PERSONAL_EMAIL_SCOPE : companyId;
+      const { accountId, folder = "inbox", status, priority, search, threadId } = r.query;
+      const canReadAccounts = hasEmailPermission(c, "email:view");
+      const accountRead = canReadAccounts ? repo.readSettingsData(c, companyIds, false) : { accounts: [] };
+      const threadCompanyIds = accountId && canReadAccounts
+        ? (await accountRead).accounts.filter(account => account.id === accountId).map(account => account.companyId)
+        : accountId ? [] : companyIds;
+      const threadsAndDetail = async () => {
+        const threads = await repo.listThreads(c, threadCompanyIds, { accountId, folder, status, priority, search });
+        const selected = threads.find(thread => thread.id === threadId) ?? threads[0];
+        if (!selected) return { threads: [], detail: null };
+        const [detail, logs] = await Promise.all([
+          readThreadDetail(c, selected.companyId, selected),
+          readThreadAudit(c, selected.companyId, selected.id).catch(() => []),
+        ]);
+        return {
+          threads: threads.map(thread => ({ ...thread, companyId: presentScope(thread.companyId) })),
+          detail: { ...detail, thread: { ...selected, companyId: presentScope(selected.companyId) }, logs },
+        };
+      };
+      const [{ accounts }, counts, notifications, mailbox] = await Promise.all([
+        accountRead,
+        repo.getFolderCounts(c, threadCompanyIds, accountId),
+        repo.listNotifications(c, companyIds),
+        threadsAndDetail(),
+      ]);
+      return reply.header("Cache-Control", "private, no-store").send({
+        companies,
+        accounts: accounts.map(account => ({
+          id: account.id, companyId: presentScope(account.companyId), emailAddress: account.emailAddress,
+          displayName: account.displayName, mode: account.mode, status: account.status, testMode: account.testMode,
+        })),
+        counts,
+        notifications: notifications.map(item => ({ ...item, companyId: presentScope(item.companyId) })),
+        ...mailbox,
+      });
+    } catch (e) { return err(reply, e); }
+  });
 
   app.post<{
     Params: { companyId: string };
@@ -152,7 +244,7 @@ export function registerEmailThreadRoutes(
     }
   });
 
-  app.get<{ Params: { companyId: string; threadId: string } }>(
+  app.get<{ Params: { companyId: string; threadId: string }; Querystring: { includeAudit?: string } }>(
     "/companies/:companyId/email-inbox/threads/:threadId",
     async (r, reply) => {
       try {
@@ -161,23 +253,11 @@ export function registerEmailThreadRoutes(
 
         const thread = await repo.getThread(c, r.params.companyId, r.params.threadId);
         if (!thread) throw Object.assign(new Error("Thread not found"), { status: 404 });
-        const messages = await repo.listMessages(c, r.params.companyId, thread.id);
-        const contact = await repo.getContact(c, r.params.companyId, thread.customerEmail);
-        const previousThreads = (await repo.listThreads(c, r.params.companyId, { search: thread.customerEmail, limit: 50 }))
-          .filter((item) => item.id !== thread.id && item.customerEmail === thread.customerEmail)
-          .map((item) => ({ id: item.id, subject: item.subject, status: item.status, priority: item.priority, lastMessageAt: item.lastMessageAt }));
-        const companyRuns = r.params.companyId.startsWith(`${PERSONAL_EMAIL_SCOPE}:`)
-          ? []
-          : await store.listCompanyAgentRuns(c, r.params.companyId, 100);
-        const relatedTasks = companyRuns
-          .filter((run) => run.task.includes(thread.customerEmail) || run.task.includes(thread.id))
-          .slice(0, 20)
-          .map((run) => ({ id: run.id, task: run.task, status: run.status, createdAt: run.createdAt }));
-
-        return reply.header("Cache-Control", "no-store").code(200).send({
-          thread, messages, contact,
-          customerContext: { previousThreads, tasks: relatedTasks },
-        });
+        const [detail, logs] = await Promise.all([
+          readThreadDetail(c, r.params.companyId, thread),
+          r.query.includeAudit === "true" ? readThreadAudit(c, r.params.companyId, thread.id).catch(() => []) : undefined,
+        ]);
+        return reply.header("Cache-Control", "no-store").send({ ...detail, logs });
       } catch (e) {
         return err(reply, e);
       }
@@ -257,9 +337,7 @@ export function registerEmailThreadRoutes(
       try {
         const c = await ctx(auth, r, "email:read_messages");
         r.params.companyId = await resolveEmailScope(store, c, r.params.companyId);
-        const logs = auditRepo
-          ? await auditRepo.listResourceLogs(c, r.params.companyId, "company_email_thread", r.params.threadId)
-          : [];
+        const logs = await readThreadAudit(c, r.params.companyId, r.params.threadId);
         return reply.code(200).send({ logs });
       } catch (e) {
         return err(reply, e);

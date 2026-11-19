@@ -11,7 +11,9 @@ export interface FolderSidebarProps {
   accounts: EmailAccount[];
   folder: EmailFolder;
   onSelectFolder: (folder: EmailFolder) => void;
-  folderCounts: Record<EmailFolder, number>;
+  onFolderHover: (folder: EmailFolder) => void;
+  onFolderLeave: () => void;
+  folderCounts: Record<EmailFolder, number> | null;
 }
 
 export function FolderSidebar({
@@ -22,6 +24,8 @@ export function FolderSidebar({
   accounts,
   folder,
   onSelectFolder,
+  onFolderHover,
+  onFolderLeave,
   folderCounts,
 }: FolderSidebarProps) {
   const { t } = useTranslation();
@@ -127,13 +131,15 @@ export function FolderSidebar({
             type="button"
             className={`email-inbox-folder-btn ${folder === f.id ? "active" : ""}`}
             onClick={() => onSelectFolder(f.id)}
+            onPointerEnter={(event) => { if (event.pointerType === "mouse") onFolderHover(f.id); }}
+            onPointerLeave={onFolderLeave}
             title={f.label}
           >
             <span className="email-folder-btn-content">
               <span className="email-folder-icon">{f.icon}</span>
               {!sidebarCollapsed && <span>{f.label}</span>}
             </span>
-            {!sidebarCollapsed && (
+            {!sidebarCollapsed && folderCounts && (
               <span className="email-folder-count">({folderCounts[f.id]})</span>
             )}
           </button>

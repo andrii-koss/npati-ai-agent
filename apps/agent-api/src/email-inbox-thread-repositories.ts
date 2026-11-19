@@ -290,7 +290,7 @@ export async function findMatchingThread(host: EmailInboxThreadHost, ctx: AuthCo
     return null;
   }
 
-export async function listThreads(host: EmailInboxThreadHost, ctx: AuthContext, companyId: string, filter: {
+export async function listThreads(host: EmailInboxThreadHost, ctx: AuthContext, companyId: string | string[], filter: {
       folder?: EmailFolder;
       status?: EmailThreadStatus;
       priority?: EmailPriority;
@@ -301,9 +301,12 @@ export async function listThreads(host: EmailInboxThreadHost, ctx: AuthContext, 
     } = {}): Promise<CompanyEmailThread[]> {
     const limit = Math.min(100, Math.max(1, filter.limit || 50));
 
+    const companyIds = typeof companyId === "string" ? [companyId] : companyId;
+    if (!companyIds.length) return [];
+
     if (host.pool) {
-      const conditions: string[] = ["workspace_id = $1", "company_id = $2"];
-      const params: any[] = [ctx.workspaceId, companyId];
+      const conditions: string[] = ["workspace_id = $1", "company_id = scope.company_scope"];
+      const params: any[] = [ctx.workspaceId, companyIds];
 
       if (filter.folder) {
         if (filter.folder === "sent") {
@@ -354,34 +357,37 @@ export async function listThreads(host: EmailInboxThreadHost, ctx: AuthContext, 
 
       params.push(limit);
       const query = `
-        SELECT ${host.threadCols},
-          (SELECT COUNT(*)::int
-             FROM company_email_messages count_message
-            WHERE count_message.workspace_id = company_email_threads.workspace_id
-              AND count_message.company_id = company_email_threads.company_id
-              AND count_message.thread_id = company_email_threads.id
-              AND count_message.is_draft = false) AS "messagesCount"
-        FROM company_email_threads
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY last_message_at DESC
-        LIMIT $${params.length}
+        SELECT latest.* FROM unnest($2::text[]) AS scope(company_scope) CROSS JOIN LATERAL (
+          SELECT ${host.threadCols},
+            (SELECT COUNT(*)::int
+               FROM company_email_messages count_message
+              WHERE count_message.workspace_id = company_email_threads.workspace_id
+                AND count_message.company_id = company_email_threads.company_id
+                AND count_message.thread_id = company_email_threads.id
+                AND count_message.is_draft = false) AS "messagesCount"
+          FROM company_email_threads
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY last_message_at DESC, company_email_threads.id
+          LIMIT $${params.length}
+        ) AS latest
+        ORDER BY latest."lastMessageAt" DESC, latest.id
       `;
       const result = await host.pool.query<CompanyEmailThread>(query, params);
       return result.rows;
     }
 
     let items = Array.from(host.memoryThreads.values()).filter(
-      (t) => t.workspaceId === ctx.workspaceId && t.companyId === companyId
+      (t) => t.workspaceId === ctx.workspaceId && companyIds.includes(t.companyId)
     );
 
     if (filter.folder === "sent") {
       items = items.filter((thread) => Array.from(host.memoryMessages.values()).some((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+        message.workspaceId === ctx.workspaceId && message.companyId === thread.companyId &&
         message.threadId === thread.id && message.direction === "outbound" && !message.isDraft
       ));
     } else if (filter.folder === "drafts") {
       items = items.filter((thread) => Array.from(host.memoryMessages.values()).some((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+        message.workspaceId === ctx.workspaceId && message.companyId === thread.companyId &&
         message.threadId === thread.id && message.isDraft && !message.isAiGenerated
       ));
     } else if (filter.folder) items = items.filter((t) => t.folder === filter.folder);
@@ -405,15 +411,16 @@ export async function listThreads(host: EmailInboxThreadHost, ctx: AuthContext, 
       .map((thread) => ({
         ...thread,
         messagesCount: Array.from(host.memoryMessages.values()).filter((message) =>
-          message.workspaceId === ctx.workspaceId && message.companyId === companyId &&
+          message.workspaceId === ctx.workspaceId && message.companyId === thread.companyId &&
           message.threadId === thread.id && !message.isDraft
         ).length,
       }));
   }
 
-export async function getFolderCounts(host: EmailInboxThreadHost, ctx: AuthContext, companyId: string, accountId?: string): Promise<Record<EmailFolder, number>> {
+export async function getFolderCounts(host: EmailInboxThreadHost, ctx: AuthContext, companyId: string | string[], accountId?: string): Promise<Record<EmailFolder, number>> {
+    const companyIds = typeof companyId === "string" ? [companyId] : companyId;
     if (host.pool) {
-      const params: unknown[] = [ctx.workspaceId, companyId];
+      const params: unknown[] = [ctx.workspaceId, companyIds];
       const accountCondition = accountId ? ` AND thread.email_account_id = $3` : "";
       if (accountId) params.push(accountId);
       const result = await host.pool.query<{
@@ -438,7 +445,7 @@ export async function getFolderCounts(host: EmailInboxThreadHost, ctx: AuthConte
           COUNT(*) FILTER (WHERE thread.folder = 'archived') AS archived,
           COUNT(*) FILTER (WHERE thread.folder = 'spam') AS spam
         FROM company_email_threads thread
-        WHERE thread.workspace_id = $1 AND thread.company_id = $2${accountCondition}`,
+        WHERE thread.workspace_id = $1 AND thread.company_id = ANY($2::text[])${accountCondition}`,
         params
       );
       const row = result.rows[0];
@@ -449,17 +456,17 @@ export async function getFolderCounts(host: EmailInboxThreadHost, ctx: AuthConte
     }
 
     const allThreads = Array.from(host.memoryThreads.values()).filter((thread) =>
-      thread.workspaceId === ctx.workspaceId && thread.companyId === companyId &&
+      thread.workspaceId === ctx.workspaceId && companyIds.includes(thread.companyId) &&
       (!accountId || thread.emailAccountId === accountId)
     );
     return {
       inbox: allThreads.filter((thread) => thread.folder === "inbox").reduce((sum, thread) => sum + thread.unreadCount, 0),
       sent: allThreads.reduce((sum, thread) => sum + Array.from(host.memoryMessages.values()).filter((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id &&
+        message.workspaceId === ctx.workspaceId && message.companyId === thread.companyId && message.threadId === thread.id &&
         message.direction === "outbound" && !message.isDraft
       ).length, 0),
       drafts: allThreads.reduce((sum, thread) => sum + Array.from(host.memoryMessages.values()).filter((message) =>
-        message.workspaceId === ctx.workspaceId && message.companyId === companyId && message.threadId === thread.id &&
+        message.workspaceId === ctx.workspaceId && message.companyId === thread.companyId && message.threadId === thread.id &&
         message.isDraft && !message.isAiGenerated
       ).length, 0),
       archived: allThreads.filter((thread) => thread.folder === "archived").length,
