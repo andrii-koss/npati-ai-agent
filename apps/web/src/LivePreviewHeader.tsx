@@ -1,4 +1,5 @@
 import { isolatedPreviewUrl } from "./preview-origin";
+import { projectCodeFilesHref } from "./code-workspace/actions";
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -111,11 +112,7 @@ export function LivePreviewHeader({
 
   function handleOpenCode() {
     if (!codeWorkspaceUrl) return;
-    const [path, query] = codeWorkspaceUrl.split("?");
-    const params = new URLSearchParams(query);
-    params.set("view", "files");
-    if (/^(?:HTML\/CSS|static)$/i.test(projectFramework ?? "")) params.set("file", "index.html");
-    navigate(`${path}?${params}`);
+    navigate(projectCodeFilesHref(codeWorkspaceUrl, projectFramework));
   }
 
   function handleOpenTerminal() {

@@ -481,6 +481,13 @@ function CodeWorkspaceContent() {
     if (path) void openFile(path);
   }, [openFile]);
 
+  const openEntryFile = searchParams.get("view") === "files" && !searchParams.has("file");
+  useEffect(() => {
+    if (openEntryFile && !selectedPath && tree.some(file => file.path === "index.html")) {
+      void openFile("index.html");
+    }
+  }, [openEntryFile, selectedPath, tree, openFile]);
+
   const saveFile = async () => {
     if (!companyId || !projectId || !selectedPath || fileContent === null || savingFile) return;
     if (!fileRevision) { setFileError("Reload the file before saving: its revision is unavailable."); return; }

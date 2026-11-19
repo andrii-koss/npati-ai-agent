@@ -105,12 +105,12 @@ it("opens the file named in the address after a reload", async () => {
   }, "/code/co/pr?session=s&run=r&file=b.ts");
 });
 
-it("opens the Files & Code section with the site's entry point selected", async () => {
+it.each(["&file=index.html", ""])("opens Files & Code with the site's entry point selected (%s)", async (fileQuery) => {
   await view(async ({ host }) => {
     expect(button(host, "Files & Code").getAttribute("aria-selected")).toBe("true");
     expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
     expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
-  }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
+  }, `/code/co/pr?session=s&run=r&view=files${fileQuery}`);
 });
 
 it("shows the selected terminal at the top of the workspace content", async () => {

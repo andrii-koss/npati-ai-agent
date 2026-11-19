@@ -285,3 +285,11 @@ export function askUserAnswerRequest(input: AskUserAnswerInput): ApiRequest {
     },
   };
 }
+
+export function projectCodeFilesHref(href: string, framework?: string | null) {
+  const [path, query] = href.split("?");
+  const params = new URLSearchParams(query);
+  params.set("view", "files");
+  if (/^(?:HTML\/CSS|static)$/i.test(framework?.trim() ?? "")) params.set("file", "index.html");
+  return `${path}?${params}`;
+}
