@@ -1,6 +1,6 @@
 # Self-hosted project production
 
-The production overlay adds two services to an existing NPATI installation. Traefik accepts public HTTP and HTTPS. Production builds and serves project releases. The Code Workspace calls Production through a separate control network. Preview continues to run in the existing sandbox.
+The optional production profile in docker-compose.yml enables two services for a standard Docker Compose installation. Traefik accepts public HTTP and HTTPS. Production builds and serves project releases. The Code Workspace calls Production through a separate control network. Preview continues to run in the existing sandbox.
 
 ## Enable production
 
@@ -14,10 +14,10 @@ NPATI_PRODUCTION_CPUS=4
 NPATI_PRODUCTION_MEMORY=4g
 ```
 
-Append `-f docker-compose.production.yml` to your existing Compose invocation. Keep the existing project name, environment files and overrides. For a standard Compose installation:
+Enable the `production` profile. Keep the existing project name, environment files and overrides:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build production traefik agent-api
+docker compose -f docker-compose.yml --profile production up -d --build production traefik agent-api
 ```
 
 Traefik uses ports 80 and 443. Forward both ports to the server. Point the domain's A record, and its AAAA record if IPv6 is configured, at this installation. For automatic project domains, configure wildcard DNS such as `*.sites.example.com` for the suffix you control. For a custom domain, add the TXT record displayed under **Domain & SSL / Network**. Each domain is assigned to one project at a time.
