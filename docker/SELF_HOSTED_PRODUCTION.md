@@ -1,23 +1,29 @@
 # Self-hosted project production
 
-The optional production profile in docker-compose.yml enables two services for a standard Docker Compose installation. Traefik accepts public HTTP and HTTPS. Production builds and serves project releases. The Code Workspace calls Production through a separate control network. Preview continues to run in the existing sandbox.
+The standard Docker Compose installation starts the `production` and `traefik` services by default. Traefik accepts public HTTP and HTTPS. Production builds and serves project releases. The Code Workspace calls Production through a separate control network. Preview continues to run in the existing sandbox.
 
-## Enable production
+## Configure publication
 
-Add these values to the environment file used by your Compose installation. Generate a random control secret, for example with `openssl rand -hex 32`.
+The quick start uses `.env.example`, which enables local project publication on loopback ports 18080 and 18443. If you already have a `.env`, add the production settings from the example. Generate a unique control secret with `openssl rand -hex 32` and replace the local example token before exposing the installation.
+
+For public domains, use settings such as these:
 
 ```dotenv
 NPATI_PRODUCTION_TOKEN=<random-generated-secret>
+NPATI_PRODUCTION_LOCAL=false
+NPATI_PRODUCTION_BIND=0.0.0.0
+NPATI_PRODUCTION_HTTP_PORT=80
+NPATI_PRODUCTION_HTTPS_PORT=443
 NPATI_PRODUCTION_ACME_EMAIL=operator@example.com
 NPATI_PRODUCTION_DOMAIN=sites.example.com
 NPATI_PRODUCTION_CPUS=4
 NPATI_PRODUCTION_MEMORY=4g
 ```
 
-Enable the `production` profile. Keep the existing project name, environment files and overrides:
+Start the standard stack. Keep the existing project name, environment files and overrides:
 
 ```sh
-docker compose -f docker-compose.yml --profile production up -d --build production traefik agent-api
+docker compose -f docker-compose.yml up -d --build
 ```
 
 Traefik uses ports 80 and 443. Forward both ports to the server. Point the domain's A record, and its AAAA record if IPv6 is configured, at this installation. For automatic project domains, configure wildcard DNS such as `*.sites.example.com` for the suffix you control. For a custom domain, add the TXT record displayed under **Domain & SSL / Network**. Each domain is assigned to one project at a time.
