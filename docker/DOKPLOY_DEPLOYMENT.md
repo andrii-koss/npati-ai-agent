@@ -217,9 +217,10 @@ isolation by running `scripts/verify-shared-project-runtime.mjs` with Node insid
 agent-api. The script reads its runner URL/secret without printing the secret and
 removes its temporary projects afterward; it does not create Docker containers.
 
-Both Compose files start the same 11 services by default: agent-api, company-worker,
-sandbox-runner, postgres, postgres-projects, redis, minio, omniroute, crawler,
-browser-use-worker and searxng. Frontend assets are served by agent-api.
+Dokploy starts 11 services: agent-api, company-worker, sandbox-runner, postgres,
+postgres-projects, redis, minio, omniroute, crawler, browser-use-worker and searxng.
+Frontend assets are served by agent-api. Standard Docker Compose starts these
+same services plus `production` and `traefik` for project publication.
 
 ### PostgreSQL vector search without Qdrant
 

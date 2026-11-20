@@ -96,7 +96,7 @@ docker compose up --build
 
 Open **http://localhost:3000** and sign in. The chat is at **http://localhost:3000/chat**.<br/>
 To use another port, change `NPATI_WEB_PORT`, `NPATI_WEB_ORIGIN` and `NPATI_AGENT_PUBLIC_DOMAIN` in `.env`. On Windows Command Prompt use `copy .env.example .env`.<br/>
-Standard Docker Compose and Dokploy both start 11 services by default. For a server with a domain, see the [Dokploy guide](docker/DOKPLOY_DEPLOYMENT.md).<br/>
+Standard Docker Compose starts 13 services, including [project publication](docker/SELF_HOSTED_PRODUCTION.md). Dokploy starts 11 services for the agent and project previews. See the [Dokploy guide](docker/DOKPLOY_DEPLOYMENT.md).<br/>
 Before you open the installation to other people, change every password and key in `.env`.
 
 </div>

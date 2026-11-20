@@ -13,7 +13,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment: &agent-api-env
       NPATI_PRODUCTION_URL: ${NPATI_PRODUCTION_URL:-http://production:8091}
-      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:-}
+      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:?Set NPATI_PRODUCTION_TOKEN in .env to at least 32 characters}
       NODE_ENV: production
       NPATI_ENV: ${NPATI_ENV:-development}
       NPATI_AGENT_API_PORT: 3001
@@ -426,7 +426,6 @@ services:
     networks: [npati-agent-network]
 
   traefik:
-    profiles: [production]
     image: traefik:v3.6
     restart: unless-stopped
     user: "65532:65532"
@@ -455,7 +454,6 @@ services:
         condition: service_healthy
 
   production:
-    profiles: [production]
     build: ./apps/production-runtime
     restart: unless-stopped
     init: true
@@ -464,7 +462,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     environment:
-      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:-}
+      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:?Set NPATI_PRODUCTION_TOKEN in .env to at least 32 characters}
       NPATI_PRODUCTION_ACME_EMAIL: ${NPATI_PRODUCTION_ACME_EMAIL:-}
       NPATI_PRODUCTION_DOMAIN: ${NPATI_PRODUCTION_DOMAIN:-}
       NPATI_PRODUCTION_LOCAL: ${NPATI_PRODUCTION_LOCAL:-false}
