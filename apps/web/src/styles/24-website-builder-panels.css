@@ -796,6 +796,15 @@
 /* ==========================================================================
    Website Studio Project Cards (2 per row with Live Sandbox Preview)
    ========================================================================== */
+html:has(.website-projects-page) {
+  scrollbar-gutter: stable;
+}
+
+.website-projects-page > .company-drawer-backdrop {
+  inset-inline-end: auto;
+  inline-size: 100vw;
+}
+
 .website-studio-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

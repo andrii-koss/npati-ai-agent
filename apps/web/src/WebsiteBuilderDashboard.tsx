@@ -647,7 +647,7 @@ export function WebsiteBuilderDashboard() {
   }, [t.deletePrompt]);
 
   return (
-    <main className="company-refined company-page">
+    <main className="company-refined company-page website-projects-page">
       {/* NPATI Header Standard (Matching Settings & Automations) */}
       <header className="inspector-header automations-header" style={{ marginBottom: "24px" }}>
         <div className="automations-header-top">
