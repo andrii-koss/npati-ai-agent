@@ -21,6 +21,7 @@ export interface CreateWebsiteDrawerProps {
   handleCreate: (e: FormEvent) => void | Promise<void>;
   error: string;
   selectedFramework: string;
+  savedFramework?: string;
   handleSelectFramework: (fw: FrameworkStarterOption) => void;
   domain: string;
   setDomain: (val: string) => void;
@@ -67,6 +68,7 @@ export function CreateWebsiteDrawer({
   handleCreate,
   error,
   selectedFramework,
+  savedFramework,
   handleSelectFramework,
   domain,
   setDomain,
@@ -140,7 +142,9 @@ export function CreateWebsiteDrawer({
           <section>
             <h3>{t.sectionTemplate}</h3>
             <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "#64748b" }}>
-              {t.drawerSubtitle}
+              {editing && savedFramework ? <>
+                {isUk ? "Поточний фреймворк" : "Current framework"} <strong>{savedFramework}</strong>
+              </> : t.drawerSubtitle}
             </p>
 
             <div
@@ -157,20 +161,22 @@ export function CreateWebsiteDrawer({
                   <article
                     key={fw.id}
                     className={`provider-card is-connected${isSelected ? " selected" : ""}`}
-                    onClick={() => handleSelectFramework(fw)}
+                    aria-disabled={editing || undefined}
+                    onClick={editing ? undefined : () => handleSelectFramework(fw)}
                     style={{
-                      cursor: "pointer",
+                      cursor: editing ? "default" : "pointer",
+                      transform: editing ? "none" : undefined,
                       borderColor: isSelected ? "var(--npati-red, #e11d2e)" : "#f2b6bd",
                       borderWidth: "1px",
                       borderStyle: "solid",
                       boxShadow: isSelected
                         ? "0 4px 14px rgba(225, 29, 46, 0.12)"
-                        : undefined,
+                        : editing ? "var(--npati-shadow)" : undefined,
                       background: "#ffffff",
                       outline: "none",
                     }}
                   >
-                    <div className="provider-card-main" style={{ cursor: "pointer" }}>
+                    <div className="provider-card-main" style={{ cursor: "inherit" }}>
                       <span
                         className="provider-avatar"
                         aria-hidden="true"
@@ -195,7 +201,7 @@ export function CreateWebsiteDrawer({
                       </span>
                       <span
                         className={`connection-light ${isSelected ? "on" : ""}`}
-                        aria-label={isSelected ? "Selected" : "Available"}
+                        aria-label={isSelected ? "Selected" : editing ? undefined : "Available"}
                         style={{ marginLeft: "auto", justifySelf: "end" }}
                       />
                     </div>

@@ -922,6 +922,8 @@
    Project Preview Placeholder (SVG + CSS Glassmorphic Mockup)
    ========================================================================== */
 .website-preview-viewport {
+  height: 196px;
+  box-sizing: border-box;
   border: 0;
   border-bottom: 1px solid #eaecf0;
   background: #f8fafc;
@@ -960,7 +962,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0px;
   padding: 6px 10px 14px;
   box-sizing: border-box;
@@ -1008,9 +1010,9 @@
 .project-preview-placeholder-art {
   position: relative;
   z-index: 1;
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
+  width: min(100%, 252px);
+  aspect-ratio: 400 / 184;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1019,8 +1021,6 @@
 .project-preview-placeholder-svg {
   width: 100%;
   height: 100%;
-  max-width: 480px;
-  max-height: 225px;
   display: block;
 }
 

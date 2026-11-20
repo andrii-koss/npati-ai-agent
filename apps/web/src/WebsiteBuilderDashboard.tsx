@@ -35,6 +35,7 @@ import {
 import {
   websiteBuilderCopy as copy,
   FRAMEWORK_STARTERS,
+  frameworkStarterForProject,
   type FrameworkStarterOption,
 } from "./website-builder-constants";
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
@@ -78,7 +79,7 @@ export function WebsiteBuilderDashboard() {
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<WebsiteProject | null>(null);
-  const [selectedFramework, setSelectedFramework] = useState<FrameworkStarterOption["id"]>("html-css");
+  const [selectedFramework, setSelectedFramework] = useState<FrameworkStarterOption["id"] | "">("html-css");
   const [name, setName] = useState(FRAMEWORK_STARTERS[0]?.defaultName ?? "Modern HTML/CSS Website");
   const [description, setDescription] = useState(FRAMEWORK_STARTERS[0]?.defaultDesc ?? "Clean responsive website");
   const [framework, setFramework] = useState<string>("HTML/CSS");
@@ -229,6 +230,7 @@ export function WebsiteBuilderDashboard() {
 
   // When framework selection changes in drawer, update suggested values.
   const handleSelectFramework = (fw: FrameworkStarterOption) => {
+    if (editingProject) return;
     setSelectedFramework(fw.id);
     setFramework(fw.frameworkKey);
     setContainerPort(fw.defaultPort);
@@ -302,7 +304,7 @@ export function WebsiteBuilderDashboard() {
         );
         deploymentRevision.current = stored.revision;
 
-        const updated = productionEnabled && name.trim() === editingProject.name && framework === editingProject.framework
+        const updated = productionEnabled && name.trim() === editingProject.name
           ? editingProject : await apiFetch<WebsiteProject>(
           `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}`,
           {
@@ -311,7 +313,6 @@ export function WebsiteBuilderDashboard() {
               name: name.trim() || editingProject.name,
               expectedRevision: editingProject.revision,
               ...(!productionEnabled ? { deploymentUrl: `https://${finalDomain}`, deploymentStatus: "deployed", previewUrl: `https://${finalDomain}`, previewPort: domainConfig.port } : {}),
-              framework,
             }),
           }
         );
@@ -462,23 +463,19 @@ export function WebsiteBuilderDashboard() {
     setCreationCompanyId(site.companyId);
     setName(site.name);
     setDescription(site.description ?? "");
-    const starter = FRAMEWORK_STARTERS.find(s =>
-      (site.framework && (s.id.toLowerCase() === site.framework.toLowerCase() || s.frameworkKey.toLowerCase() === site.framework.toLowerCase())) ||
-      (site.kind && s.kind === site.kind) ||
-      (site.type && s.defaultType === site.type)
-    ) || FRAMEWORK_STARTERS[0]!;
-    setSelectedFramework(starter.id);
-    setFramework(site.framework || starter.frameworkKey);
-    const resolvedType = (site.type === "code_project" ? "web_app" : site.type) || starter.defaultType;
+    const starter = frameworkStarterForProject(site);
+    setSelectedFramework(starter?.id ?? "");
+    setFramework(site.framework || starter?.frameworkKey || "");
+    const resolvedType = (site.type === "code_project" ? "web_app" : site.type) || starter?.defaultType || "website";
     setType(resolvedType);
-    setKind((site.kind ?? projectKindOf(site)) || starter.kind);
+    setKind(projectKindOf(site));
     const rawDomain = (site.deploymentUrl || site.previewUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
     const isTechnical = !rawDomain || rawDomain.endsWith(".preview.npati.com");
     setDomain(isTechnical ? "" : rawDomain);
     setAlias({ domain: "", redirect: true });
     setInternalPath("/");
     setStripPath(false);
-    setContainerPort(site.previewPort || starter.defaultPort || 3000);
+    setContainerPort(site.previewPort || starter?.defaultPort || 3000);
     setUseCustomEntrypoint(false);
     setCustomEntrypoint("web, websecure");
     setAutoSsl(true);
@@ -736,6 +733,7 @@ export function WebsiteBuilderDashboard() {
         handleCreate={handleCreate}
         error={error}
         selectedFramework={selectedFramework}
+        savedFramework={editingProject?.framework}
         handleSelectFramework={handleSelectFramework}
         domain={domain}
         setDomain={setDomain}

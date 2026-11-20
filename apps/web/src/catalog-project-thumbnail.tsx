@@ -148,7 +148,7 @@ export function CatalogProjectThumbnail({
   const isImagePending = Boolean(thumbnail || !settled);
 
   return <div ref={container} style={{ width: "100%" }}>
-    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#f8fafc" }}>
+    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", overflow: "hidden", background: "#f8fafc" }}>
       <a href={previewHref} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer", textDecoration: "none" }}>
         {thumbnail && (
           <img

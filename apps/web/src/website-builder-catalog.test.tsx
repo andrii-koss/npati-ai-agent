@@ -10,12 +10,20 @@ vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => authState.token, get
 vi.mock("./i18n", () => ({ useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
 vi.mock("./ConfirmDialog", () => ({ confirmModal: async () => true, promptModal: async () => null }));
 vi.mock("./website-builder-card", () => ({
-  WebsiteProjectCard: ({ site, companyId, handleDelete }: { site: { name: string }; companyId: string; handleDelete: (site: { name: string }) => void }) => (
-    <article data-project data-company={companyId}>{site.name}<button data-delete-project onClick={() => handleDelete(site)} /></article>
+  WebsiteProjectCard: ({ site, companyId, handleDelete, handleRename }: {
+    site: { name: string }; companyId: string; handleDelete: (site: { name: string }) => void; handleRename: (site: { name: string }) => void;
+  }) => (
+    <article data-project data-company={companyId}>
+      {site.name}<button data-delete-project onClick={() => handleDelete(site)} /><button data-edit-project onClick={() => handleRename(site)} />
+    </article>
   ),
   invalidateWebsitePreviewCache: vi.fn(),
 }));
-vi.mock("./website-builder-drawer", () => ({ CreateWebsiteDrawer: () => null }));
+vi.mock("./website-builder-drawer", () => ({
+  CreateWebsiteDrawer: ({ isOpen, selectedFramework, savedFramework, containerPort }: {
+    isOpen: boolean; selectedFramework: string; savedFramework?: string; containerPort: number;
+  }) => isOpen ? <div data-edit-starter={selectedFramework} data-framework={savedFramework} data-port={containerPort} /> : null,
+}));
 let root: Root, host: HTMLDivElement;
 beforeEach(() => { authState.token = "test-" + ++authState.serial; localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -23,6 +31,29 @@ const project = (id: string, companyId: string) => ({ id, companyId, name: id, t
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
 describe("Projects catalog company scope and freshness", () => {
+  it.each([
+    ["React + Vite", "website", "vite", 5173],
+    ["Next.js", "website", "nextjs", 3000],
+    ["Vue 3 + Vite", "website", "vue", 5173],
+    ["Vite", "game", "phaser", 5173],
+    ["FastAPI", "api", "fastapi", 8000],
+    ["Fastify", "api", "", 3000],
+  ])("opens %s project settings on the matching starter", async (framework, kind, starter, port) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/files/read")) return new Response(null, { status: 404 });
+      if (url.endsWith("/production")) return new Response(JSON.stringify({ enabled: false }));
+      return new Response(JSON.stringify(url.includes("/projects/catalog")
+        ? { projects: [{ ...project("sample", "company"), framework, kind }], pagination: { nextCursor: null } }
+        : { companies: [{ id: "company", name: "Company" }], pagination: { nextCursor: null } }));
+    }));
+    await render();
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-edit-project]")!.click());
+    const drawer = host.querySelector("[data-edit-starter]");
+    expect(drawer?.getAttribute("data-edit-starter")).toBe(starter);
+    expect(drawer?.getAttribute("data-framework")).toBe(framework);
+    expect(drawer?.getAttribute("data-port")).toBe(String(port));
+  });
+
   it("removes only the deleted card and keeps the order, mounted cards and continuation", async () => {
     let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
     vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });

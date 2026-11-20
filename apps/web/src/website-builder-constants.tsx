@@ -1,5 +1,5 @@
 import React from "react";
-import type { ProjectKind } from "@npati/shared";
+import { canonicalFrameworkName, type ProjectKind } from "@npati/shared";
 
 export function FrameworkIcon({ id }: { id: string }) {
   if (id === "html-css") {
@@ -447,6 +447,23 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     defaultDescUk: "Застосунок на Flutter зі списком, формою додавання та веб-превʼю.",
   },
 ];
+
+export function frameworkStarterForProject(project: { framework?: string; kind?: ProjectKind; type?: string }) {
+  const framework = project.framework?.trim().toLowerCase();
+  let candidates = FRAMEWORK_STARTERS;
+  if (framework) {
+    candidates = FRAMEWORK_STARTERS.filter(starter =>
+      [starter.id, starter.frameworkKey, starter.name].some(value => value.toLowerCase() === framework),
+    );
+    if (candidates.length === 0) {
+      const canonical = canonicalFrameworkName(framework);
+      if (canonical) candidates = FRAMEWORK_STARTERS.filter(starter => canonicalFrameworkName(starter.frameworkKey) === canonical);
+    }
+  }
+  return candidates.find(starter => starter.kind === project.kind)
+    ?? candidates.find(starter => starter.defaultType === project.type)
+    ?? candidates[0];
+}
 
 /** Projects page labels for each project kind. */
 export const PROJECT_KIND_LABELS: Record<ProjectKind, { en: string; uk: string }> = {
