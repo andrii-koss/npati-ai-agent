@@ -206,6 +206,44 @@ describe("development request planning", () => {
   });
 });
 describe("chat development lifecycle with the real store, queue and executor", () => {
+  it("opens a linked project chat directly even with older history, and reuses its replacement after deletion", async () => {
+    const f = await fixture();
+    const { project } = await f.projects.create(owner, f.company.id, { name: "Older project", type: "website" }, "older-project");
+    const original = await f.store.createNeutralConversation(owner, "Original project chat");
+    await f.store.appendNeutralMessage(owner, original.id, "user", "Keep the original project history");
+    await f.service.ensureChatProcess(owner, {
+      companyId: f.company.id, projectId: project.id, conversationId: original.id, sessionId: "older-project-session",
+    });
+    for (let index = 0; index < 60; index++) await f.store.createNeutralConversation(owner, `Newer chat ${index}`);
+    const listChats = vi.spyOn(f.store, "listNeutralConversations");
+    const createChat = vi.spyOn(f.store, "createNeutralConversation");
+    const app = Fastify();
+    registerChatDevelopmentRoutes(app, { ...f.ports, auth: { authenticate: async () => owner } });
+    try {
+      const open = async () => {
+        const response = await app.inject({
+          method: "POST", url: "/chat/development/project", payload: { companyId: f.company.id, projectId: project.id },
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        return new URL(response.json().url, "http://localhost").pathname;
+      };
+      expect(await open()).toBe(`/c/${original.id}`);
+      expect((await f.store.getNeutralConversation(owner, original.id)).messages.map(message => message.content))
+        .toContain("Keep the original project history");
+      expect(listChats).not.toHaveBeenCalled();
+      expect(createChat).not.toHaveBeenCalled();
+
+      await f.store.deleteNeutralConversation(owner, original.id);
+      const replacement = await open();
+      expect(replacement).not.toBe(`/c/${original.id}`);
+      const count = createChat.mock.calls.length;
+      expect(count).toBeGreaterThan(0);
+      expect(await open()).toBe(replacement);
+      expect(createChat).toHaveBeenCalledTimes(count);
+      expect(listChats).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
   it("acknowledges early, starts four distinct sessions and verifies build before Preview", async () => {
     const f = await fixture(); const result = await f.start(bulk + "; websites use Next.js");
     expect(result.processes).toHaveLength(4);

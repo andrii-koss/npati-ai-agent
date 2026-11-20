@@ -47,6 +47,13 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   discord.setInboundHandler(async(connectionId,message)=>{const connection=await repo.getInternal(connectionId);if(!connection)return;await discordDispatcher.dispatch(connection,message).catch(async(error)=>{await repo.record(connection.id,"inbound",error instanceof Error?error.message:String(error));});});
   const email=gateway.optionalAdapter("email");
   const emailDispatcher=email?new MessagingInboundDispatcher({store,repo,adapter:email,handleMessage:deps.handleMessage,resetConversation:deps.resetConversation}):undefined;
+  async function listConnections(ctx: AuthContext, companyId?: string) {
+    if (!deps.emailRepo) return repo.list(ctx, companyId);
+    const accounts = await deps.emailRepo.listUserAccounts(ctx);
+    const scoped = companyId ? accounts.filter(account => account.companyId === companyId && account.connectionScope !== "account") : accounts;
+    await Promise.all(scoped.map(account => repo.ensureEmailConnection(account, ctx.permissions)));
+    return repo.list(ctx, companyId, new Set(scoped.map(account => account.id)));
+  }
   if(!app.hasContentTypeParser("application/x-www-form-urlencoded"))app.addContentTypeParser("application/x-www-form-urlencoded",{parseAs:"string"},(_request,body,done)=>done(null,body));
   app.addHook("preParsing",async(request,_reply,payload)=>{if(!request.url.includes("/integrations/whatsapp/cloud/")&&!request.url.includes("/integrations/slack/http/"))return payload;const chunks:Buffer[]=[];for await(const chunk of payload)chunks.push(Buffer.from(chunk));const raw=Buffer.concat(chunks);(request as any).rawBody=raw;return Readable.from(raw);});
 
@@ -55,15 +62,8 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
       const ctx = await authenticate(auth, request, "workspace:read");
       const includeCompanies = request.query.includeCompanies === "true";
       if (includeCompanies && !ctx.permissions.includes("workspace:read")) throw new WorkspaceAccessError("Missing permission: workspace:read");
-      async function listConnections() {
-        if (deps.emailRepo) {
-          const accounts = await deps.emailRepo.listUserAccounts(ctx);
-          await Promise.all(accounts.map(account => repo.ensureEmailConnection(account, ctx.permissions)));
-        }
-        return repo.list(ctx);
-      }
       const [connections, companyPage] = await Promise.all([
-        listConnections(),
+        listConnections(ctx),
         includeCompanies ? store.listCompanies(ctx) : null,
       ]);
       reply.header("cache-control", "private, no-store");
@@ -159,7 +159,7 @@ export function registerMessagingIntegrationRoutes(app:FastifyInstance,deps:{
   app.post("/api/v1/integrations/whatsapp/cloud/:secret",whatsappCloudWebhookHandler);app.post("/v1/integrations/whatsapp/cloud/:secret",whatsappCloudWebhookHandler);
 
 
-  app.get<{Params:{companyId:string}}>("/companies/:companyId/integrations/messaging",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"workspace:read");await store.getCompany(ctx,r.params.companyId);return {connections:await repo.list(ctx,r.params.companyId)};}catch(e){return failure(reply,e);}});
+  app.get<{Params:{companyId:string}}>("/companies/:companyId/integrations/messaging",async(r,reply)=>{try{const ctx=await authenticate(auth,r,"workspace:read");await store.getCompany(ctx,r.params.companyId);return {connections:await listConnections(ctx,r.params.companyId)};}catch(e){return failure(reply,e);}});
   app.post<{Params:{companyId:string};Body:{displayName?:string;botToken?:string;agentId?:string}}>("/companies/:companyId/integrations/telegram",async(r,reply)=>{
     try{
       const ctx=await authenticate(auth,r,"business:manage");await store.getCompany(ctx,r.params.companyId);

@@ -9,6 +9,7 @@ import { runMigration046 } from "../packages/workspace/src/migration-046";
 import { runMigration047 } from "../packages/workspace/src/migration-047";
 import { runMigration048 } from "../packages/workspace/src/migration-048";
 import { MessagingScopeRouter } from "../apps/agent-api/src/messaging-scope-router";
+import { EmailInboxRepository } from "../apps/agent-api/src/email-inbox-repository";
 
 const owner:AuthContext={workspaceId:"workspace-a",userId:"user-a",permissions:["workspace:read","business:manage","tools:execute"]};
 
@@ -31,6 +32,35 @@ it("includes company choices with the channels and connections when requested", 
     const catalog = await app.inject({ method: "GET", url: "/integrations/channels" });
     expect(catalog.json()).not.toHaveProperty("companies");
     expect(listCompanies).toHaveBeenCalledTimes(1);
+  } finally { await app.close(); }
+});
+
+it("excludes deleted email accounts from the catalog while keeping other connections", async () => {
+  const repo = new MessagingIntegrationsRepository(undefined, undefined, new CryptoVault("test-master-key-that-is-at-least-thirty-two-characters"));
+  const emailRepo = new EmailInboxRepository();
+  const mail = await emailRepo.createAccount(owner, "company-a", { emailAddress: "deleted@example.test" });
+  const remaining = await emailRepo.createAccount(owner, "company-a", { emailAddress: "active@example.test", status: "auth_error" });
+  const telegram = await repo.createTelegram(owner, "company-a", { displayName: "Telegram", botToken: "test-token" });
+  const app = Fastify();
+  registerMessagingIntegrationRoutes(app, {
+    auth: { authenticate: async () => owner }, store: {} as WorkspaceStore, repo, emailRepo,
+    gateway: new MessagingGateway(), handleMessage: async () => ({ message: "" }),
+  });
+  const catalog = async () => {
+    const response = await app.inject({ method: "GET", url: "/integrations/channels" });
+    expect(response.statusCode).toBe(200);
+    return response.json().connections;
+  };
+  try {
+    expect(await catalog()).toEqual(expect.arrayContaining([expect.objectContaining({ id: mail.id, channel: "email" })]));
+    await emailRepo.deleteAccount(owner, "company-a", mail.id);
+    expect(await catalog()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: remaining.id, status: "error" }),
+      expect.objectContaining({ id: telegram.connection.id }),
+    ]));
+    expect((await catalog()).map((item: { id: string }) => item.id)).not.toContain(mail.id);
+    await emailRepo.deleteAccount(owner, "company-a", remaining.id);
+    expect(await catalog()).toEqual([expect.objectContaining({ id: telegram.connection.id })]);
   } finally { await app.close(); }
 });
 

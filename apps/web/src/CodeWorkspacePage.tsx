@@ -34,6 +34,7 @@ import {
   flattenFiles,
 } from "./code-workspace-page-types";
 import { CodeWorkspaceBottomTabs } from "./code-workspace-bottom-tabs";
+import { ProjectProductionHeader, useProjectProduction } from "./code-workspace/project-production";
 
 /**
  * Code Workspace (C7).
@@ -64,6 +65,7 @@ function CodeWorkspaceContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { language } = useTranslation();
   const isUk = language === "uk";
+  const production = useProjectProduction(companyId, projectId);
 
   const base = `/api/companies/${companyId}/projects/${projectId}`;
   const codeBase = `/api/companies/${companyId}/code`;
@@ -576,6 +578,7 @@ function CodeWorkspaceContent() {
   return (
     <main className="goals-container automations-container code-workspace" data-project-id={projectId} style={{ maxWidth: 1180, margin: "0 auto", paddingBottom: 60 }}>
       <CodeWorkspaceHeader isUk={isUk} sessionId={sessionId} runId={runId} selectSession={selectSession} sessions={sessions} deleteCurrentSession={deleteCurrentSession} createNewSession={createNewSession} taskBusy={taskBusy} mode={mode} tree={tree} events={events} changedFiles={changedFiles} usage={usage} />
+      <ProjectProductionHeader controller={production} isUk={isUk} />
 
       {/* Dismissible Notices */}
       {taskError && (
@@ -679,6 +682,7 @@ function CodeWorkspaceContent() {
             changedFiles={changedFiles}
             events={events}
             terminalEvents={terminalEvents}
+            production={production.status}
           />
         </div>
       )}

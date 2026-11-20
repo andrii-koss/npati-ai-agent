@@ -1,0 +1,80 @@
+services:
+  agent-api:
+    environment:
+      NPATI_PRODUCTION_URL: http://production:8091
+      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:?Set a random production control token}
+    networks: [npati-production-control]
+
+  traefik:
+    image: traefik:v3.6
+    restart: unless-stopped
+    user: "65532:65532"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    entrypoint: [/bin/sh, /etc/npati/traefik.sh]
+    environment:
+      NPATI_PRODUCTION_ACME_EMAIL: ${NPATI_PRODUCTION_ACME_EMAIL:-}
+    ports:
+      - "${NPATI_PRODUCTION_BIND:-0.0.0.0}:${NPATI_PRODUCTION_HTTP_PORT:-80}:8080"
+      - "${NPATI_PRODUCTION_BIND:-0.0.0.0}:${NPATI_PRODUCTION_HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./apps/production-runtime/traefik.sh:/etc/npati/traefik.sh:ro
+      - npati-production-routes:/routes:ro
+      - npati-production-certs:/certs
+    networks: [npati-production-edge]
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    depends_on:
+      production:
+        condition: service_healthy
+
+  production:
+    build: ./apps/production-runtime
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    environment:
+      NPATI_PRODUCTION_TOKEN: ${NPATI_PRODUCTION_TOKEN:?Set a random production control token}
+      NPATI_PRODUCTION_ACME_EMAIL: ${NPATI_PRODUCTION_ACME_EMAIL:-}
+      NPATI_PRODUCTION_DOMAIN: ${NPATI_PRODUCTION_DOMAIN:-}
+      NPATI_PRODUCTION_LOCAL: ${NPATI_PRODUCTION_LOCAL:-false}
+      NPATI_PRODUCTION_HTTP_PORT: ${NPATI_PRODUCTION_HTTP_PORT:-80}
+      NPATI_PRODUCTION_HTTPS_PORT: ${NPATI_PRODUCTION_HTTPS_PORT:-443}
+    volumes:
+      - npati-production-state:/srv/production
+      - npati-production-routes:/routes
+      - npati-production-certs:/certs
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+      - /builds:mode=0711,size=640m
+    cpus: ${NPATI_PRODUCTION_CPUS:-4}
+    mem_limit: ${NPATI_PRODUCTION_MEMORY:-4g}
+    memswap_limit: ${NPATI_PRODUCTION_MEMORY:-4g}
+    pids_limit: 512
+    networks: [npati-production-edge, npati-production-control]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8091/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+networks:
+  npati-production-edge:
+  npati-production-control:
+    internal: true
+
+volumes:
+  npati-production-state:
+  npati-production-routes:
+  npati-production-certs:

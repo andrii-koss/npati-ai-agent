@@ -25,6 +25,7 @@ export interface ProjectLifecycleDeps {
   sandboxService?: ProjectSandboxService;
   mediaService?: ProjectMediaService;
   dataBackendService?: DataBackendService;
+  removeProduction?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<void>;
   removeWorkspace?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<{ removed: boolean; reason?: string; alreadyAbsent?: boolean }>;
   auditLog?: (entry: { ctx: AuthContext; companyId: string; action: string; resourceId: string; metadata?: Record<string, unknown> }) => Promise<void>;
   logger?: FastifyBaseLogger;
@@ -266,6 +267,7 @@ export class ProjectLifecycleService {
     }
 
     await this.audit(ctx, companyId, "project.lifecycle.soft_delete", projectId, { reason: options.reason });
+    await this.deps.removeProduction?.(ctx, companyId, projectId);
 
     // 1. Stop live preview
     let previewStopped = false;
@@ -498,6 +500,7 @@ export class ProjectLifecycleService {
     }
 
     await this.audit(ctx, companyId, "project.lifecycle.hard_purge", projectId, { force: options.force });
+    await this.deps.removeProduction?.(ctx, companyId, projectId);
 
     // Transition to 'purging' state
     if (project.status !== "purging") await this.deps.store.transitionProjectToPurging(ctx, companyId, projectId);

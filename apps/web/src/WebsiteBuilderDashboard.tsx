@@ -2,7 +2,7 @@ import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { readProjectFile, writeProjectFile } from "./project-files-client";
+import { ProjectFilesClientError, readProjectFile, writeProjectFile } from "./project-files-client";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
@@ -42,6 +42,9 @@ import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
 import { cachedCatalog, invalidateProjectCatalog, mergeCatalogRefresh, removeProjectFromCatalog, requestCatalog } from "./project-catalog-client";
 import { CatalogScrollToTop } from "./CatalogScrollToTop";
+import { apiGet, apiSend } from "./code-workspace-page-types";
+import { productionEndpoint, useProjectProduction, type ProductionDraftLimits, type ProductionStatus } from "./code-workspace/project-production";
+import { projectDomain, useProductionCapabilities } from "./website-builder-production";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -82,6 +85,7 @@ export function WebsiteBuilderDashboard() {
   const [type, setType] = useState<"website" | "landing_page" | "web_app" | "mobile_app">("website");
   const [kind, setKind] = useState<ProjectKind>("website");
   const [domain, setDomain] = useState("");
+  const [alias, setAlias] = useState({ domain: "", redirect: true });
   const [internalPath, setInternalPath] = useState("/");
   const [stripPath, setStripPath] = useState(false);
   const [containerPort, setContainerPort] = useState(3000);
@@ -89,18 +93,21 @@ export function WebsiteBuilderDashboard() {
   const [customEntrypoint, setCustomEntrypoint] = useState("web, websecure");
   const [autoSsl, setAutoSsl] = useState(true);
   const [busy, setBusy] = useState(false);
-
-  // Sync default container port with framework selection
-  useEffect(() => {
-    if (editingProject) return; const fw = framework.toLowerCase();
-    if (fw.includes("vite")) {
-      setContainerPort(5173);
-    } else if (fw.includes("astro")) {
-      setContainerPort(4321);
-    } else {
-      setContainerPort(3000);
-    }
-  }, [framework, editingProject]);
+  const [loadingDeployment, setLoadingDeployment] = useState(false);
+  const draftRequest = useRef(0);
+  const deploymentRevision = useRef<string | undefined>(undefined);
+  const [savedLimits, setSavedLimits] = useState<Partial<ProductionDraftLimits>>({});
+  const [runtimeEnvironment, setRuntimeEnvironment] = useState("");
+  const drawerCompanyId = editingProject?.companyId ?? creationCompanyId;
+  const production = useProjectProduction(modalOpen ? editingProject?.companyId ?? "" : "", editingProject?.id ?? "");
+  const capabilities = useProductionCapabilities(modalOpen && type !== "mobile_app" ? drawerCompanyId : "");
+  const release = production.status?.enabled ? production.status.release : null;
+  const productionEnabled = capabilities?.enabled === true && (!editingProject || production.status?.enabled === true);
+  const limits = capabilities?.enabled ? { ...capabilities.defaults, ...release?.settings.limits, ...savedLimits } : undefined;
+  const automaticDomain = production.status?.enabled ? production.status.automaticDomain : undefined;
+  const targetDomain = projectDomain(domain) || automaticDomain;
+  const localDomain = targetDomain ? targetDomain.endsWith(".localhost") : capabilities?.enabled && capabilities.automaticDomainIsLocal;
+  const canUseSsl = !capabilities?.enabled || (capabilities.tlsEnabled && !localDomain && !(useCustomEntrypoint && customEntrypoint.trim() === "web"));
 
   // Load Companies
   useEffect(() => {
@@ -118,7 +125,8 @@ export function WebsiteBuilderDashboard() {
         writeCachedCompanies(list);
         if (list.length === 0) return;
         const resolved = chooseAvailableCompanyId(list, { requested: readActiveCompanyId() });
-        setCreationCompanyId(list.some(company => company.id === resolved) ? resolved : list[0]!.id);
+        const defaultCompany = list.some(company => company.id === resolved) ? resolved : list[0]!.id;
+        setCreationCompanyId(current => list.some(company => company.id === current) ? current : defaultCompany);
       } catch (err: any) {
         if (active) {
           setError(err.message || t.loadError);
@@ -234,75 +242,87 @@ export function WebsiteBuilderDashboard() {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
-    const companyId = creationCompanyId;
-    if (!name.trim() || !companyId || busy) return;
+    const companyId = drawerCompanyId;
+    const publish = (e.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "publish";
+    if (!name.trim() || !companyId || busy || loadingDeployment || (publish && (!productionEnabled || production.running))) return;
     setBusy(true);
+    setError("");
+    let createdForPublication: WebsiteProject | null = null;
     try {
       // Determine domain: use custom domain if provided, otherwise generate temporary technical preview domain
       const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "site";
-      const userDomainTrimmed = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const userDomainTrimmed = projectDomain(domain);
       const randomSuffix = Math.random().toString(36).substring(2, 6);
       const technicalDomain = `${slug}-${randomSuffix}.preview.npati.com`;
       const finalDomain = userDomainTrimmed || technicalDomain;
       const isTechnical = !userDomainTrimmed;
+      const aliasDomain = projectDomain(alias.domain);
 
       const domainConfig: WebsiteDomainConfig = {
         domain: finalDomain,
         isTechnicalDomain: isTechnical,
         path: internalPath.trim() || "/",
         stripPath,
-        port: Number(containerPort) || (framework.toLowerCase().includes("vite") ? 80 : 3000),
+        port: containerPort,
         customEntrypoint: useCustomEntrypoint,
         entrypoints: useCustomEntrypoint
           ? customEntrypoint.split(",").map((s) => s.trim()).filter(Boolean)
           : ["web", "websecure"],
-        sslCertificate: autoSsl,
-        certificateProvider: autoSsl ? "letsencrypt" : "none",
+        sslCertificate: autoSsl && canUseSsl,
+        certificateProvider: autoSsl && canUseSsl ? "letsencrypt" : "none",
       };
+      const entrypoints = [...new Set(domainConfig.entrypoints)].sort().join(",");
+      const entrypoint = !useCustomEntrypoint || entrypoints === "web,websecure" ? "auto" : entrypoints;
+      let environment: unknown;
+      if (publish && runtimeEnvironment.trim()) {
+        try { environment = JSON.parse(runtimeEnvironment); }
+        catch { throw new Error(language === "uk" ? "Введіть змінні середовища як об’єкт JSON." : "Enter runtime environment variables as a JSON object."); }
+      }
+      const settings = {
+        domain: userDomainTrimmed, aliasDomain, redirectAlias: alias.redirect,
+        path: domainConfig.path ?? "/", stripPath, port: domainConfig.port,
+        entrypoint, tls: domainConfig.sslCertificate, limits,
+        environment,
+      };
+      const deploymentConfigData = JSON.stringify({
+        domain: finalDomain, isTechnicalDomain: isTechnical, path: domainConfig.path, stripPath,
+        port: domainConfig.port, entrypoints: domainConfig.entrypoints, customEntrypoint: useCustomEntrypoint,
+        ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
+        ...(productionEnabled ? { productionLimits: limits, aliasDomain, redirectAlias: alias.redirect } : {}),
+      }, null, 2);
+      const publishProject = (project: WebsiteProject) => apiSend<ProductionStatus>("POST",
+        productionEndpoint(project.companyId, project.id), settings);
 
       if (editingProject) {
-        const deploymentConfigData = JSON.stringify(
-          {
-            domain: finalDomain,
-            isTechnicalDomain: isTechnical,
-            path: domainConfig.path,
-            stripPath: domainConfig.stripPath,
-            port: domainConfig.port,
-            entrypoints: domainConfig.entrypoints,
-            ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
-            updatedAt: new Date().toISOString(),
-          },
-          null,
-          2
+        const stored = await writeProjectFile(
+          { companyId: editingProject.companyId, projectId: editingProject.id },
+          "deployment.json",
+          deploymentConfigData,
+          deploymentRevision.current,
         );
+        deploymentRevision.current = stored.revision;
 
-        try {
-          await writeProjectFile(
-            { companyId: editingProject.companyId, projectId: editingProject.id },
-            "deployment.json",
-            deploymentConfigData
-          );
-        } catch {
-          // ignore if workspace not initialized
-        }
-
-        await apiFetch(
+        const updated = productionEnabled && name.trim() === editingProject.name && framework === editingProject.framework
+          ? editingProject : await apiFetch<WebsiteProject>(
           `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}`,
           {
             method: "PATCH",
             body: JSON.stringify({
               name: name.trim() || editingProject.name,
               expectedRevision: editingProject.revision,
-              deploymentUrl: `https://${finalDomain}`,
-              deploymentStatus: "deployed",
-              previewUrl: `https://${finalDomain}`,
-              previewPort: domainConfig.port,
+              ...(!productionEnabled ? { deploymentUrl: `https://${finalDomain}`, deploymentStatus: "deployed", previewUrl: `https://${finalDomain}`, previewPort: domainConfig.port } : {}),
               framework,
             }),
           }
         );
 
-        void apiFetch(
+        setEditingProject(updated);
+        if (publish) {
+          if (!(await production.publish(settings))) return;
+          setRuntimeEnvironment("");
+          return;
+        }
+        if (!productionEnabled) void apiFetch(
           `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}/preview/start`,
           {
             method: "POST",
@@ -327,12 +347,12 @@ export function WebsiteBuilderDashboard() {
             description: description.trim(),
             type,
             kind,
-            deploymentUrl: `https://${finalDomain}`,
-            previewUrl: `https://${finalDomain}`,
+            ...(!productionEnabled ? { deploymentUrl: `https://${finalDomain}`, previewUrl: `https://${finalDomain}` } : {}),
             previewPort: domainConfig.port,
           }),
         }
       );
+      if (publish) createdForPublication = created;
 
       // Initialize project files. Mobile projects get the Expo template (D6) so the workspace
       // never mixes a Next.js/Vite scaffold into a React Native app.
@@ -376,30 +396,25 @@ export function WebsiteBuilderDashboard() {
 
       // Save domain and deployment configuration file in project files
       if (!isMobileApp) {
-        files["deployment.json"] = JSON.stringify(
-          {
-            domain: finalDomain,
-            isTechnicalDomain: isTechnical,
-            path: domainConfig.path,
-            stripPath: domainConfig.stripPath,
-            port: domainConfig.port,
-            entrypoints: domainConfig.entrypoints,
-            ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
-            createdAt: new Date().toISOString(),
-          },
-          null,
-          2
-        );
+        files["deployment.json"] = deploymentConfigData;
       }
 
       // Write initial scaffold files into the workspace
       for (const [filePath, content] of Object.entries(files)) {
         try {
           // Shared adapter (C7): the scaffold write goes through the same client module as the file browser.
-          await writeProjectFile({ companyId, projectId: created.id }, filePath, content);
-        } catch {
+          const stored = await writeProjectFile({ companyId, projectId: created.id }, filePath, content);
+          if (filePath === "deployment.json") deploymentRevision.current = stored.revision;
+        } catch (error) {
+          if (publish) throw error;
           // ignore individual write fail
         }
+      }
+
+      if (publish) {
+        await publishProject(created);
+        setRuntimeEnvironment("");
+        return;
       }
 
       // Automatically start framework dev / preview runtime
@@ -428,11 +443,21 @@ export function WebsiteBuilderDashboard() {
     } catch (err: any) {
       setError(err.message || "Failed to create project");
     } finally {
+      if (createdForPublication) {
+        setEditingProject(createdForPublication);
+        invalidateProjectCatalog();
+        void loadWebsites(companyId);
+      }
       setBusy(false);
     }
   };
 
   const handleRename = useCallback((site: WebsiteProject) => {
+    const requestId = ++draftRequest.current;
+    setLoadingDeployment(true);
+    deploymentRevision.current = undefined;
+    setSavedLimits({});
+    setRuntimeEnvironment("");
     setEditingProject(site);
     setCreationCompanyId(site.companyId);
     setName(site.name);
@@ -450,6 +475,7 @@ export function WebsiteBuilderDashboard() {
     const rawDomain = (site.deploymentUrl || site.previewUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
     const isTechnical = !rawDomain || rawDomain.endsWith(".preview.npati.com");
     setDomain(isTechnical ? "" : rawDomain);
+    setAlias({ domain: "", redirect: true });
     setInternalPath("/");
     setStripPath(false);
     setContainerPort(site.previewPort || starter.defaultPort || 3000);
@@ -458,24 +484,52 @@ export function WebsiteBuilderDashboard() {
     setAutoSsl(true);
     setError("");
     setModalOpen(true);
-    void readProjectFile({ companyId: site.companyId, projectId: site.id }, "deployment.json").then(file => {
-      if (!file?.content) return;
+    void Promise.all([
+      readProjectFile({ companyId: site.companyId, projectId: site.id }, "deployment.json").catch(error => {
+        if (error instanceof ProjectFilesClientError && error.status === 404) return null;
+        throw error;
+      }),
+      apiGet<ProductionStatus>(productionEndpoint(site.companyId, site.id)).catch(() => null),
+    ]).then(([file, published]) => {
+      if (requestId !== draftRequest.current) return;
+      deploymentRevision.current = file?.revision;
       try {
-        const parsed = JSON.parse(file.content);
+        const parsed = file?.content ? JSON.parse(file.content) : {};
+        const active = published?.enabled ? published.release?.settings : undefined;
+        if (active && !parsed.productionLimits) {
+          setDomain(active.domain === (published?.enabled && published.automaticDomain) ? "" : active.domain);
+          setAlias({ domain: active.aliasDomain ?? "", redirect: active.redirectAlias !== false });
+          setInternalPath(active.path);
+          setStripPath(active.stripPath);
+          setContainerPort(active.port);
+          setUseCustomEntrypoint(active.entrypoint !== "auto");
+          setCustomEntrypoint(active.entrypoint === "auto" ? "web, websecure" : active.entrypoint);
+          setAutoSsl(active.tls);
+          return;
+        }
         if (parsed.domain && !parsed.isTechnicalDomain) setDomain(parsed.domain);
+        if (typeof parsed.aliasDomain === "string") setAlias({ domain: parsed.aliasDomain, redirect: parsed.redirectAlias !== false });
         if (parsed.path) setInternalPath(parsed.path);
         if (typeof parsed.stripPath === "boolean") setStripPath(parsed.stripPath);
         if (parsed.port) setContainerPort(Number(parsed.port));
         if (Array.isArray(parsed.entrypoints) && parsed.entrypoints.length > 0) {
           setCustomEntrypoint(parsed.entrypoints.join(", "));
-          setUseCustomEntrypoint(true);
+          setUseCustomEntrypoint(parsed.customEntrypoint ?? parsed.entrypoints.join(",") !== "web,websecure");
         }
         if (parsed.ssl) setAutoSsl(parsed.ssl !== "Disabled");
+        if (parsed.productionLimits && typeof parsed.productionLimits === "object") setSavedLimits(parsed.productionLimits);
       } catch {}
-    }).catch(() => {});
+    }).catch(error => {
+      if (requestId === draftRequest.current && !(error instanceof ProjectFilesClientError && error.status === 404)) setError(error.message);
+    }).finally(() => { if (requestId === draftRequest.current) setLoadingDeployment(false); });
   }, []);
 
   const handleOpenCreateModal = useCallback(() => {
+    draftRequest.current++;
+    setLoadingDeployment(false);
+    deploymentRevision.current = undefined;
+    setSavedLimits({});
+    setRuntimeEnvironment("");
     setEditingProject(null);
     setError("");
     const initial = FRAMEWORK_STARTERS[0]!;
@@ -486,6 +540,7 @@ export function WebsiteBuilderDashboard() {
     setType(initial.defaultType);
     setKind(initial.kind);
     setDomain("");
+    setAlias({ domain: "", redirect: true });
     setInternalPath("/");
     setStripPath(false);
     setContainerPort(initial.defaultPort);
@@ -672,11 +727,11 @@ export function WebsiteBuilderDashboard() {
 
       <CreateWebsiteDrawer
         isOpen={modalOpen}
-        onClose={() => { setModalOpen(false); setEditingProject(null); }}
+        onClose={() => { if (!busy && !production.busy) { draftRequest.current++; setModalOpen(false); setEditingProject(null); } }}
         t={t}
         language={language}
         companies={companies}
-        companyId={creationCompanyId}
+        companyId={drawerCompanyId}
         setCompanyId={setCreationCompanyId}
         handleCreate={handleCreate}
         error={error}
@@ -689,7 +744,7 @@ export function WebsiteBuilderDashboard() {
         setInternalPath={setInternalPath}
         stripPath={stripPath}
         setStripPath={setStripPath}
-        framework={framework}
+        defaultPort={(FRAMEWORK_STARTERS.find(starter => starter.id === selectedFramework) ?? FRAMEWORK_STARTERS[0]!).defaultPort}
         containerPort={containerPort}
         setContainerPort={setContainerPort}
         useCustomEntrypoint={useCustomEntrypoint}
@@ -698,7 +753,15 @@ export function WebsiteBuilderDashboard() {
         setCustomEntrypoint={setCustomEntrypoint}
         autoSsl={autoSsl}
         setAutoSsl={setAutoSsl}
-        busy={busy}
+        busy={busy || loadingDeployment}
+        editing={Boolean(editingProject)}
+        production={productionEnabled && limits ? {
+          limits, setLimit: (key, value) => setSavedLimits(previous => ({ ...previous, [key]: value })),
+          controller: production, automaticDomain, canUseSsl, localDomain: Boolean(localDomain), runtimeEnvironment, setRuntimeEnvironment,
+          canAssignDomain: capabilities.automaticDomain,
+          projectId: editingProject?.id,
+          alias, setAlias,
+        } : undefined}
       />
     </main>
   );

@@ -1,4 +1,8 @@
 import type { FormEvent } from "react";
+import { confirmModal } from "./ConfirmDialog";
+import { safeExternalUrl } from "./code-workspace-page-types";
+import { ProductionLimitFields, useProjectProduction, type ProductionDraftLimits, type ProductionLimits } from "./code-workspace/project-production";
+import { ProductionDomainProof, projectDomain } from "./website-builder-production";
 import {
   FrameworkIcon,
   type FrameworkStarterOption,
@@ -25,7 +29,7 @@ export interface CreateWebsiteDrawerProps {
   setInternalPath: (val: string) => void;
   stripPath: boolean;
   setStripPath: (val: boolean) => void;
-  framework: string;
+  defaultPort: number;
   containerPort: number;
   setContainerPort: (val: number) => void;
   useCustomEntrypoint: boolean;
@@ -35,6 +39,21 @@ export interface CreateWebsiteDrawerProps {
   autoSsl: boolean;
   setAutoSsl: (val: boolean) => void;
   busy: boolean;
+  editing?: boolean;
+  production?: {
+    limits: ProductionDraftLimits;
+    setLimit: (key: keyof ProductionLimits, value: number | "") => void;
+    controller: ReturnType<typeof useProjectProduction>;
+    automaticDomain?: string;
+    canAssignDomain: boolean;
+    canUseSsl: boolean;
+    localDomain: boolean;
+    projectId?: string;
+    alias: { domain: string; redirect: boolean };
+    setAlias: (value: { domain: string; redirect: boolean }) => void;
+    runtimeEnvironment: string;
+    setRuntimeEnvironment: (value: string) => void;
+  };
 }
 
 export function CreateWebsiteDrawer({
@@ -56,7 +75,7 @@ export function CreateWebsiteDrawer({
   setInternalPath,
   stripPath,
   setStripPath,
-  framework,
+  defaultPort,
   containerPort,
   setContainerPort,
   useCustomEntrypoint,
@@ -66,8 +85,15 @@ export function CreateWebsiteDrawer({
   autoSsl,
   setAutoSsl,
   busy,
+  editing,
+  production,
 }: CreateWebsiteDrawerProps) {
   if (!isOpen) return null;
+  const isUk = language === "uk";
+  const release = production?.controller.status?.enabled ? production.controller.status.release : null;
+  const liveUrl = safeExternalUrl(release?.url);
+  const publicationBusy = Boolean(production?.controller.running || production?.controller.busy);
+  const productionError = production?.controller.issue || (production?.controller.status?.enabled && production.controller.status.job?.error);
 
   return (
     <div
@@ -81,7 +107,7 @@ export function CreateWebsiteDrawer({
         <header>
           <div>
             <span>{t.drawerKicker}</span>
-            <h2>{t.drawerTitle}</h2>
+            <h2>{editing ? (isUk ? "Налаштування проєкту" : "Project settings") : t.drawerTitle}</h2>
           </div>
           <button
             type="button"
@@ -99,7 +125,7 @@ export function CreateWebsiteDrawer({
         <form onSubmit={(e) => void handleCreate(e)}>
           <section>
             <label>{language === "uk" ? "Компанія" : "Company"}
-              <select value={companyId} onChange={event => setCompanyId(event.target.value)}>
+              <select disabled={editing || busy} value={companyId} onChange={event => setCompanyId(event.target.value)}>
                 {companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
               </select>
             </label>
@@ -207,10 +233,34 @@ export function CreateWebsiteDrawer({
               />
               <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
                 {domain.trim()
-                  ? `Target domain: https://${domain.trim().replace(/^https?:\/\//, "")}`
+                  ? `${isUk ? "Домен" : "Target domain"}: ${autoSsl && production?.canUseSsl !== false ? "https" : "http"}://${projectDomain(domain)}`
+                  : production ? (production.automaticDomain || (production.canAssignDomain
+                    ? (isUk ? "Домен буде призначено автоматично." : "A domain will be assigned automatically.")
+                    : (isUk ? "Вкажіть домен для публікації." : "Enter a domain to publish.")))
                   : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
               </span>
             </label>
+            {production?.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
+              domain={domain} automaticDomain={production.automaticDomain} currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
+            {production && (
+              <div style={{ marginTop: 12 }}>
+                <label>
+                  <span>{isUk ? "Додатковий домен" : "Additional domain"}</span>
+                  <input type="text" placeholder="www.example.com" value={production.alias.domain}
+                    onChange={event => production.setAlias({ ...production.alias, domain: event.target.value })} />
+                </label>
+                {production.alias.domain.trim() && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                    <input type="checkbox" checked={production.alias.redirect}
+                      onChange={event => production.setAlias({ ...production.alias, redirect: event.target.checked })} />
+                    <span>{isUk ? "Перенаправляти на основний домен" : "Redirect to the primary domain"}</span>
+                  </label>
+                )}
+                {production.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
+                  domain={production.alias.domain} automaticDomain={production.automaticDomain}
+                  currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
+              </div>
+            )}
 
             {/* 2. Path */}
             <div style={{ marginTop: "12px" }}>
@@ -246,13 +296,19 @@ export function CreateWebsiteDrawer({
                 <span>{t.portLabel}</span>
                 <input
                   type="number"
-                  placeholder={framework.toLowerCase().includes("vite") ? "80" : "3000"}
-                  value={containerPort}
+                  required
+                  min={1}
+                  max={65535}
+                  placeholder={String(defaultPort)}
+                  value={containerPort || ""}
                   onChange={(e) => setContainerPort(Number(e.target.value) || 0)}
                 />
                 <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
                   {t.portDesc}
                 </span>
+                {production && <span className="ds-muted">{isUk
+                  ? `Порт шаблону: ${defaultPort}. На сервері Traefik приймає HTTP на 80 і HTTPS на 443.`
+                  : `Template default: ${defaultPort}. On the server, Traefik listens on 80 for HTTP and 443 for HTTPS.`}</span>}
               </label>
             </div>
 
@@ -270,10 +326,20 @@ export function CreateWebsiteDrawer({
                 </span>
               </label>
               <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "24px" }}>
-                {t.customEntrypointDesc}
+                {production ? (isUk
+                  ? "Залиште вимкненим для автоматичного налаштування. web — HTTP (80), websecure — HTTPS (443)."
+                  : "Leave off to use automatic routing. web is HTTP (80), and websecure is HTTPS (443).") : t.customEntrypointDesc}
               </span>
 
-              {useCustomEntrypoint && (
+              {useCustomEntrypoint && (production ? (
+                <select aria-label={isUk ? "Точки входу Traefik" : "Traefik entrypoints"}
+                  value={["web", "websecure"].includes(customEntrypoint.trim()) ? customEntrypoint.trim() : "web, websecure"}
+                  onChange={event => setCustomEntrypoint(event.target.value)}>
+                  <option value="web, websecure">{isUk ? "Автоматично (web і websecure)" : "Automatic (web and websecure)"}</option>
+                  <option value="web">{isUk ? "Тільки HTTP (web)" : "HTTP only (web)"}</option>
+                  <option value="websecure">{isUk ? "Тільки HTTPS (websecure)" : "HTTPS only (websecure)"}</option>
+                </select>
+              ) : (
                 <input
                   type="text"
                   placeholder="web, websecure"
@@ -281,7 +347,7 @@ export function CreateWebsiteDrawer({
                   onChange={(e) => setCustomEntrypoint(e.target.value)}
                   style={{ marginLeft: "24px", marginTop: "4px" }}
                 />
-              )}
+              ))}
             </div>
 
             {/* 5. SSL Certificate */}
@@ -300,7 +366,8 @@ export function CreateWebsiteDrawer({
               <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", margin: 0 }}>
                 <input
                   type="checkbox"
-                  checked={autoSsl}
+                  checked={autoSsl && production?.canUseSsl !== false}
+                  disabled={production?.canUseSsl === false}
                   onChange={(e) => setAutoSsl(e.target.checked)}
                   style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
                 />
@@ -309,7 +376,12 @@ export function CreateWebsiteDrawer({
                 </span>
               </label>
 
-              {autoSsl && (
+              {production?.canUseSsl === false && (
+                <span className="ds-muted">{production.localDomain ? (isUk ? "Локальні домени використовують HTTP." : "Local domains use HTTP.")
+                  : useCustomEntrypoint && customEntrypoint.trim() === "web" ? (isUk ? "Точка входу web використовує HTTP." : "The web entrypoint uses HTTP.")
+                  : (isUk ? "HTTPS потребує налаштованого Let's Encrypt." : "HTTPS requires Let's Encrypt to be configured.")}</span>
+              )}
+              {autoSsl && production?.canUseSsl !== false && (
                 <div
                   style={{
                     display: "flex",
@@ -348,9 +420,28 @@ export function CreateWebsiteDrawer({
                 </div>
               )}
             </div>
+            {production && (
+              <>
+                <ProductionLimitFields isUk={isUk} limits={production.limits} setLimit={production.setLimit} />
+                <details>
+                  <summary>{isUk ? "Змінні середовища Node.js" : "Node.js runtime environment"}</summary>
+                  <label>
+                    <span>{isUk ? "Об’єкт JSON. Порожнє поле зберігає попередні значення, {} очищає їх." : "JSON object. Leave blank to keep existing values, or enter {} to clear them."}</span>
+                    <textarea rows={3} value={production.runtimeEnvironment} onChange={event => production.setRuntimeEnvironment(event.target.value)}
+                      autoComplete="off" spellCheck={false} maxLength={68000} />
+                  </label>
+                </details>
+                {productionError && <p role="alert" className="ds-hint-error">{productionError}</p>}
+                {(publicationBusy || liveUrl) && <p aria-live="polite">
+                  {publicationBusy ? (isUk ? "Публікація…" : "Publishing…") : release?.certificate === "pending"
+                    ? (isUk ? "Очікує HTTPS" : "HTTPS pending") : (isUk ? "Опубліковано" : "Published")}
+                  {liveUrl && <> · <a href={liveUrl} target="_blank" rel="noopener noreferrer">{release?.settings.domain}</a></>}
+                </p>}
+              </>
+            )}
           </section>
 
-          <footer style={{ justifyContent: "flex-end" }}>
+          <footer style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
             <button
               type="button"
               className="button-secondary"
@@ -360,11 +451,22 @@ export function CreateWebsiteDrawer({
             </button>
             <button
               type="submit"
-              className="button-primary"
+              className={production ? "button-secondary" : "button-primary"}
               disabled={busy || !name.trim()}
             >
-              {busy ? t.creating : t.createBtn}
+              {editing ? (isUk ? "Зберегти" : "Save") : busy ? t.creating : t.createBtn}
             </button>
+            {production && <>
+              {release && <button type="button" className="button-secondary" disabled={busy || publicationBusy}
+                onClick={() => { void confirmModal({ message: isUk ? "Припинити публікацію цього проєкту?" : "Unpublish this project?", isDanger: true })
+                  .then(ok => { if (ok) void production.controller.unpublish(); }); }}>
+                {isUk ? "Зняти з публікації" : "Unpublish"}
+              </button>}
+              <button type="submit" value="publish" className="button-primary"
+                disabled={busy || publicationBusy || !name.trim() || (!production.canAssignDomain && !projectDomain(domain))}>
+                {editing ? (isUk ? "Опублікувати" : "Publish") : (isUk ? "Створити й опублікувати" : "Create and publish")}
+              </button>
+            </>}
           </footer>
         </form>
       </aside>

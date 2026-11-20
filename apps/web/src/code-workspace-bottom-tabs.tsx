@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
+import type { ProductionStatus } from "./code-workspace/project-production";
 import { type BottomTab, type Change, type ProjectTerminalRow, type RunEvent } from "./code-workspace-page-types";
 
 export interface CodeWorkspaceBottomTabsProps {
@@ -13,6 +15,7 @@ export interface CodeWorkspaceBottomTabsProps {
   events?: RunEvent[];
   /** Stored project commands with their output; when present they are what the Terminal tab shows. */
   terminalEvents?: ProjectTerminalRow[];
+  production?: ProductionStatus | null;
 }
 
 export function CodeWorkspaceBottomTabs({
@@ -26,7 +29,9 @@ export function CodeWorkspaceBottomTabs({
   changedFiles,
   events = [],
   terminalEvents = [],
+  production,
 }: CodeWorkspaceBottomTabsProps) {
+  const [logEnvironment, setLogEnvironment] = useState("preview");
   // Activity events name the tool but carry neither the command nor its output, so the Terminal showed only
   // "$ code.shell.exec". The project's stored commands have both; activity remains the fallback.
   const storedCommands = [...terminalEvents].reverse().map((e) => ({
@@ -174,7 +179,18 @@ export function CodeWorkspaceBottomTabs({
 
         {tab === "logs" && (
           <div>
-            {logs.length === 0 ? (
+            {production?.enabled && (
+              <label className="code-production-log-choice">
+                {isUk ? "Середовище" : "Environment"}
+                <select aria-label={isUk ? "Середовище" : "Environment"} value={logEnvironment} onChange={event => setLogEnvironment(event.target.value)}>
+                  <option value="preview">Preview</option>
+                  <option value="production">Production</option>
+                </select>
+              </label>
+            )}
+            {logEnvironment === "production" && production?.enabled ? (
+              <ProductionLogs production={production} isUk={isUk} />
+            ) : logs.length === 0 ? (
               <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
                 {isUk ? "Логи виконання відсутні." : "No execution logs recorded yet."}
               </p>
@@ -209,15 +225,66 @@ export function CodeWorkspaceBottomTabs({
         )}
 
         {tab === "activity" && (
-          runId ? (
-            <CodeSnapshotPanel companyId={companyId} runId={runId} isUk={isUk} />
-          ) : (
-            <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
-              {isUk ? "Activity з'явиться, коли сесія почне run." : "Activity appears once the session starts a run."}
-            </p>
-          )
+          <>
+            {production?.enabled && (production.release || production.activity.length > 0) && <ProductionActivity production={production} isUk={isUk} />}
+            {runId ? <CodeSnapshotPanel companyId={companyId} runId={runId} isUk={isUk} /> : (
+              <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
+                {isUk ? "Activity з'явиться, коли сесія почне run." : "Activity appears once the session starts a run."}
+              </p>
+            )}
+          </>
         )}
       </div>
+    </section>
+  );
+}
+
+type ProductionView = { production: Extract<ProductionStatus, { enabled: true }>; isUk: boolean };
+
+function ProductionLogs({ production, isUk }: ProductionView) {
+  if (!production.logs.length) return <p className="ds-muted">{isUk ? "Логів Production ще немає." : "No production logs yet."}</p>;
+  return (
+    <ul className="code-production-events">
+      {production.logs.map((log, index) => (
+        <li key={`${log.at}-${index}`}>
+          <time dateTime={log.at}>{new Date(log.at).toLocaleTimeString()}</time>
+          <strong>{log.source === "build" ? (isUk ? "Збірка" : "Build") : (isUk ? "Застосунок" : "Application")}</strong>
+          <pre>{log.message}</pre>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const productionEvents: Record<string, readonly [string, string]> = {
+  published: ["Published", "Опубліковано"],
+  unpublished: ["Unpublished", "Знято з публікації"],
+  domain_changed: ["Domain changed", "Домен змінено"],
+  alias_changed: ["Additional domain changed", "Додатковий домен змінено"],
+  https_requested: ["HTTPS requested", "Запитано HTTPS"],
+  https_issued: ["HTTPS certificate issued", "Сертифікат HTTPS видано"],
+  publish_failed: ["Publication failed", "Публікація не вдалася"],
+  publish_interrupted: ["Publication interrupted", "Публікацію перервано"],
+  application_stopped: ["Application stopped", "Застосунок зупинено"],
+};
+
+function ProductionActivity({ production, isUk }: ProductionView) {
+  const { requests, errors, limited, averageMs } = production.traffic;
+  return (
+    <section>
+      <h3>Production</h3>
+      <p className="ds-muted">
+        {isUk ? "За останню добу" : "Past 24 hours"} · {requests.toLocaleString()} {isUk ? "запитів" : "requests"} · {errors} 5xx · {limited} 429 · {averageMs} ms
+      </p>
+      <ul className="code-production-events">
+        {production.activity.map((entry, index) => (
+          <li key={`${entry.at}-${index}`}>
+            <time dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
+            <strong>{productionEvents[entry.event]?.[isUk ? 1 : 0] ?? entry.event}</strong>
+            <span>{entry.detail}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

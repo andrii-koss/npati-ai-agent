@@ -1,4 +1,5 @@
 import { invalidateEmailSettings, readCachedEmailSettings, readEmailSettings } from "./email-settings-read";
+import { invalidateIntegrationsCatalog } from "./integrations/cache";
 import { ALL_COMPANIES } from "./company-scope";
 import { readEmailCollection } from "./email-company-scope";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -553,6 +554,7 @@ export function EmailSettingsPage() {
       await api(`/companies/${ownerId}/email-accounts/${id}`, { method: "DELETE" });
       accountsVersion.current++;
       invalidateEmailSettings(ownerId);
+      invalidateIntegrationsCatalog();
       setAccounts((prev) => prev.filter((a) => a.id !== id));
     } catch (err: any) {
       setNotice(err.message);

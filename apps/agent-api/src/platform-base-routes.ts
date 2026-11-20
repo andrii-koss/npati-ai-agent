@@ -25,6 +25,7 @@ import { ProjectGitService } from "./project-git-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
 import { ProjectImportService } from "./project-import-service";
 import { registerProjectPreviewRoutes } from "./project-preview-routes";
+import { registerProjectProductionRoutes } from "./project-production-routes";
 import { ProjectPreviewService } from "./project-preview-service";
 import { registerProjectRoutes } from "./project-routes";
 import { ProjectSandboxService } from "./project-sandbox-service";
@@ -123,6 +124,7 @@ export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformB
   registerProjectFileRoutes(app, projectWorkspace, authProvider, projectMediaService, projectService);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
+  registerProjectProductionRoutes(app, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
   registerCodeRoutes(app, authProvider, codeService, featureFlagService);

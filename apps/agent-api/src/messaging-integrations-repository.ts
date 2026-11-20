@@ -49,11 +49,23 @@ export class MessagingIntegrationsRepository{
   private readonly pool?:Pool; private readonly memory=new Map<string,MessagingConnection>();
   private readonly sessions=new Map<string,MessagingSession>(); private readonly inboundEvents=new Set<string>(); private lastInboundCleanupAt=0;
   constructor(databaseUrl?:string,pool?:Pool,private readonly vault=new CryptoVault()){this.pool=pool??(databaseUrl?.trim()?new Pool({connectionString:databaseUrl,max:5}):undefined);}
-  async list(ctx:AuthContext,companyId?:string):Promise<MessagingConnectionView[]>{
-    let rows:MessagingConnection[];
-    if(this.pool){const result=await this.pool.query<MessagingConnection>(`SELECT ${columns} FROM messaging_connections WHERE workspace_id=$1 AND user_id=$2 AND ($3::text IS NULL OR company_id=$3) ORDER BY created_at DESC`,[ctx.workspaceId,ctx.userId,companyId??null]);rows=result.rows;}
-    else rows=[...this.memory.values()].filter((item)=>item.workspaceId===ctx.workspaceId&&item.userId===ctx.userId&&(!companyId||item.companyId===companyId));
-    return rows.map(view);
+  async list(ctx: AuthContext, companyId?: string, activeEmailIds?: ReadonlySet<string>): Promise<MessagingConnectionView[]> {
+    if (this.pool) {
+      const result = await this.pool.query<MessagingConnection>(`
+        SELECT ${columns} FROM messaging_connections
+        WHERE workspace_id = $1 AND user_id = $2 AND ($3::text IS NULL OR company_id = $3)
+          AND (channel <> 'email' OR EXISTS (
+            SELECT 1 FROM company_email_accounts account
+            WHERE account.id = messaging_connections.id
+              AND account.workspace_id = messaging_connections.workspace_id
+              AND account.user_id = messaging_connections.user_id AND account.deleted_at IS NULL
+          ))
+        ORDER BY created_at DESC`, [ctx.workspaceId, ctx.userId, companyId ?? null]);
+      return result.rows.map(view);
+    }
+    return [...this.memory.values()].filter(item => item.workspaceId === ctx.workspaceId && item.userId === ctx.userId
+      && (!companyId || item.companyId === companyId)
+      && (item.channel !== "email" || !activeEmailIds || activeEmailIds.has(item.id))).map(view);
   }
   async createTelegram(ctx:AuthContext,companyId:string|null,input:{displayName:string;botToken:string;botUsername?:string;agentId?:string|null;scope?:MessagingConnectionScope}){
     const id=randomUUID(),now=new Date().toISOString(),pairingCode=String(randomInt(100000,1000000));

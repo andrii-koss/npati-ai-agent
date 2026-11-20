@@ -49,6 +49,7 @@ import { createCoreServices } from "./core-services";
 import { createDataBackendServices } from "./data-backend-services";
 import { registerPlatformRoutes } from "./platform-routes";
 import { registerPlatformBaseRoutes } from "./platform-base-routes";
+import { removeProjectProduction } from "./project-production-routes";
 import { registerCodeRouteWiring } from "./code-route-wiring";
 import { ProjectLifecycleService } from "./project-lifecycle-service";
 import { createCompanyCodingDelegation } from "./code-company-delegation";
@@ -255,12 +256,11 @@ export function buildApp(config: AppConfig = {}) {
     getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
   });
   const projectService = new ProjectService(workspaceStore, async (context, project) => {
+    await removeProjectProduction(context, project.companyId, project.id);
     if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project");
     await projectSandbox?.destroy(context, project);
-
     await dataBackendService?.detachProjectArtifacts(context, project.companyId, project.id).catch(() => undefined);
   }, async (context, companyId, projectId) => {
-
     if (!dataBackendService) return undefined;
     try {
       const project = await workspaceStore.getProject(context, companyId, projectId);
@@ -708,7 +708,7 @@ export function buildApp(config: AppConfig = {}) {
     previewService: projectPreviewService,
     sandboxService: projectSandbox,
     mediaService: projectMediaService,
-    dataBackendService,
+    dataBackendService, removeProduction: removeProjectProduction,
     removeWorkspace: async (ctx, companyId, projectId) => projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId),
     auditLog: codePrivilegedAudit ? async (entry) => {
       await codePrivilegedAudit.record({
