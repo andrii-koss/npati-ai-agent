@@ -125,7 +125,9 @@ function snapshotFields(payload: Record<string, unknown>, isUk: boolean): FieldR
   ].map((entry) => ({ ...entry, value: entry.value }));
 }
 
-export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { companyId: string; runId: string; isUk: boolean; initialData?: RunSnapshotData }) {
+export function CodeSnapshotPanel({ companyId, runId, isUk, initialData, showLoadingNotice = true }: {
+  companyId: string; runId: string; isUk: boolean; initialData?: RunSnapshotData; showLoadingNotice?: boolean;
+}) {
   const [snapshot, setSnapshot] = useState<SnapshotView | null>(null);
   const [legacy, setLegacy] = useState(false);
   const [replay, setReplay] = useState<ReplayView | null>(null);
@@ -208,7 +210,7 @@ export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { com
   }, [companyId, compareRunId, isUk, snapshot]);
 
   return (
-    <section className="ds-section-title" aria-label={isUk ? "Чому агент так діяв" : "Why did the agent act this way"}>
+    <section className="ds-section-title" aria-label={isUk ? "Чому агент так діяв" : "Why did the agent act this way"} aria-busy={loading}>
       <header>
         <h3>{isUk ? "Чому агент так діяв (C6b)" : "Why did the agent act this way (C6b)"}</h3>
         <p className="ds-muted">
@@ -218,7 +220,7 @@ export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { com
         </p>
       </header>
 
-      {loading && <p className="ds-muted">{isUk ? "Завантаження…" : "Loading…"}</p>}
+      {showLoadingNotice && loading && <p className="ds-muted">{isUk ? "Завантаження…" : "Loading…"}</p>}
       {error && <div className="data-studio-alert error" role="alert">{error}</div>}
 
       {legacy && (
@@ -290,7 +292,7 @@ export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { com
         </div>
       )}
 
-      <div className="code-detail-row">
+      {(showLoadingNotice || noBundle || replay) && <div className="code-detail-row">
         <span>{isUk ? "Replay" : "Replay"}</span>
         {noBundle ? (
           <span className="ds-muted">
@@ -312,7 +314,7 @@ export function CodeSnapshotPanel({ companyId, runId, isUk, initialData }: { com
         ) : (
           <span className="ds-muted">—</span>
         )}
-      </div>
+      </div>}
 
       {/*
         C8: the trust control sits with the trust *fact* the snapshot already shows. It is mounted only when the

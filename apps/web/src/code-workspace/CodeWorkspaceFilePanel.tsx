@@ -280,7 +280,7 @@ export function CodeWorkspaceFilePanel({ isUk, activeTab, tree, filteredTree, fi
 
             <div className="project-preview-col-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <span>{isEditingFile ? "✏️ " + (isUk ? "Режим редагування" : "Manual edit mode") : "🔒 " + (isUk ? "Режим читання (Read-only)" : "Read-only mode")}</span>
+                <span>{isEditingFile ? "✏️ " + (isUk ? "Режим редагування" : "Manual edit mode") : (isUk ? "Режим читання (Read-only)" : "Read-only mode")}</span>
                 <span style={{ marginLeft: "12px", color: isEditingFile ? "#0284c7" : undefined }}>
                   {isEditingFile
                     ? (isUk ? "Внесіть зміни та збережіть файл" : "Modify code and click Save")

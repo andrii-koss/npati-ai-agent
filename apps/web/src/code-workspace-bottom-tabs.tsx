@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 import type { ProductionStatus } from "./code-workspace/project-production";
 import { type BottomTab, type Change, type ProjectTerminalRow, type RunEvent } from "./code-workspace-page-types";
@@ -13,6 +13,7 @@ export interface CodeWorkspaceBottomTabsProps {
   changesError: string | null;
   changedFiles: Change[];
   events?: RunEvent[];
+  logsPending?: boolean;
   /** Stored project commands with their output; when present they are what the Terminal tab shows. */
   terminalEvents?: ProjectTerminalRow[];
   production?: ProductionStatus | null;
@@ -28,10 +29,16 @@ export function CodeWorkspaceBottomTabs({
   changesError,
   changedFiles,
   events = [],
+  logsPending = false,
   terminalEvents = [],
   production,
 }: CodeWorkspaceBottomTabsProps) {
   const [logEnvironment, setLogEnvironment] = useState("preview");
+  const [activityVisited, setActivityVisited] = useState(tab === "activity");
+  useEffect(() => {
+    if (tab === "activity") setActivityVisited(true);
+  }, [tab]);
+  const productionLogsSelected = logEnvironment === "production" && production?.enabled;
   // Activity events name the tool but carry neither the command nor its output, so the Terminal showed only
   // "$ code.shell.exec". The project's stored commands have both; activity remains the fallback.
   const storedCommands = [...terminalEvents].reverse().map((e) => ({
@@ -178,7 +185,7 @@ export function CodeWorkspaceBottomTabs({
         )}
 
         {tab === "logs" && (
-          <div>
+          <div aria-busy={!productionLogsSelected && logsPending}>
             {production?.enabled && (
               <label className="code-production-log-choice">
                 {isUk ? "Середовище" : "Environment"}
@@ -191,7 +198,7 @@ export function CodeWorkspaceBottomTabs({
             {logEnvironment === "production" && production?.enabled ? (
               <ProductionLogs production={production} isUk={isUk} />
             ) : logs.length === 0 ? (
-              <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
+              !logsPending && <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
                 {isUk ? "Логи виконання відсутні." : "No execution logs recorded yet."}
               </p>
             ) : (
@@ -224,15 +231,15 @@ export function CodeWorkspaceBottomTabs({
           </div>
         )}
 
-        {tab === "activity" && (
-          <>
+        {(tab === "activity" || activityVisited) && (
+          <div hidden={tab !== "activity"}>
             {production?.enabled && (production.release || production.activity.length > 0) && <ProductionActivity production={production} isUk={isUk} />}
-            {runId ? <CodeSnapshotPanel companyId={companyId} runId={runId} isUk={isUk} /> : (
+            {runId ? <CodeSnapshotPanel key={JSON.stringify([companyId, runId])} companyId={companyId} runId={runId} isUk={isUk} showLoadingNotice={false} /> : (
               <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
                 {isUk ? "Activity з'явиться, коли сесія почне run." : "Activity appears once the session starts a run."}
               </p>
             )}
-          </>
+          </div>
         )}
       </div>
     </section>

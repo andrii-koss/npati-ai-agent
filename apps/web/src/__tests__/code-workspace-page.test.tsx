@@ -14,18 +14,22 @@ const duplicateDomainError = "Enter a valid additional domain different from the
 
 type Fetcher = (input: unknown, init?: RequestInit) => Promise<Response>;
 
-async function view(check: (state: { host: HTMLDivElement; fetcher: Mock<Fetcher>; releaseA: () => void }) => Promise<void>, entry = "/code/co/pr?session=s&run=r") {
+async function view(check: (state: { host: HTMLDivElement; fetcher: Mock<Fetcher>; releaseA: () => void }) => Promise<void>,
+  entry = "/code/co/pr?session=s&run=r", activity?: Promise<Response>) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let approvals = [{ id: "approval-a", toolName: "code.fs.edit", command: "same command", diff: "first patch" }, { id: "approval-b", toolName: "code.fs.edit", command: "same command", diff: "second patch" }];
   let releaseA!: () => void;
   const fetcher = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url.endsWith("/projects/pr")) return json({ name: "Production site", type: "website" });
-    if (url.endsWith("/production?defaults=1")) return json({ enabled: true, suggested: { domain: "suggested.localhost" }, release: {
+    if (url.endsWith("/production?defaults=1")) return json({
+      enabled: true, suggested: { domain: "suggested.localhost" }, logs: [], activity: [],
+      traffic: { requests: 0, errors: 0, limited: 0, averageMs: 0 }, release: {
       id: "release-a", runtime: "running", kind: "node", createdAt: "2026-11-19T10:00:00.000Z",
       settings: { limits: { memoryMiB: 512 } }, domains: [{ host: "sample.localhost", url: "http://sample.localhost/", primary: true, certificate: "disabled" }],
     } });
     if (url.includes("/production?metrics=")) return json({ points: [{ at: Date.now() - 1000, cpu: 23, memoryMiB: 42, networkBps: 400 }] });
+    if (activity && url.endsWith("/runs/r/activity")) return activity;
     if (url.endsWith("/production") && init?.method === "PATCH") return json({ error: { message: duplicateDomainError } }, 400);
     if (url.includes("/approvals?")) return json({ approvals });
     if (url.endsWith("/decide")) { approvals = approvals.filter(a => !url.includes(a.id)); return json({}); }
@@ -184,7 +188,40 @@ it("opens all panels and selects the main file from a project card link", async 
     expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
     expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
     expect(host.textContent).toContain("Project details");
+    expect(host.textContent).toContain("Read-only mode");
+    expect(host.textContent).toContain("Edits executed via agent");
+    expect(host.textContent).not.toContain("🔒");
   }, "/code/co/pr?view=all");
+});
+
+it("loads Logs and Activity quietly and keeps the loaded Activity on tab switches", async () => {
+  let finishActivity!: (result: Response) => void;
+  const activity = new Promise<Response>(resolve => { finishActivity = resolve; });
+  await view(async ({ host, fetcher }) => {
+    const content = host.querySelector(".bottom-tab-content")!;
+    expect(content.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(content.textContent).not.toContain("No execution logs recorded yet.");
+    await act(async () => finishActivity(json({ events: [{ kind: "message", payload: { message: "Fetched log row" } }] })));
+    expect(content.textContent).toContain("Fetched log row");
+
+    const fallback = fetcher.getMockImplementation()!;
+    let finishSnapshot!: (result: Response) => void;
+    fetcher.mockImplementation((input, init) => {
+      if (String(input).endsWith("/runs/r/snapshot")) return new Promise<Response>(resolve => { finishSnapshot = resolve; });
+      if (String(input).endsWith("/runs/r/replay")) return Promise.resolve(json({ status: "no_bundle" }));
+      return fallback(input, init);
+    });
+    await act(async () => button(host, "Activity").click());
+    expect(content.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(content.textContent).not.toContain("Loading");
+    await act(async () => finishSnapshot(json({ status: "legacy_no_snapshot" })));
+    expect(content.textContent).toContain("legacy_no_snapshot");
+    await act(async () => button(host, "Logs").click());
+    expect(content.querySelector('[aria-label="Why did the agent act this way"]')?.closest("[hidden]")).not.toBeNull();
+    await act(async () => button(host, "Activity").click());
+    expect(content.querySelector('[aria-label="Why did the agent act this way"]')?.closest("[hidden]")).toBeNull();
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/runs/r/snapshot"))).toHaveLength(1);
+  }, "/code/co/pr?session=s&run=r&tab=logs", activity);
 });
 
 it("shows the selected terminal at the top of the workspace content", async () => {

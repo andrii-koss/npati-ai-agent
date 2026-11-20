@@ -76,8 +76,11 @@ function CodeWorkspaceContent() {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  const [events, setEvents] = useState<RunEvent[]>([]);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [stream, setStream] = useState<{ runId: string; events: RunEvent[]; error: string | null }>();
+  const streamRequest = useRef<{ runId: string } | null>(null);
+  const currentStream = runId && stream?.runId === runId ? stream : undefined;
+  const events = currentStream?.events ?? [];
+  const streamError = currentStream?.error ?? null;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   // "Open project terminal" links here with ?tab=terminal; the page opens on that tab instead of Changes.
@@ -268,17 +271,23 @@ function CodeWorkspaceContent() {
 
   const loadStream = useCallback(async () => {
     if (!runId) {
-      setEvents([]);
-      setStreamError(null);
+      streamRequest.current = null;
       return;
     }
+    if (streamRequest.current?.runId === runId) return;
+    const request = { runId };
+    streamRequest.current = request;
     try {
       const data = await apiGet<ActivityResponse>(`${codeBase}/runs/${runId}/activity`);
-      setEvents(data.events ?? []);
-      setStreamError(null);
+      if (streamRequest.current === request) setStream({ runId, events: data.events ?? [], error: null });
     } catch (cause) {
-      setEvents([]);
-      setStreamError(cause instanceof Error ? cause.message : String(cause));
+      if (streamRequest.current === request) setStream(previous => ({
+        runId,
+        events: previous?.runId === runId ? previous.events : [],
+        error: cause instanceof Error ? cause.message : String(cause),
+      }));
+    } finally {
+      if (streamRequest.current === request) streamRequest.current = null;
     }
   }, [codeBase, runId]);
 
@@ -536,6 +545,7 @@ function CodeWorkspaceContent() {
             changesError={changesError}
             changedFiles={changedFiles}
             events={events}
+            logsPending={Boolean(runId && !currentStream)}
             terminalEvents={terminalEvents}
             production={production.status}
           />
