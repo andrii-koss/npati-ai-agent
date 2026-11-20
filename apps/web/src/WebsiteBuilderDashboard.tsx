@@ -711,6 +711,7 @@ export function WebsiteBuilderDashboard() {
               companyId={site.companyId}
               language={language}
               t={t}
+              drawerProductionStatus={modalOpen && editingProject?.id === site.id ? production.status : undefined}
               handleDuplicate={handleDuplicate}
               handleRename={handleRename}
               handleDelete={handleDelete}
@@ -756,7 +757,7 @@ export function WebsiteBuilderDashboard() {
         production={productionEnabled && limits ? {
           limits, setLimit: (key, value) => setSavedLimits(previous => ({ ...previous, [key]: value })),
           controller: production, automaticDomain, canUseSsl, localDomain: Boolean(localDomain), runtimeEnvironment, setRuntimeEnvironment,
-          canAssignDomain: capabilities.automaticDomain,
+          canAssignDomain: capabilities.automaticDomain, tlsEnabled: capabilities.tlsEnabled,
           projectId: editingProject?.id,
           alias, setAlias,
         } : undefined}

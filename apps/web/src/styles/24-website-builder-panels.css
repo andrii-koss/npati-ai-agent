@@ -825,6 +825,46 @@
   border-color: #d1d5db !important;
 }
 
+.website-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.website-card-production-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+.website-card-production-dot[data-healthy="true"] {
+  background: #16a34a;
+}
+
+.company-drawer .website-drawer-domain-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--npati-red, #c8212a);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.website-drawer-domain-link svg {
+  flex: none;
+}
+
+.company-drawer .website-drawer-domain-link:hover,
+.company-drawer .website-drawer-domain-link:focus-visible {
+  text-decoration: underline;
+}
+
 .website-action-btn-primary:hover {
   background: #b91c1c !important;
   box-shadow: 0 2px 6px rgba(185, 28, 28, 0.3) !important;

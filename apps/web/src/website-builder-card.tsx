@@ -7,12 +7,14 @@ import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
 import type { WebsiteProject } from "./website-builder-cache";
 import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
 import { projectKindOf } from "@npati/shared";
+import { useProjectProduction, type ProductionStatus } from "./code-workspace/project-production";
 
 export interface WebsiteProjectCardProps {
   site: WebsiteProject;
   companyId: string;
   language: string;
   t: (typeof websiteBuilderCopy)["en"];
+  drawerProductionStatus?: ProductionStatus | null;
   handleDuplicate: (site: WebsiteProject) => void | Promise<void>;
   handleRename: (site: WebsiteProject) => void | Promise<void>;
   handleDelete: (site: WebsiteProject) => void | Promise<void>;
@@ -23,6 +25,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   companyId,
   language,
   t,
+  drawerProductionStatus,
   handleDuplicate,
   handleRename,
   handleDelete,
@@ -32,6 +35,15 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const checkProduction = drawerProductionStatus === undefined && site.status !== "archived" && projectKindOf(site) !== "mobile_app";
+  const { status: cardProductionStatus } = useProjectProduction(checkProduction ? companyId : "", site.id);
+  const productionStatus = drawerProductionStatus === undefined ? cardProductionStatus : drawerProductionStatus;
+  const release = productionStatus?.enabled ? productionStatus.release : null;
+  const productionHealthy = release?.runtime === "running" && release.certificate !== "pending";
+  const isUk = language === "uk";
+  const productionLabel = productionHealthy
+    ? (isUk ? "Продакшен працює" : "Production running")
+    : (isUk ? "Продакшен недоступний або ще не готовий" : "Production unavailable or not ready");
 
   // Close popup menu when clicking outside, scrolling, or pressing Escape
   useEffect(() => {
@@ -139,21 +151,27 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
       >
         {/* Project Title */}
         <div style={{ marginBottom: "14px" }}>
-          <h3
-            style={{
-              fontSize: "16.5px",
-              fontWeight: 700,
-              margin: 0,
-              color: "#111111",
-              lineHeight: 1.3,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={site.name}
-          >
-            {site.name}
-          </h3>
+          <div className="website-card-title-row">
+            <h3
+              style={{
+                fontSize: "16.5px",
+                fontWeight: 700,
+                margin: 0,
+                color: "#111111",
+                lineHeight: 1.3,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={site.name}
+            >
+              {site.name}
+            </h3>
+            {release?.settings.domain && (
+              <span className="website-card-production-dot" data-healthy={productionHealthy}
+                role="img" aria-label={productionLabel} title={productionLabel} />
+            )}
+          </div>
           <small className="website-card-kind" style={{ display: "block", marginTop: "4px", color: "#667085", fontSize: "12.5px" }}>
             {PROJECT_KIND_LABELS[projectKindOf(site)][language === "uk" ? "uk" : "en"]}
             {site.framework ? ` · ${site.framework}` : ""}{site.deploymentUrl && !site.deploymentUrl.includes(".preview.npati.com") ? ` · ${site.deploymentUrl.replace(/^https?:\/\//, "")}` : ""}

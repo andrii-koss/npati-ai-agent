@@ -1,4 +1,5 @@
 import type { FormEvent } from "react";
+import { ExternalLink } from "lucide-react";
 import { confirmModal } from "./ConfirmDialog";
 import { safeExternalUrl } from "./code-workspace-page-types";
 import { ProductionLimitFields, useProjectProduction, type ProductionDraftLimits, type ProductionLimits } from "./code-workspace/project-production";
@@ -9,6 +10,19 @@ import {
   FRAMEWORK_STARTERS,
   type websiteBuilderCopy,
 } from "./website-builder-constants";
+
+const validProductionHost = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function DomainLink({ host, publishedUrl, https }: { host: string; publishedUrl?: string; https: boolean }) {
+  if (!validProductionHost.test(host)) return null;
+  const href = safeExternalUrl(publishedUrl) ?? `${https && !host.endsWith(".localhost") ? "https" : "http"}://${host}`;
+  return (
+    <a className="website-drawer-domain-link" href={href} target="_blank" rel="noopener noreferrer">
+      <ExternalLink size={14} aria-hidden="true" />
+      {host}
+    </a>
+  );
+}
 
 export interface CreateWebsiteDrawerProps {
   isOpen: boolean;
@@ -48,6 +62,7 @@ export interface CreateWebsiteDrawerProps {
     automaticDomain?: string;
     canAssignDomain: boolean;
     canUseSsl: boolean;
+    tlsEnabled: boolean;
     localDomain: boolean;
     projectId?: string;
     alias: { domain: string; redirect: boolean };
@@ -93,7 +108,13 @@ export function CreateWebsiteDrawer({
   if (!isOpen) return null;
   const isUk = language === "uk";
   const release = production?.controller.status?.enabled ? production.controller.status.release : null;
-  const liveUrl = safeExternalUrl(release?.url);
+  const primaryHost = projectDomain(domain) || production?.automaticDomain || release?.settings.domain || "";
+  const aliasHost = projectDomain(production?.alias.domain ?? "");
+  const primaryUrl = release?.domains?.find(item => item.primary && item.host === primaryHost)?.url ??
+    (release?.settings.domain === primaryHost ? release?.url : undefined);
+  const aliasUrl = release?.domains?.find(item => !item.primary && item.host === aliasHost)?.url;
+  const useHttps = autoSsl && production?.canUseSsl !== false;
+  const aliasUsesHttps = primaryHost.endsWith(".localhost") ? production?.tlsEnabled === true : useHttps;
   const publicationBusy = Boolean(production?.controller.running || production?.controller.busy);
   const productionError = production?.controller.issue || (production?.controller.status?.enabled && production.controller.status.job?.error);
 
@@ -237,15 +258,15 @@ export function CreateWebsiteDrawer({
                 value={domain}
                 onChange={(e) => setDomain(e.target.value)}
               />
+            </label>
+            {primaryHost ? <DomainLink host={primaryHost} publishedUrl={primaryUrl} https={useHttps} /> : (
               <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
-                {domain.trim()
-                  ? `${isUk ? "Домен" : "Target domain"}: ${autoSsl && production?.canUseSsl !== false ? "https" : "http"}://${projectDomain(domain)}`
-                  : production ? (production.automaticDomain || (production.canAssignDomain
+                {production ? (production.canAssignDomain
                     ? (isUk ? "Домен буде призначено автоматично." : "A domain will be assigned automatically.")
-                    : (isUk ? "Вкажіть домен для публікації." : "Enter a domain to publish.")))
+                    : (isUk ? "Вкажіть домен для публікації." : "Enter a domain to publish."))
                   : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
               </span>
-            </label>
+            )}
             {production?.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
               domain={domain} automaticDomain={production.automaticDomain} currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
             {production && (
@@ -255,6 +276,7 @@ export function CreateWebsiteDrawer({
                   <input type="text" placeholder="www.example.com" value={production.alias.domain}
                     onChange={event => production.setAlias({ ...production.alias, domain: event.target.value })} />
                 </label>
+                <DomainLink host={aliasHost} publishedUrl={aliasUrl} https={aliasUsesHttps} />
                 {production.alias.domain.trim() && (
                   <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
                     <input type="checkbox" checked={production.alias.redirect}
@@ -438,11 +460,7 @@ export function CreateWebsiteDrawer({
                   </label>
                 </details>
                 {productionError && <p role="alert" className="ds-hint-error">{productionError}</p>}
-                {(publicationBusy || liveUrl) && <p aria-live="polite">
-                  {publicationBusy ? (isUk ? "Публікація…" : "Publishing…") : release?.certificate === "pending"
-                    ? (isUk ? "Очікує HTTPS" : "HTTPS pending") : (isUk ? "Опубліковано" : "Published")}
-                  {liveUrl && <> · <a href={liveUrl} target="_blank" rel="noopener noreferrer">{release?.settings.domain}</a></>}
-                </p>}
+                {publicationBusy && <p aria-live="polite">{isUk ? "Публікація…" : "Publishing…"}</p>}
               </>
             )}
           </section>

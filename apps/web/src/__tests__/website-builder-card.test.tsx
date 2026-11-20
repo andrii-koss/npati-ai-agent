@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { WebsiteProjectCard } from "../website-builder-card";
 import { websiteBuilderCopy } from "../website-builder-constants";
 import type { WebsiteProject } from "../website-builder-cache";
+import type { ProductionStatus } from "../code-workspace/project-production";
 
 describe("WebsiteProjectCard", () => {
   const dummyProject: WebsiteProject = {
@@ -47,7 +48,7 @@ describe("WebsiteProjectCard", () => {
 
     // Compact icon buttons: Open Preview and Code; Duplicate, Rename and Delete live in the "⋯" menu (website-builder-card-menu.test.tsx)
     expect(markup).toContain("Відкрити Preview");
-    expect(markup).toContain("aspect-ratio:16 / 10");
+    expect(markup).toContain("website-preview-viewport");
     expect(markup).not.toContain("height:180px");
     expect(markup).toContain("Код");
     expect(markup).toContain("Більше дій");
@@ -58,6 +59,31 @@ describe("WebsiteProjectCard", () => {
     expect(markup).not.toContain("2026-10-18");
     expect(markup).not.toContain("Live Preview Status");
     expect(markup).not.toContain("company-run-card");
+    expect(markup).not.toContain("website-card-production-dot");
+  });
+
+  it.each([
+    ["running", "disabled", true],
+    ["running", "pending", false],
+    ["stopped", "disabled", false],
+    ["unavailable", "issued", false],
+  ] as const)("shows the production indicator for runtime %s and certificate %s", (runtime, certificate, healthy) => {
+    const defaults = { cpu: 1, memoryMiB: 512, requestsPerSecond: 20, concurrency: 5, bodyMiB: 1, timeoutSeconds: 10 };
+    const status: ProductionStatus = {
+      enabled: true, automaticDomain: "site.localhost", localEnabled: true, tlsEnabled: true, defaults,
+      release: {
+        kind: "static", createdAt: dummyProject.updatedAt, url: "http://site.localhost:18080/", certificate, runtime,
+        settings: { domain: "site.localhost", path: "/", port: 3000, stripPath: false, tls: false, entrypoint: "auto", limits: defaults },
+      },
+      job: null, logs: [], activity: [], traffic: { requests: 0, errors: 0, limited: 0, averageMs: 0 },
+    };
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <WebsiteProjectCard site={dummyProject} companyId="comp-1" language="en" t={websiteBuilderCopy.en}
+          drawerProductionStatus={status} handleDuplicate={() => {}} handleRename={() => {}} handleDelete={() => {}} />
+      </MemoryRouter>
+    );
+    expect(markup).toContain(`class="website-card-production-dot" data-healthy="${healthy}"`);
   });
 
   it("renders English copy when language is en", () => {
