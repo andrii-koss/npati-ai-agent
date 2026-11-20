@@ -644,7 +644,7 @@ export function ActivityPage() {
             {/* Main: Execution Trace & Policy Inspection */}
             <section className="activity-trace-detail">
             {selectedRun?.requestedMode.startsWith("coding") ? (
-              currentDetail?.code && <CodeRunMonitor key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.code} />
+              currentDetail?.code && <CodeRunMonitor key={`monitor:${selectedRunId}`} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.code} />
             ) : <>
             <ActivityTraceDetail
               activeRunDetails={activeRunDetails}
@@ -659,7 +659,7 @@ export function ActivityPage() {
             {/* C6b: the minimum Run Trace needs to explain a run's environment and policies. A run with no
                 snapshot says legacy_no_snapshot rather than rendering an error. */}
             {currentDetail ? (
-              <CodeSnapshotPanel key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.snapshot} />
+              <CodeSnapshotPanel key={`snapshot:${selectedRunId}`} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} initialData={currentDetail.snapshot} />
             ) : null}
           </section>
         </div>
