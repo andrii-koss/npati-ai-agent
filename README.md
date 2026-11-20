@@ -81,7 +81,7 @@ Everything runs on your own computer or server. Your data, your keys, your model
 
 ## Quick start
 
-You need Docker with Compose v2 and Git.
+You need Docker with Compose v2 and Git. The shared preview runner also needs the [Docker host requirements](docker/DOKPLOY_DEPLOYMENT.md#website-builder-shared-runtime-on-this-vps).
 
 </div>
 
@@ -96,7 +96,7 @@ docker compose up --build
 
 Open **http://localhost:3000** and sign in. The chat is at **http://localhost:3000/chat**.<br/>
 To use another port, change `NPATI_WEB_PORT`, `NPATI_WEB_ORIGIN` and `NPATI_AGENT_PUBLIC_DOMAIN` in `.env`. On Windows Command Prompt use `copy .env.example .env`.<br/>
-For a server with a domain, see the [Dokploy guide](docker/DOKPLOY_DEPLOYMENT.md).<br/>
+Standard Docker Compose and Dokploy both start 11 services by default. For a server with a domain, see the [Dokploy guide](docker/DOKPLOY_DEPLOYMENT.md).<br/>
 Before you open the installation to other people, change every password and key in `.env`.
 
 </div>
