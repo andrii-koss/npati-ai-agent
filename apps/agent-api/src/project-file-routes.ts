@@ -39,6 +39,8 @@ async function authorize(
   return context;
 }
 
+export { authorize as authorizeProjectFileRead };
+
 interface Params { companyId: string; projectId: string }
 interface Query { path?: string; query?: string; workspaceId?: string; prefix?: string }
 

@@ -2,7 +2,7 @@ import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { ProjectFilesClientError, readProjectFile, writeProjectFile } from "./project-files-client";
+import { writeProjectFile } from "./project-files-client";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
@@ -53,6 +53,7 @@ export function WebsiteBuilderDashboard() {
   const t = language === "uk" ? copy.uk : copy.en;
 
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>(() => readCachedCompanies());
+  const [companiesReady, setCompaniesReady] = useState(false);
   const [companyId, setCompanyId] = useState(""); // Empty scope means all companies; always the initial view.
   const [creationCompanyId, setCreationCompanyId] = useState("");
   const [websites, setWebsites] = useState<WebsiteProject[]>(() => cachedCatalog({ companyId: "", search: "", status: "all", framework: "all", kind: "all" })?.projects ?? []);
@@ -95,14 +96,25 @@ export function WebsiteBuilderDashboard() {
   const [autoSsl, setAutoSsl] = useState(true);
   const [busy, setBusy] = useState(false);
   const [loadingDeployment, setLoadingDeployment] = useState(false);
+  const [deploymentLoadError, setDeploymentLoadError] = useState("");
+  const [editorProduction, setEditorProduction] = useState<ProductionStatus | null>(null);
   const draftRequest = useRef(0);
   const deploymentRevision = useRef<string | undefined>(undefined);
   const originalDomains = useRef<{ primary: string; alias: string; redirect: boolean } | null>(null);
   const [savedLimits, setSavedLimits] = useState<Partial<ProductionDraftLimits>>({});
   const [runtimeEnvironment, setRuntimeEnvironment] = useState("");
   const drawerCompanyId = editingProject?.companyId ?? creationCompanyId;
-  const production = useProjectProduction(modalOpen ? editingProject?.companyId ?? "" : "", editingProject?.id ?? "");
-  const capabilities = useProductionCapabilities(modalOpen && type !== "mobile_app" ? drawerCompanyId : "");
+  const production = useProjectProduction(modalOpen ? editingProject?.companyId ?? "" : "", editingProject?.id ?? "", false, editorProduction);
+  const { capabilities: createCapabilities, pending: createCapabilitiesPending } = useProductionCapabilities(
+    modalOpen && !editingProject ? drawerCompanyId : "", draftRequest.current,
+  );
+  const loadingCreate = drawerCompanyId ? createCapabilitiesPending && !createCapabilities : !companiesReady;
+  const editorStatus = production.status;
+  const capabilities = editingProject ? (editorStatus?.enabled ? {
+    enabled: true as const, defaults: editorStatus.defaults, tlsEnabled: editorStatus.tlsEnabled,
+    automaticDomain: Boolean(editorStatus.automaticDomain),
+    automaticDomainIsLocal: editorStatus.automaticDomain.endsWith(".localhost"),
+  } : null) : type === "mobile_app" ? null : createCapabilities;
   const release = production.status?.enabled ? production.status.release : null;
   const productionEnabled = capabilities?.enabled === true && (!editingProject || production.status?.enabled === true);
   const limits = capabilities?.enabled ? { ...capabilities.defaults, ...release?.settings.limits, ...savedLimits } : undefined;
@@ -134,6 +146,8 @@ export function WebsiteBuilderDashboard() {
           setError(err.message || t.loadError);
           setLoading(false);
         }
+      } finally {
+        if (active) setCompaniesReady(true);
       }
     }
     void loadCompanies();
@@ -247,7 +261,7 @@ export function WebsiteBuilderDashboard() {
     e.preventDefault();
     const companyId = drawerCompanyId;
     const publish = (e.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "publish";
-    if (!name.trim() || !companyId || busy || loadingDeployment || (publish && (!productionEnabled || production.running))) return;
+    if (!name.trim() || !companyId || busy || loadingDeployment || createCapabilitiesPending || (publish && (!productionEnabled || production.running))) return;
     setBusy(true);
     setError("");
     let createdForPublication: WebsiteProject | null = null;
@@ -472,6 +486,8 @@ export function WebsiteBuilderDashboard() {
   const handleRename = useCallback((site: WebsiteProject) => {
     const requestId = ++draftRequest.current;
     setLoadingDeployment(true);
+    setDeploymentLoadError("");
+    setEditorProduction(null);
     deploymentRevision.current = undefined;
     originalDomains.current = null;
     setSavedLimits({});
@@ -498,14 +514,11 @@ export function WebsiteBuilderDashboard() {
     setAutoSsl(true);
     setError("");
     setModalOpen(true);
-    void Promise.all([
-      readProjectFile({ companyId: site.companyId, projectId: site.id }, "deployment.json").catch(error => {
-        if (error instanceof ProjectFilesClientError && error.status === 404) return null;
-        throw error;
-      }),
-      apiGet<ProductionStatus>(productionEndpoint(site.companyId, site.id)).catch(() => null),
-    ]).then(([file, published]) => {
+    void apiGet<{ deployment: { content: string; revision?: string } | null; production: ProductionStatus }>(
+      `${productionEndpoint(site.companyId, site.id)}?editor=1`,
+    ).then(({ deployment: file, production: published }) => {
       if (requestId !== draftRequest.current) return;
+      setEditorProduction(published);
       deploymentRevision.current = file?.revision;
       const active = published?.enabled ? published.release?.settings : undefined;
       if (active) {
@@ -541,17 +554,24 @@ export function WebsiteBuilderDashboard() {
         if (parsed.productionLimits && typeof parsed.productionLimits === "object") setSavedLimits(parsed.productionLimits);
       } catch {}
     }).catch(error => {
-      if (requestId === draftRequest.current && !(error instanceof ProjectFilesClientError && error.status === 404)) setError(error.message);
+      if (requestId === draftRequest.current) setDeploymentLoadError(error.message);
     }).finally(() => { if (requestId === draftRequest.current) setLoadingDeployment(false); });
   }, []);
 
   const handleOpenCreateModal = useCallback(() => {
     draftRequest.current++;
     setLoadingDeployment(false);
+    setDeploymentLoadError("");
+    setEditorProduction(null);
     deploymentRevision.current = undefined;
     setSavedLimits({});
     setRuntimeEnvironment("");
     setEditingProject(null);
+    setCreationCompanyId(current => {
+      if (companies.some(company => company.id === current)) return current;
+      const preferred = chooseAvailableCompanyId(companies, { requested: readActiveCompanyId() });
+      return companies.some(company => company.id === preferred) ? preferred : companies[0]?.id ?? "";
+    });
     setError("");
     const initial = FRAMEWORK_STARTERS[0]!;
     setSelectedFramework(initial.id);
@@ -569,7 +589,7 @@ export function WebsiteBuilderDashboard() {
     setCustomEntrypoint("web, websecure");
     setAutoSsl(true);
     setModalOpen(true);
-  }, [language]);
+  }, [companies, language]);
 
   const handleDuplicate = useCallback(async (site: WebsiteProject) => {
     try {
@@ -776,13 +796,17 @@ export function WebsiteBuilderDashboard() {
         setCustomEntrypoint={setCustomEntrypoint}
         autoSsl={autoSsl}
         setAutoSsl={setAutoSsl}
-        busy={busy || loadingDeployment}
+        busy={busy}
+        loading={editingProject ? loadingDeployment : loadingCreate}
+        submitPending={createCapabilitiesPending}
+        loadError={editingProject ? deploymentLoadError : ""}
         editing={Boolean(editingProject)}
         production={productionEnabled && limits ? {
           limits, setLimit: (key, value) => setSavedLimits(previous => ({ ...previous, [key]: value })),
           controller: production, automaticDomain, canUseSsl, localDomain: Boolean(localDomain), runtimeEnvironment, setRuntimeEnvironment,
           canAssignDomain: capabilities.automaticDomain, tlsEnabled: capabilities.tlsEnabled,
           projectId: editingProject?.id,
+          editorProofs: editorProduction?.enabled ? editorProduction.proofs ?? {} : undefined,
           alias, setAlias,
         } : undefined}
       />

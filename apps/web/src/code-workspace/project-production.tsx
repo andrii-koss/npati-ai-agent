@@ -6,7 +6,7 @@ export type ProductionSettings = {
   domain: string; aliasDomain?: string; redirectAlias?: boolean;
   path: string; port: number; stripPath: boolean; tls: boolean; entrypoint: string; limits: ProductionLimits;
 };
-type Proof = { name: string; value: string };
+export type ProductionDomainProofRecord = { name: string; value: string };
 export type ProductionDomain = { host: string; url: string; primary: boolean; certificate: "disabled" | "pending" | "issued" };
 type Release = {
   id?: string; kind: "static" | "node"; createdAt: string; url: string; settings: ProductionSettings;
@@ -24,7 +24,8 @@ export type ProductionStatus = { enabled: false } | {
   tlsEnabled: boolean;
   defaults: ProductionLimits;
   suggested?: Partial<ProductionSettings> | null;
-  proof?: Proof | null;
+  proof?: ProductionDomainProofRecord | null;
+  proofs?: Record<string, ProductionDomainProofRecord>;
   release: Release | null;
   job: Job | null;
   logs: { at: string; source: string; message: string }[];
@@ -36,9 +37,11 @@ const running = (status: ProductionStatus | null) => status?.enabled && (status.
 
 export const productionEndpoint = (companyId: string, projectId: string) => `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/production`;
 
-export function useProjectProduction(companyId: string, projectId: string, includeDefaults = false) {
+export function useProjectProduction(companyId: string, projectId: string, includeDefaults = false, editorStatus?: ProductionStatus | null) {
   const base = companyId && projectId ? productionEndpoint(companyId, projectId) : "";
-  const [status, setStatus] = useState<ProductionStatus | null>(null);
+  const [loaded, setLoaded] = useState<{ base: string; status: ProductionStatus } | null>(null);
+  const status = loaded?.base === base ? loaded.status : editorStatus ?? null;
+  const editorManaged = editorStatus !== undefined;
   const [issue, setIssue] = useState("");
   const [readIssue, setReadIssue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,7 +51,7 @@ export function useProjectProduction(companyId: string, projectId: string, inclu
     try {
       const data = await apiGet<ProductionStatus>(base + (includeDefaults ? "?defaults=1" : ""));
       if (request !== version.current) return;
-      setStatus(data);
+      setLoaded({ base, status: data });
       setReadIssue("");
     } catch (error) {
       if (request === version.current && (includeDefaults || !/HTTP 404|Only the company owner/.test(String(error)))) {
@@ -59,17 +62,17 @@ export function useProjectProduction(companyId: string, projectId: string, inclu
 
   const jobActive = running(status);
   useEffect(() => {
-    setStatus(null);
+    setLoaded(null);
     setIssue("");
     setReadIssue("");
     setBusy(false);
     mutating.current = false;
-    if (base) void refresh();
+    if (base && !editorManaged) void refresh();
     return () => { version.current++; };
-  }, [base, refresh]);
+  }, [base, editorManaged, refresh]);
 
   const starting = status?.enabled && status.release?.runtime === "starting";
-  const periodically = jobActive || Boolean(status?.enabled && status.release);
+  const periodically = jobActive || (!editorManaged && Boolean(status?.enabled && status.release));
   useEffect(() => {
     if (!base || !periodically) return;
     const refreshVisible = () => { if (!document.hidden && !mutating.current) void refresh(); };
@@ -92,7 +95,7 @@ export function useProjectProduction(companyId: string, projectId: string, inclu
       const data = await apiSend<ProductionStatus>(method, base, body);
       if (request !== version.current) return false;
       if (method === "DELETE") await refresh(request);
-      else setStatus(data);
+      else setLoaded({ base, status: data });
       return true;
     } catch (error) {
       if (request === version.current) reportError(error instanceof Error ? error.message : String(error));

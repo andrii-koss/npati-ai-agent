@@ -3,9 +3,10 @@ import { WorkspaceAccessError, WorkspaceNotFoundError, type AuthContext, type Wo
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectFileError, type ProjectWorkspace } from "./project-workspace";
+import { authorizeProjectFileRead } from "./project-file-routes";
 
 interface Params { companyId: string; projectId: string }
-interface Query { domain?: string; defaults?: string; metrics?: string }
+interface Query { domain?: string; defaults?: string; metrics?: string; editor?: string }
 const snapshotLimit = 24 * 1024 * 1024;
 const inactive = new Set(["archived", "soft_deleted", "purging", "deleted"]);
 const runtimeExcluded = new Set(["node_modules", "dist", "build", "coverage"]);
@@ -71,25 +72,41 @@ async function snapshot(workspace: ProjectWorkspace, ctx: AuthContext, { company
   return workspace.withFileLease ? workspace.withFileLease(ctx, companyId, projectId, capture) : capture();
 }
 
-async function readDeploymentSettings(workspace: ProjectWorkspace, ctx: AuthContext, { companyId, projectId }: Params) {
+async function readDeploymentFile(workspace: ProjectWorkspace, ctx: AuthContext, { companyId, projectId }: Params) {
   try {
-    const data = JSON.parse((await workspace.readFile(ctx, companyId, projectId, "deployment.json")).content);
-    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-    const options = String(data.entrypoints ?? "").trim();
-    return {
-      domain: data.isTechnicalDomain === true || typeof data.domain !== "string" ? "" : data.domain,
-      aliasDomain: typeof data.aliasDomain === "string" ? data.aliasDomain : "",
-      redirectAlias: data.redirectAlias !== false,
-      path: typeof data.path === "string" ? data.path : "/",
-      stripPath: data.stripPath === true,
-      port: Number.isInteger(Number(data.port)) && Number(data.port) > 0 ? Number(data.port) : 3000,
-      entrypoint: options === "web" || options === "websecure" ? options : "auto",
-      tls: data.ssl !== "Disabled",
-    };
+    const { content, revision } = await workspace.readFile(ctx, companyId, projectId, "deployment.json");
+    return { content, revision };
   } catch (error) {
-    if (error instanceof SyntaxError || (error instanceof ProjectFileError && error.status === 404)) return null;
+    if (error instanceof ProjectFileError && error.status === 404) return null;
     throw error;
   }
+}
+
+function parseDeployment(content: string | undefined) {
+  try {
+    const data = content ? JSON.parse(content) : null;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    return data;
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function readDeploymentSettings(workspace: ProjectWorkspace, ctx: AuthContext, params: Params) {
+  const data = parseDeployment((await readDeploymentFile(workspace, ctx, params))?.content);
+  if (!data) return null;
+  const options = String(data.entrypoints ?? "").trim();
+  return {
+    domain: data.isTechnicalDomain === true || typeof data.domain !== "string" ? "" : data.domain,
+    aliasDomain: typeof data.aliasDomain === "string" ? data.aliasDomain : "",
+    redirectAlias: data.redirectAlias !== false,
+    path: typeof data.path === "string" ? data.path : "/",
+    stripPath: data.stripPath === true,
+    port: Number.isInteger(Number(data.port)) && Number(data.port) > 0 ? Number(data.port) : 3000,
+    entrypoint: options === "web" || options === "websecure" ? options : "auto",
+    tls: data.ssl !== "Disabled",
+  };
 }
 
 function sendError(reply: FastifyReply, error: unknown) {
@@ -104,10 +121,11 @@ function sendError(reply: FastifyReply, error: unknown) {
 
 export function registerProjectProductionRoutes(app: FastifyInstance, workspace: ProjectWorkspace, auth: AuthProvider, store: WorkspaceStore) {
   const base = "/companies/:companyId/projects/:projectId/production";
+  const canManage = (ctx: AuthContext) => ctx.permissions.includes("workspace:write") && !ctx.apiKeyId;
   const owner = async (request: FastifyRequest, companyId: string) => {
     const ctx = await auth.authenticate(request);
     const company = await store.getCompany(ctx, companyId);
-    if (ctx.userId !== company.userId || !ctx.permissions.includes("workspace:write") || ctx.apiKeyId) {
+    if (ctx.userId !== company.userId || !canManage(ctx)) {
       throw new ProductionRouteError(403, "Only the company owner can access self-hosted project Production.");
     }
     return ctx;
@@ -134,6 +152,30 @@ export function registerProjectProductionRoutes(app: FastifyInstance, workspace:
 
   app.get<{ Params: Params; Querystring: Query }>(base, async (request, reply) => {
     try {
+      if (request.query.editor === "1") {
+        const { companyId, projectId } = request.params;
+        const ctx = await authorizeProjectFileRead(auth, request, companyId, projectId);
+        const [project, deployment] = await Promise.all([
+          store.getProject(ctx, companyId, projectId),
+          readDeploymentFile(workspace, ctx, request.params),
+        ]);
+        reply.header("Cache-Control", "private, no-store");
+        const disabled = { deployment, production: { enabled: false } };
+        if (!serviceConfig() || !canManage(ctx) || inactive.has(project.status) || project.type === "mobile_app") return disabled;
+        const company = await store.getCompany(ctx, companyId);
+        if (ctx.userId !== company.userId) return disabled;
+
+        const draft = parseDeployment(deployment?.content);
+        const fallback = (project.deploymentUrl || project.previewUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
+        const domains = [draft?.isTechnicalDomain !== true && draft?.domain, draft?.aliasDomain,
+          fallback.endsWith(".preview.npati.com") ? "" : fallback];
+        const query = new URLSearchParams();
+        for (const domain of domains) {
+          if (typeof domain === "string" && domain && domain.length <= 253) query.append("proofDomain", domain);
+        }
+        const production = await productionRequest(ctx, request.params, "GET", undefined, query.size ? `?${query}` : "");
+        return { deployment, production };
+      }
       if (!serviceConfig()) return { enabled: false };
       const { ctx, project } = await authorize(request);
       if (inactive.has(project.status)) return { enabled: false };

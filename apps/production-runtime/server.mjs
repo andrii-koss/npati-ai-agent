@@ -184,7 +184,7 @@ async function deploy(record, settings, files, environment) {
   }
 }
 
-async function statusFor(record, queryDomain) {
+async function statusFor(record, queryDomain, proofDomains = []) {
   const { release } = record;
   const settings = release?.settings;
   const domains = settings ? domainsFor(settings).map(host => ({ host, config: domainSettings(settings, host) })) : [];
@@ -203,6 +203,10 @@ async function statusFor(record, queryDomain) {
   return {
     enabled: true, tlsEnabled, localEnabled, defaults, automaticDomain: automaticDomain(record.key),
     proof: queryDomain ? domainProof(record.key, queryDomain) : null,
+    ...(proofDomains.length ? { proofs: Object.fromEntries(proofDomains.flatMap(domain => {
+      const proof = domainProof(record.key, domain);
+      return proof ? [[proof.name.slice("_npati-verify.".length), proof]] : [];
+    })) } : {}),
     release: release && {
       id: release.id, kind: release.kind, createdAt: release.createdAt, url: publicUrl(settings), settings, certificate,
       domains: domains.map(({ host, config }) => ({ host, url: publicUrl(config), primary: host === settings.domain,
@@ -303,7 +307,7 @@ async function control(req, res) {
     if (![15, 60, 360, 1440].includes(minutes)) throw new ProductionError(400, "Invalid metrics time range.");
     return json(res, 200, { points: metricHistory(record.metrics, minutes) });
   }
-  if (req.method === "GET") return json(res, 200, await statusFor(record, url.searchParams.get("domain")));
+  if (req.method === "GET") return json(res, 200, await statusFor(record, url.searchParams.get("domain"), url.searchParams.getAll("proofDomain").slice(0, 3)));
   assertIdle(key);
   if (req.method === "PATCH") {
     await changeRelease(record, await readJson(req, 16384));

@@ -2,7 +2,7 @@ import type { FormEvent } from "react";
 import { ExternalLink } from "lucide-react";
 import { confirmModal } from "./ConfirmDialog";
 import { safeExternalUrl } from "./code-workspace-page-types";
-import { ProductionLimitFields, useProjectProduction, type ProductionDraftLimits, type ProductionLimits } from "./code-workspace/project-production";
+import { ProductionLimitFields, useProjectProduction, type ProductionDomainProofRecord, type ProductionDraftLimits, type ProductionLimits } from "./code-workspace/project-production";
 import { ProductionDomainProof, projectDomain } from "./website-builder-production";
 import {
   FrameworkIcon,
@@ -54,6 +54,9 @@ export interface CreateWebsiteDrawerProps {
   autoSsl: boolean;
   setAutoSsl: (val: boolean) => void;
   busy: boolean;
+  loading?: boolean;
+  submitPending?: boolean;
+  loadError?: string;
   editing?: boolean;
   production?: {
     limits: ProductionDraftLimits;
@@ -65,6 +68,7 @@ export interface CreateWebsiteDrawerProps {
     tlsEnabled: boolean;
     localDomain: boolean;
     projectId?: string;
+    editorProofs?: Record<string, ProductionDomainProofRecord>;
     alias: { domain: string; redirect: boolean };
     setAlias: (value: { domain: string; redirect: boolean }) => void;
     runtimeEnvironment: string;
@@ -102,6 +106,9 @@ export function CreateWebsiteDrawer({
   autoSsl,
   setAutoSsl,
   busy,
+  loading,
+  submitPending,
+  loadError,
   editing,
   production,
 }: CreateWebsiteDrawerProps) {
@@ -125,6 +132,7 @@ export function CreateWebsiteDrawer({
     >
       <aside
         className="company-drawer"
+        aria-busy={loading || undefined}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <header>
@@ -145,6 +153,7 @@ export function CreateWebsiteDrawer({
           </button>
         </header>
 
+        {loading ? null : loadError ? <p className="website-drawer-load-error" role="alert">{loadError}</p> : (
         <form onSubmit={(e) => void handleCreate(e)}>
           <section>
             <label>{language === "uk" ? "Компанія" : "Company"}
@@ -270,7 +279,7 @@ export function CreateWebsiteDrawer({
               )}
             </div>
             {production?.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
-              domain={domain} automaticDomain={production.automaticDomain} currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
+              domain={domain} automaticDomain={production.automaticDomain} currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} editorProofs={production.editorProofs} />}
             {production && (
               <div style={{ marginTop: 12 }}>
                 <label>
@@ -288,7 +297,7 @@ export function CreateWebsiteDrawer({
                 )}
                 {production.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
                   domain={production.alias.domain} automaticDomain={production.automaticDomain}
-                  currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
+                  currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} editorProofs={production.editorProofs} />}
               </div>
             )}
 
@@ -478,7 +487,7 @@ export function CreateWebsiteDrawer({
             <button
               type="submit"
               className={production ? "button-secondary" : "button-primary"}
-              disabled={busy || !name.trim()}
+              disabled={busy || submitPending || !companyId || !name.trim()}
             >
               {editing ? (isUk ? "Зберегти" : "Save") : busy ? t.creating : t.createBtn}
             </button>
@@ -489,12 +498,13 @@ export function CreateWebsiteDrawer({
                 {isUk ? "Зняти з публікації" : "Unpublish"}
               </button>}
               <button type="submit" value="publish" className="button-primary"
-                disabled={busy || publicationBusy || !name.trim() || (!production.canAssignDomain && !projectDomain(domain))}>
+                disabled={busy || submitPending || publicationBusy || !companyId || !name.trim() || (!production.canAssignDomain && !projectDomain(domain))}>
                 {editing ? (isUk ? "Опублікувати" : "Publish") : (isUk ? "Створити й опублікувати" : "Create and publish")}
               </button>
             </>}
           </footer>
         </form>
+        )}
       </aside>
     </div>
   );

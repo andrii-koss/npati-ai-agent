@@ -39,19 +39,21 @@ describe("Projects catalog company scope and freshness", () => {
     ["FastAPI", "api", "fastapi", 8000],
     ["Fastify", "api", "", 3000],
   ])("opens %s project settings on the matching starter", async (framework, kind, starter, port) => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("/files/read")) return new Response(null, { status: 404 });
-      if (url.endsWith("/production")) return new Response(JSON.stringify({ enabled: false }));
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/production?editor=1")) return Response.json({ deployment: null, production: { enabled: false } });
       return new Response(JSON.stringify(url.includes("/projects/catalog")
         ? { projects: [{ ...project("sample", "company"), framework, kind }], pagination: { nextCursor: null } }
         : { companies: [{ id: "company", name: "Company" }], pagination: { nextCursor: null } }));
-    }));
+    });
+    vi.stubGlobal("fetch", fetch);
     await render();
     await act(async () => host.querySelector<HTMLButtonElement>("[data-edit-project]")!.click());
     const drawer = host.querySelector("[data-edit-starter]");
     expect(drawer?.getAttribute("data-edit-starter")).toBe(starter);
     expect(drawer?.getAttribute("data-framework")).toBe(framework);
     expect(drawer?.getAttribute("data-port")).toBe(String(port));
+    expect(fetch.mock.calls.map(([url]) => url).filter(url => url.includes("/production") || url.includes("/files/read")))
+      .toEqual(["/api/companies/company/projects/sample/production?editor=1"]);
   });
 
   it("removes only the deleted card and keeps the order, mounted cards and continuation", async () => {

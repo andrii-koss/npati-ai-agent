@@ -35,9 +35,20 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const checkProduction = drawerProductionStatus === undefined && site.status !== "archived" && projectKindOf(site) !== "mobile_app";
+  const productionEligible = site.status !== "archived" && projectKindOf(site) !== "mobile_app";
+  const checkProduction = productionEligible && drawerProductionStatus === undefined;
   const { status: cardProductionStatus } = useProjectProduction(checkProduction ? companyId : "", site.id);
-  const productionStatus = drawerProductionStatus === undefined ? cardProductionStatus : drawerProductionStatus;
+  const currentProductionStatus = drawerProductionStatus === undefined ? cardProductionStatus : drawerProductionStatus;
+  const lastConfirmedProduction = useRef<{ scope: string; status: ProductionStatus } | null>(null);
+  useEffect(() => {
+    if (!productionEligible) {
+      lastConfirmedProduction.current = null;
+    } else if (currentProductionStatus) {
+      lastConfirmedProduction.current = { scope: codeUrl, status: currentProductionStatus };
+    }
+  }, [productionEligible, codeUrl, currentProductionStatus]);
+  const productionStatus = productionEligible ? currentProductionStatus ??
+    (lastConfirmedProduction.current?.scope === codeUrl ? lastConfirmedProduction.current.status : null) : null;
   const release = productionStatus?.enabled ? productionStatus.release : null;
   const productionHealthy = release?.runtime === "running" && release.certificate !== "pending";
   const isUk = language === "uk";
