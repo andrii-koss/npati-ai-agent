@@ -17,7 +17,7 @@ A team of AI agents for your company, with memory, goals, automations, email and
 [![Website](https://img.shields.io/badge/Website-npati.com-e11d2e?style=flat-square&logo=google-chrome&logoColor=white)](https://www.npati.com/npati-ai-agent)
 [![Blog](https://img.shields.io/badge/Updates-en.npati.com-111827?style=flat-square)](https://en.npati.com/category/npati-ai-agent/)
 
-<img src="docs/media/chat-website-01.gif" width="860" alt="A website built from one chat message, with the live Preview next to the chat"/>
+<img src="docs/media/chat-website-02.gif" width="860" alt="A website built from one chat message, with the live Preview next to the chat"/>
 
 </div>
 
