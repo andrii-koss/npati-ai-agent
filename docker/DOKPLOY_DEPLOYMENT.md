@@ -217,10 +217,9 @@ isolation by running `scripts/verify-shared-project-runtime.mjs` with Node insid
 agent-api. The script reads its runner URL/secret without printing the secret and
 removes its temporary projects afterward; it does not create Docker containers.
 
-`docker-compose.dokploy.yml` runs the shared project runtime. It defines exactly
-10 services: agent-api, company-worker, sandbox-runner, postgres,
-postgres-projects, redis, minio, omniroute, crawler and browser-use-worker.
-Frontend assets are served by agent-api.
+Both Compose files start the same 11 services by default: agent-api, company-worker,
+sandbox-runner, postgres, postgres-projects, redis, minio, omniroute, crawler,
+browser-use-worker and searxng. Frontend assets are served by agent-api.
 
 ### PostgreSQL vector search without Qdrant
 
@@ -228,7 +227,10 @@ This Compose no longer starts Qdrant or supplies `QDRANT_URL` to API/worker.
 Company Knowledge already writes document chunks and embeddings into PostgreSQL
 and performs scoped vector and full-text retrieval there. SQLite FTS5 remains
 an in-process supplementary text index; it adds no container. Existing Qdrant
-support in the code is retained for other deployment configurations.
+support is retained in the standard Compose file. Before upgrading an existing
+standard installation that uses Qdrant, set `COMPOSE_PROFILES=qdrant` and
+`QDRANT_URL=http://qdrant:6333` in its environment file to keep its current vector
+backend and named volume.
 
 On redeployment, `--remove-orphans` removes the old Qdrant container without
 deleting its named data volume. Preserve and back up the existing

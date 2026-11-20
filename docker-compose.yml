@@ -47,8 +47,12 @@ services:
       OMNIROUTE_VISION_MODEL: ${OMNIROUTE_VISION_MODEL:-openai/gpt-5.6-luna}
       NPATI_DATA_DIR: /app/data
       NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
-      NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-}
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
+      NPATI_PROJECT_RUNTIME_MODE: ${NPATI_PROJECT_RUNTIME_MODE:-shared}
+      NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
+      NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-npati-local-runner-token-change-before-production}
       NPATI_TERMINAL_TIMEOUT_MS: ${NPATI_TERMINAL_TIMEOUT_MS:-120000}
       NPATI_TERMINAL_BUILD_TIMEOUT_MS: ${NPATI_TERMINAL_BUILD_TIMEOUT_MS:-600000}
       NPATI_TERMINAL_OUTPUT_LIMIT_BYTES: ${NPATI_TERMINAL_OUTPUT_LIMIT_BYTES:-64000}
@@ -58,6 +62,7 @@ services:
       NPATI_HUB_BASE_URL: ${NPATI_HUB_BASE_URL:-}
       NPATI_HUB_API_KEY: ${NPATI_HUB_API_KEY:-}
       CRAWL4AI_BASE_URL: http://crawler:11235
+      NPATI_SEARXNG_URL: ${NPATI_SEARXNG_URL:-http://searxng:8080}
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-npati-local-internal-crawler-token}
       BROWSER_USE_WORKER_URL: http://browser-use-worker:8765
       NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:-npati-local-browser-worker-token-change-before-production}
@@ -75,7 +80,7 @@ services:
       NPATI_PROJECTS_POSTGRES_HOST: postgres-projects
       NPATI_PROJECTS_POSTGRES_PORT: 5432
       NPATI_PROJECTS_POSTGRES_ADMIN_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-npati-local-projects-db-change-before-production}
       NPATI_PROJECTS_POSTGRES_ADMIN_DB: postgres
       NPATI_PROJECTS_SNAPSHOT_DIR: /app/project-snapshots
       NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS: ${NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS:-30}
@@ -89,7 +94,7 @@ services:
       NPATI_DATA_BACKUP_TICK_SECONDS: ${NPATI_DATA_BACKUP_TICK_SECONDS:-300}
       NPATI_DATA_BACKUP_DISABLED: ${NPATI_DATA_BACKUP_DISABLED:-}
       NPATI_PROMOTE_DATA_MAX_ROWS: ${NPATI_PROMOTE_DATA_MAX_ROWS:-500}
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
       REDIS_URL: redis://redis:6379
@@ -117,6 +122,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      postgres-projects:
+        condition: service_healthy
       minio:
         condition: service_healthy
       browser-use-worker:
@@ -127,7 +134,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks: [npati-agent-network, npati-projects-db-network, npati-production-control]
+    networks: [npati-agent-network, npati-projects-db-network, npati-sandbox-control, npati-production-control]
 
   company-worker:
     container_name: npati-agent-company-worker
@@ -161,7 +168,55 @@ services:
       timeout: 8s
       retries: 5
       start_period: 15s
-    networks: [npati-agent-network]
+    networks: [npati-agent-network, npati-sandbox-control]
+
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: apps/agent-api/Dockerfile
+      target: project-runtime
+      args:
+        NPATI_BUILD_COMMIT: ${NPATI_BUILD_COMMIT:-unknown}
+        NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
+    restart: unless-stopped
+    environment:
+      NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
+      NPATI_SANDBOX_RUNNER_MODE: local
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-npati-local-runner-token-change-before-production}
+      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,repo.packagist.org,pub.dev,www.gstatic.com,fonts.gstatic.com,fonts.googleapis.com}
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - project-runtime-workspaces:/projects
+      - project-runtime-state:/runtime-state
+    expose:
+      - "7865"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
+    # Permit unprivileged namespace setup, without SYS_ADMIN or privileged mode.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/sandbox/project-runtime-seccomp.json
+      - apparmor=unconfined
+      # Linux 5.15 rejects nested procfs mounts when Docker masks /proc paths.
+      # Project commands get a separate read-only procfs from Bubblewrap.
+      - systempaths=unconfined
+    cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
+    mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
+    pids_limit: 4096
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [npati-sandbox-control, npati-sandbox-egress]
 
   crawler:
     container_name: npati-agent-crawler
@@ -189,6 +244,24 @@ services:
       timeout: 8s
       retries: 5
       start_period: 30s
+    networks: [npati-agent-network]
+
+  searxng:
+    image: searxng/searxng:${SEARXNG_VERSION:-2026.10.30-ffa88e3ba}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${NPATI_SEARXNG_SECRET:-npati-local-searxng-secret-change-before-production}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./services/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [npati-agent-network]
 
   browser-use-worker:
@@ -257,6 +330,7 @@ services:
     networks: [npati-agent-network]
 
   qdrant:
+    profiles: [qdrant]
     container_name: npati-agent-qdrant
     image: qdrant/qdrant:v1.15.4
     restart: unless-stopped
@@ -312,13 +386,12 @@ services:
     networks: [npati-agent-network]
 
   postgres-projects:
-    profiles: [data-studio]
     container_name: npati-agent-postgres-projects
     image: postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-}
+      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-npati-local-projects-db-change-before-production}
       POSTGRES_DB: postgres
     volumes:
       - postgres-projects-data:/var/lib/postgresql/data
@@ -419,6 +492,9 @@ services:
       options: {max-size: 10m, max-file: "3"}
 
 networks:
+  npati-sandbox-control:
+    internal: true
+  npati-sandbox-egress:
   npati-production-edge:
   npati-production-control:
     internal: true
@@ -428,6 +504,8 @@ networks:
     name: npati-agent-network
 
 volumes:
+  project-runtime-workspaces:
+  project-runtime-state:
   npati-production-state:
   npati-production-routes:
   npati-production-certs:
