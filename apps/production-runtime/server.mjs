@@ -226,16 +226,29 @@ async function changeRelease(record, input) {
     assertIdle(key);
     if (record.release !== release) throw new ProductionError(409, "The release changed. Refresh Production and try again.");
   };
-  if (input.action === "domain") {
-    if (typeof input.domain !== "string" || !input.domain.trim()) throw new ProductionError(400, "Enter an additional domain.");
-    const settings = settingsFor(key, { ...release.settings, aliasDomain: input.domain, redirectAlias: false });
+  if (input.action === "domain" || input.action === "domains") {
+    const aliasOnly = input.action === "domain";
+    if (aliasOnly && (typeof input.domain !== "string" || !input.domain.trim())) {
+      throw new ProductionError(400, "Enter an additional domain.");
+    }
+    if (!aliasOnly && input.aliasDomain !== undefined && typeof input.aliasDomain !== "string") {
+      throw new ProductionError(400, "Enter a valid additional domain different from the primary domain.");
+    }
+    const changes = aliasOnly ? { aliasDomain: input.domain, redirectAlias: false } : {
+      ...(input.domain !== undefined ? { domain: input.domain, tls: input.tls ?? release.settings.tls, entrypoint: input.entrypoint ?? release.settings.entrypoint } : {}),
+      ...(input.aliasDomain !== undefined ? { aliasDomain: input.aliasDomain, redirectAlias: input.redirectAlias ?? release.settings.redirectAlias } : {}),
+    };
+    const settings = settingsFor(key, { ...release.settings, ...changes });
     await verifyDomains(key, settings, release.settings);
     await locked(async () => {
       checkRelease();
       assertDomainsAvailable(record, settings);
       const previousActivity = record.activity;
       record.release = { ...release, settings };
-      pushActivity(record, "alias_changed", settings.aliasDomain ?? release.settings.aliasDomain ?? "");
+      if (release.settings.domain !== settings.domain) pushActivity(record, "domain_changed", settings.domain);
+      if (release.settings.aliasDomain !== settings.aliasDomain || release.settings.redirectAlias !== settings.redirectAlias) {
+        pushActivity(record, "alias_changed", settings.aliasDomain ?? release.settings.aliasDomain ?? "");
+      }
       try {
         await persist(record);
         await refreshRoutes();

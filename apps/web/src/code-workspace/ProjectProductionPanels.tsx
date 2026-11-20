@@ -107,7 +107,7 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
     <section className="overview-card workspace-production-card workspace-production-header" aria-label={t("Проєкт", "Project")}>
       <span className="workspace-production-project-icon" aria-hidden="true"><CodeXml /></span>
       <div className="workspace-production-name">
-        <h2>{project?.name || t("Проєкт", "Project")}</h2>
+        <h2 title={project?.name}>{project?.name || t("Проєкт", "Project")}</h2>
         <span title={projectId}>ID {projectId.slice(0, 8)}{project?.createdAt && <> · {t("Створено", "Created")} {date(project.createdAt)}</>}</span>
       </div>
       {state && <span className={`workspace-production-status workspace-production-indicator workspace-production-header-status ${statusClass}`} aria-live="polite">{state}</span>}

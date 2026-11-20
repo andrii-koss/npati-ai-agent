@@ -12,7 +12,9 @@ type Release = {
   id?: string; kind: "static" | "node"; createdAt: string; url: string; settings: ProductionSettings;
   certificate: string; domains?: ProductionDomain[]; runtime: "running" | "starting" | "unavailable" | "stopped";
 };
-type Control = { action: "start" | "stop" | "restart" } | { action: "domain"; domain: string };
+type Control = { action: "start" | "stop" | "restart" } | { action: "domain"; domain: string } | {
+  action: "domains"; domain?: string; aliasDomain?: string; redirectAlias?: boolean; tls?: boolean; entrypoint?: string;
+};
 type ReportError = (message: string) => void;
 type Job = { state: "queued" | "building" | "ready" | "failed"; error?: string };
 export type ProductionStatus = { enabled: false } | {
@@ -70,8 +72,13 @@ export function useProjectProduction(companyId: string, projectId: string, inclu
   const periodically = jobActive || Boolean(status?.enabled && status.release);
   useEffect(() => {
     if (!base || !periodically) return;
-    const interval = window.setInterval(() => { if (!document.hidden && !mutating.current) void refresh(); }, jobActive || starting ? 1700 : 15000);
-    return () => window.clearInterval(interval);
+    const refreshVisible = () => { if (!document.hidden && !mutating.current) void refresh(); };
+    const interval = window.setInterval(refreshVisible, jobActive || starting ? 1700 : 15000);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [base, periodically, jobActive, starting, refresh]);
 
   async function mutate(method: "POST" | "PATCH" | "DELETE", body?: unknown, reportError: ReportError = setIssue) {

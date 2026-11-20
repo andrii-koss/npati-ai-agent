@@ -250,23 +250,25 @@ export function CreateWebsiteDrawer({
             </p>
 
             {/* 1. Domain */}
-            <label>
-              <span>{t.domainLabel}</span>
-              <input
-                type="text"
-                placeholder="ai.npati.com"
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-              />
-            </label>
-            {primaryHost ? <DomainLink host={primaryHost} publishedUrl={primaryUrl} https={useHttps} /> : (
-              <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
-                {production ? (production.canAssignDomain
-                    ? (isUk ? "Домен буде призначено автоматично." : "A domain will be assigned automatically.")
-                    : (isUk ? "Вкажіть домен для публікації." : "Enter a domain to publish."))
-                  : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
-              </span>
-            )}
+            <div>
+              <label>
+                <span>{t.domainLabel}</span>
+                <input
+                  type="text"
+                  placeholder="ai.npati.com"
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                />
+              </label>
+              {primaryHost ? <DomainLink host={primaryHost} publishedUrl={primaryUrl} https={useHttps} /> : (
+                <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
+                  {production ? (production.canAssignDomain
+                      ? (isUk ? "Домен буде призначено автоматично." : "A domain will be assigned automatically.")
+                      : (isUk ? "Вкажіть домен для публікації." : "Enter a domain to publish."))
+                    : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
+                </span>
+              )}
+            </div>
             {production?.projectId && <ProductionDomainProof companyId={companyId} projectId={production.projectId}
               domain={domain} automaticDomain={production.automaticDomain} currentDomains={[release?.settings.domain, release?.settings.aliasDomain]} isUk={isUk} />}
             {production && (

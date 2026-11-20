@@ -97,6 +97,7 @@ export function WebsiteBuilderDashboard() {
   const [loadingDeployment, setLoadingDeployment] = useState(false);
   const draftRequest = useRef(0);
   const deploymentRevision = useRef<string | undefined>(undefined);
+  const originalDomains = useRef<{ primary: string; alias: string; redirect: boolean } | null>(null);
   const [savedLimits, setSavedLimits] = useState<Partial<ProductionDraftLimits>>({});
   const [runtimeEnvironment, setRuntimeEnvironment] = useState("");
   const drawerCompanyId = editingProject?.companyId ?? creationCompanyId;
@@ -296,6 +297,16 @@ export function WebsiteBuilderDashboard() {
         productionEndpoint(project.companyId, project.id), settings);
 
       if (editingProject) {
+        const original = originalDomains.current;
+        const primaryChanged = !publish && productionEnabled && release && original &&
+          userDomainTrimmed !== original.primary && (userDomainTrimmed || automaticDomain) !== release.settings.domain;
+        const aliasChanged = !publish && productionEnabled && release && original &&
+          (aliasDomain !== original.alias || alias.redirect !== original.redirect) &&
+          (aliasDomain !== (release.settings.aliasDomain ?? "") ||
+            Boolean(aliasDomain) && alias.redirect !== (release.settings.redirectAlias !== false));
+        if ((primaryChanged || aliasChanged) && (production.running || production.busy)) {
+          throw new Error(language === "uk" ? "Дочекайтеся завершення поточної операції продакшену." : "Wait for the current Production operation to finish.");
+        }
         const stored = await writeProjectFile(
           { companyId: editingProject.companyId, projectId: editingProject.id },
           "deployment.json",
@@ -323,6 +334,11 @@ export function WebsiteBuilderDashboard() {
           setRuntimeEnvironment("");
           return;
         }
+        if ((primaryChanged || aliasChanged) && !(await production.control({
+          action: "domains",
+          ...(primaryChanged ? { domain: userDomainTrimmed, tls: settings.tls, entrypoint } : {}),
+          ...(aliasChanged ? { aliasDomain, redirectAlias: alias.redirect } : {}),
+        }, setError))) return;
         if (!productionEnabled) void apiFetch(
           `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}/preview/start`,
           {
@@ -457,6 +473,7 @@ export function WebsiteBuilderDashboard() {
     const requestId = ++draftRequest.current;
     setLoadingDeployment(true);
     deploymentRevision.current = undefined;
+    originalDomains.current = null;
     setSavedLimits({});
     setRuntimeEnvironment("");
     setEditingProject(site);
@@ -490,12 +507,21 @@ export function WebsiteBuilderDashboard() {
     ]).then(([file, published]) => {
       if (requestId !== draftRequest.current) return;
       deploymentRevision.current = file?.revision;
+      const active = published?.enabled ? published.release?.settings : undefined;
+      if (active) {
+        const primary = published?.enabled && active.domain === published.automaticDomain ? "" : active.domain;
+        const savedAlias = { domain: active.aliasDomain ?? "", redirect: active.redirectAlias !== false };
+        originalDomains.current = { primary, alias: savedAlias.domain, redirect: savedAlias.redirect };
+        setDomain(primary);
+        setAlias(savedAlias);
+      }
       try {
         const parsed = file?.content ? JSON.parse(file.content) : {};
-        const active = published?.enabled ? published.release?.settings : undefined;
+        if (!active) {
+          if (parsed.domain && !parsed.isTechnicalDomain) setDomain(parsed.domain);
+          if (typeof parsed.aliasDomain === "string") setAlias({ domain: parsed.aliasDomain, redirect: parsed.redirectAlias !== false });
+        }
         if (active && !parsed.productionLimits) {
-          setDomain(active.domain === (published?.enabled && published.automaticDomain) ? "" : active.domain);
-          setAlias({ domain: active.aliasDomain ?? "", redirect: active.redirectAlias !== false });
           setInternalPath(active.path);
           setStripPath(active.stripPath);
           setContainerPort(active.port);
@@ -504,8 +530,6 @@ export function WebsiteBuilderDashboard() {
           setAutoSsl(active.tls);
           return;
         }
-        if (parsed.domain && !parsed.isTechnicalDomain) setDomain(parsed.domain);
-        if (typeof parsed.aliasDomain === "string") setAlias({ domain: parsed.aliasDomain, redirect: parsed.redirectAlias !== false });
         if (parsed.path) setInternalPath(parsed.path);
         if (typeof parsed.stripPath === "boolean") setStripPath(parsed.stripPath);
         if (parsed.port) setContainerPort(Number(parsed.port));

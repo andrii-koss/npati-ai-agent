@@ -29,8 +29,17 @@
   box-shadow: 0 1px 3px rgba(17, 17, 17, 0.08);
 }
 .workspace-production-project-icon svg { width: 23px; height: 23px; }
-.workspace-production-name { min-width: 0; overflow-wrap: anywhere; }
-.workspace-production-name h2 { margin: 0 0 4px; font-size: 1.06rem; font-weight: 750; letter-spacing: -.015em; line-height: 1.2; }
+.workspace-production-name { min-width: 0; max-width: min(36ch, 100%); }
+.workspace-production-name h2 {
+  margin: 0 0 4px;
+  font-size: 1.06rem;
+  font-weight: 750;
+  letter-spacing: -.015em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .workspace-production-name > span { color: var(--production-muted); font-size: .83rem; }
 .workspace-production-header > .workspace-production-actions { margin-left: auto; }
 .workspace-production-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
