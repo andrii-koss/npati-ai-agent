@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { MessageSquare, ExternalLink, Code2, Copy, Pencil, Trash2 } from "lucide-react";
+import { MessageSquare, ExternalLink, Settings, Copy, Pencil, Trash2 } from "lucide-react";
 import { openableProjectPreview } from "./catalog-project-preview";
 import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
 import type { WebsiteProject } from "./website-builder-cache";
@@ -227,14 +227,14 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
             <ExternalLink size={16} />
           </button>
 
-          {/* Code workspace */}
+          {/* Project workspace settings */}
           <Link
             to={codeUrl}
             className="website-icon-btn"
-            title={language === "uk" ? "Код" : "Code"}
-            aria-label={language === "uk" ? "Код" : "Code"}
+            title={language === "uk" ? "Налаштування проєкту" : "Project settings"}
+            aria-label={language === "uk" ? "Налаштування проєкту" : "Project settings"}
           >
-            <Code2 size={16} />
+            <Settings size={16} aria-hidden="true" />
           </Link>
 
           {/* Three dots menu button on the right */}

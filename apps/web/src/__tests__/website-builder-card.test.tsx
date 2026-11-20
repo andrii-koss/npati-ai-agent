@@ -50,7 +50,7 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Відкрити Preview");
     expect(markup).toContain("website-preview-viewport");
     expect(markup).not.toContain("height:180px");
-    expect(markup).toContain("Код");
+    expect(markup).toContain('aria-label="Налаштування проєкту"');
     expect(markup).toContain("Більше дій");
     expect(markup).toContain('aria-haspopup="menu"');
 
@@ -104,7 +104,8 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Travel Website");
     expect(markup).toContain("Edit in chat");
     expect(markup).toContain("Open Live Preview");
-    expect(markup).toContain("Code");
+    expect(markup).toContain('aria-label="Project settings"');
+    expect(markup).toContain("lucide-settings");
     expect(markup).toContain('href="/settings/code/comp-1/proj-1?view=all"');
     expect(markup).toContain("More options");
     expect(markup).toContain("No preview yet");

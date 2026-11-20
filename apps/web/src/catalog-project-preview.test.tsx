@@ -7,16 +7,24 @@ import { WebsiteProjectCard } from "./website-builder-card";
 import { websiteBuilderCopy } from "./website-builder-constants";
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => "thumbnail-test", getStoredAuthUser: () => ({ id: "thumbnail-test" }) }));
 describe("catalog Preview actions", () => {
-  it("only loads the saved screenshot until the user explicitly opens Preview", async () => {
+  it("reads the screenshot and production status without starting Preview", async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/qa/thumbnail") ? { thumbnail: null } : url.endsWith("/status") ? { isRunning: false } : { token: "scoped-token" })));
+    const fetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/qa/thumbnail")) return Response.json({ thumbnail: null });
+      if (url.endsWith("/production")) return Response.json({ enabled: false });
+      if (url.endsWith("/status")) return Response.json({ isRunning: false });
+      return Response.json({ token: "scoped-token" });
+    });
     vi.stubGlobal("fetch", fetch);
     const replace = vi.fn(); const popup = { opener: {}, document: { body: { textContent: "" } }, location: { replace } };
     vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
     const host = document.createElement("div"); const root = createRoot(host);
     try {
       await act(async () => root.render(<MemoryRouter><WebsiteProjectCard site={{ id: "p", companyId: "c", name: "Site", type: "website", status: "ready", revision: 1, updatedAt: "2026-10-29" }} companyId="c" language="en" t={websiteBuilderCopy.en} handleDelete={() => {}} handleDuplicate={() => {}} handleRename={() => {}} /></MemoryRouter>));
-      expect(fetch.mock.calls.map(call => call[0])).toEqual(["/api/companies/c/projects/p/qa/thumbnail"]);
+      expect(fetch.mock.calls.map(call => call[0]).sort()).toEqual([
+        "/api/companies/c/projects/p/production",
+        "/api/companies/c/projects/p/qa/thumbnail",
+      ]);
       expect(host.querySelector("iframe")).toBeNull();
       const button = host.querySelector<HTMLButtonElement>('button[aria-label="Open Live Preview"]')!;
       expect(host.querySelectorAll('button[aria-label="Open Live Preview"]')).toHaveLength(1);
