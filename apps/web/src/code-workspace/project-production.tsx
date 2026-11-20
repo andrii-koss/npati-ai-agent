@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiSend, safeExternalUrl } from "../code-workspace-page-types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiGet, apiSend } from "../code-workspace-page-types";
 
 export type ProductionLimits = { cpu: number; memoryMiB: number; requestsPerSecond: number; concurrency: number; bodyMiB: number; timeoutSeconds: number };
 export type ProductionSettings = {
@@ -7,7 +7,13 @@ export type ProductionSettings = {
   path: string; port: number; stripPath: boolean; tls: boolean; entrypoint: string; limits: ProductionLimits;
 };
 type Proof = { name: string; value: string };
-type Release = { kind: "static" | "node"; createdAt: string; url: string; settings: ProductionSettings; certificate: string; runtime: "running" | "starting" | "unavailable" };
+export type ProductionDomain = { host: string; url: string; primary: boolean; certificate: "disabled" | "pending" | "issued" };
+type Release = {
+  id?: string; kind: "static" | "node"; createdAt: string; url: string; settings: ProductionSettings;
+  certificate: string; domains?: ProductionDomain[]; runtime: "running" | "starting" | "unavailable" | "stopped";
+};
+type Control = { action: "start" | "stop" | "restart" } | { action: "domain"; domain: string };
+type ReportError = (message: string) => void;
 type Job = { state: "queued" | "building" | "ready" | "failed"; error?: string };
 export type ProductionStatus = { enabled: false } | {
   enabled: true;
@@ -28,70 +34,80 @@ const running = (status: ProductionStatus | null) => status?.enabled && (status.
 
 export const productionEndpoint = (companyId: string, projectId: string) => `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/production`;
 
-export function useProjectProduction(companyId: string, projectId: string) {
+export function useProjectProduction(companyId: string, projectId: string, includeDefaults = false) {
   const base = companyId && projectId ? productionEndpoint(companyId, projectId) : "";
   const [status, setStatus] = useState<ProductionStatus | null>(null);
   const [issue, setIssue] = useState("");
+  const [readIssue, setReadIssue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [statusFailed, setStatusFailed] = useState(false);
-  const refresh = useCallback(async () => {
+  const version = useRef(0);
+  const mutating = useRef(false);
+  const refresh = useCallback(async (request = ++version.current) => {
     try {
-      const data = await apiGet<ProductionStatus>(base);
-      setStatus(current => data.enabled && current?.enabled ? { ...data, suggested: current.suggested } : data);
-      if (statusFailed) setIssue("");
-      setStatusFailed(false);
+      const data = await apiGet<ProductionStatus>(base + (includeDefaults ? "?defaults=1" : ""));
+      if (request !== version.current) return;
+      setStatus(data);
+      setReadIssue("");
     } catch (error) {
-      setIssue(error instanceof Error ? error.message : String(error));
-      setStatusFailed(true);
+      if (request === version.current && (includeDefaults || !/HTTP 404|Only the company owner/.test(String(error)))) {
+        setReadIssue(error instanceof Error ? error.message : String(error));
+      }
     }
-  }, [base, statusFailed]);
+  }, [base, includeDefaults]);
 
   const jobActive = running(status);
   useEffect(() => {
     setStatus(null);
     setIssue("");
-    if (!base) return;
-    let mounted = true;
-    void apiGet<ProductionStatus>(base).then(data => {
-      if (mounted) setStatus(data);
-    }, error => {
-      if (mounted && !/HTTP 404|Only the company owner/.test(String(error))) setIssue(String(error));
-    });
-    return () => { mounted = false; };
-  }, [base]);
+    setReadIssue("");
+    setBusy(false);
+    mutating.current = false;
+    if (base) void refresh();
+    return () => { version.current++; };
+  }, [base, refresh]);
 
-  const periodically = running(status) || Boolean(status?.enabled && status.release);
+  const starting = status?.enabled && status.release?.runtime === "starting";
+  const periodically = jobActive || Boolean(status?.enabled && status.release);
   useEffect(() => {
     if (!base || !periodically) return;
-    const interval = window.setInterval(() => { if (!document.hidden && !busy) void refresh(); }, jobActive ? 1700 : 15000);
+    const interval = window.setInterval(() => { if (!document.hidden && !mutating.current) void refresh(); }, jobActive || starting ? 1700 : 15000);
     return () => window.clearInterval(interval);
-  }, [base, periodically, jobActive, busy, refresh]);
+  }, [base, periodically, jobActive, starting, refresh]);
 
-  async function publish(settings: Omit<ProductionSettings, "limits"> & { limits?: ProductionDraftLimits; environment?: unknown }) {
+  async function mutate(method: "POST" | "PATCH" | "DELETE", body?: unknown, reportError: ReportError = setIssue) {
+    if (!base || mutating.current) return false;
+    const request = ++version.current;
+    mutating.current = true;
     setIssue("");
+    setReadIssue("");
     setBusy(true);
     try {
-      setStatus(await apiSend<ProductionStatus>("POST", base, settings));
+      const data = await apiSend<ProductionStatus>(method, base, body);
+      if (request !== version.current) return false;
+      if (method === "DELETE") await refresh(request);
+      else setStatus(data);
       return true;
+    } catch (error) {
+      if (request === version.current) reportError(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally {
+      if (request === version.current) {
+        mutating.current = false;
+        setBusy(false);
+      }
     }
-    catch (error) { setIssue(error instanceof Error ? error.message : String(error)); }
-    finally { setBusy(false); }
-    return false;
   }
-
-  async function unpublish() {
-    setIssue("");
-    setBusy(true);
-    try {
-      await apiSend("DELETE", base);
-      await refresh();
-    } catch (error) { setIssue(error instanceof Error ? error.message : String(error)); }
-    finally { setBusy(false); }
+  const publish = (settings: Omit<ProductionSettings, "limits"> & { limits?: ProductionDraftLimits; environment?: unknown }, reportError?: ReportError) =>
+    mutate("POST", settings, reportError);
+  const unpublish = () => mutate("DELETE");
+  async function control(input: Control, reportError?: ReportError) {
+    const releaseId = status?.enabled ? status.release?.id : undefined;
+    if (!releaseId || jobActive) return false;
+    return mutate("PATCH", { ...input, releaseId }, reportError);
   }
-  return { base, status, running: running(status), issue, busy, publish, unpublish };
+  return { base, status, running: jobActive, issue: issue || readIssue, busy, publish, unpublish, control };
 }
-
-type Controller = ReturnType<typeof useProjectProduction>;
+export type ProductionController = ReturnType<typeof useProjectProduction>;
 const fields: { name: keyof ProductionLimits; en: string; uk: string; min: number; max: number; step?: number }[] = [
   { name: "cpu", en: "CPU cores", uk: "Ядра CPU", min: 0.25, max: 4, step: 0.25 },
   { name: "memoryMiB", en: "Memory (MiB)", uk: "Пам’ять (МіБ)", min: 128, max: 2048 },
@@ -119,29 +135,6 @@ export function ProductionLimitFields({ isUk, limits, setLimit }: {
         ))}
       </div>
     </fieldset>
-  );
-}
-
-export function ProjectProductionHeader({ controller, isUk }: { controller: Controller; isUk: boolean }) {
-  const { status, issue } = controller;
-  if (!status?.enabled) return issue ? <p role="status" className="ds-hint-error">{issue}</p> : null;
-  const { release } = status;
-  const url = safeExternalUrl(release?.url);
-  const jobText = controller.running ? (isUk ? "Публікація…" : "Publishing…")
-    : release?.certificate === "pending" ? (isUk ? "Очікує HTTPS" : "HTTPS pending")
-    : release?.runtime === "starting" ? (isUk ? "Запускається" : "Starting")
-    : release?.runtime === "unavailable" ? (isUk ? "Застосунок недоступний" : "Application unavailable")
-    : release ? (isUk ? "Опубліковано" : "Published")
-    : (isUk ? "Не опубліковано" : "Unpublished");
-  return (
-    <section className="code-production" aria-label="Production">
-      <div className="code-production-bar">
-        <strong>Production</strong>
-        <span className="ds-muted" aria-live="polite">{jobText}</span>
-        {url && <a href={url} target="_blank" rel="noopener noreferrer">{release?.settings.domain}</a>}
-      </div>
-      {(issue || status.job?.error) && <p role="alert" className="ds-hint-error">{issue || status.job?.error}</p>}
-    </section>
   );
 }
 

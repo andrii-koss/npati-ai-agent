@@ -2,7 +2,7 @@ import { isolatedPreviewUrl } from "./preview-origin";
 import { CodeWorkspaceHeader } from "./code-workspace/CodeWorkspaceHeader";
 import { CodeWorkspaceExecutionPanel } from "./code-workspace/CodeWorkspaceExecutionPanel";
 import { CodeWorkspaceFilePanel } from "./code-workspace/CodeWorkspaceFilePanel";
-import { approvalDecisionPlan, modeChangeRequest, persistedSessionMode } from "./code-workspace/actions";
+import { approvalDecisionPlan } from "./code-workspace/actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "./i18n";
@@ -13,35 +13,32 @@ import { AsyncWorkspacePanel } from "./code-workspace/AsyncWorkspacePanel";
 import { CodeMetricsPanel } from "./code-workspace/CodeMetricsPanel";
 import { listProjectFiles, readProjectFile, writeProjectFile } from "./project-files-client";
 import { writeActiveCompanyId } from "./active-company";
-import { confirmModal } from "./ConfirmDialog";
 import {
   type FileEntry,
   type RunEvent,
   type ActivityResponse,
   type ChangesResponse,
-  type UsageResponse,
   type PreviewStatus,
   type PendingApproval,
   type ApprovalScope,
   type BottomTab,
   type ProjectTerminalRow,
   type MobileView,
-  type SessionMode,
-  normalizeWorkspaceMode,
   apiGet,
   apiSend,
   safeExternalUrl,
   flattenFiles,
 } from "./code-workspace-page-types";
 import { CodeWorkspaceBottomTabs } from "./code-workspace-bottom-tabs";
-import { ProjectProductionHeader, useProjectProduction } from "./code-workspace/project-production";
+import { useProjectProduction } from "./code-workspace/project-production";
+import { ProjectProductionPanels } from "./code-workspace/ProjectProductionPanels";
 
 /**
  * Code Workspace (C7).
  *
  * Read-only-first workspace for a code project: file tree, agent stream (run activity),
  * file viewer, bottom tabs (Changes / Terminal / Logs / Activity) and a control panel
- * (permission mode, Stop, usage, preview) plus approval cards with scope selection.
+ * (production controls and preview) plus approval cards with scope selection.
  *
  * Conventions reused from the existing Website Builder workspace (`ProjectPage.tsx`):
  * `authHeaders()` / `apiGet()` / `apiPost()` helpers, `bottom-tabs-nav` + `bottom-tab-content`,
@@ -65,7 +62,7 @@ function CodeWorkspaceContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { language } = useTranslation();
   const isUk = language === "uk";
-  const production = useProjectProduction(companyId, projectId);
+  const production = useProjectProduction(companyId, projectId, true);
 
   const base = `/api/companies/${companyId}/projects/${projectId}`;
   const codeBase = `/api/companies/${companyId}/code`;
@@ -107,20 +104,9 @@ function CodeWorkspaceContent() {
 
   const [changes, setChanges] = useState<ChangesResponse | null>(null);
   const [changesError, setChangesError] = useState<string | null>(null);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [usageError, setUsageError] = useState<string | null>(null);
-
-  const [mode, setMode] = useState<SessionMode>("plan");
-  const [task, setTask] = useState("");
-  const [taskBusy, setTaskBusy] = useState(false);
-  const [taskError, setTaskError] = useState<string | null>(null);
+  const [contextError, setContextError] = useState<string | null>(null);
   const [contextReady, setContextReady] = useState(false);
-  const [asyncInboxEnabled, setAsyncInboxEnabled] = useState<boolean | null>(null);
   const asyncBinding = JSON.stringify([companyId, projectId, sessionId]);
-  useEffect(() => { setAsyncInboxEnabled(null); }, [asyncBinding]);
-  const [modeBusy, setModeBusy] = useState(false);
-  const [modeError, setModeError] = useState<string | null>(null);
-  const [sessionRevision, setSessionRevision] = useState<number | null>(null);
   const fileRequest = useRef(0);
   const [fileRevision, setFileRevision] = useState<string | undefined>(undefined);
 
@@ -150,8 +136,6 @@ function CodeWorkspaceContent() {
 
   const tree = useMemo(() => flattenFiles(files), [files]);
 
-  const [sessions, setSessions] = useState<Array<{ id: string; projectId: string; status: string; mode: SessionMode; summary?: string }>>([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
   const [fileFilter, setFileFilter] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -226,134 +210,40 @@ function CodeWorkspaceContent() {
   };
 
   useEffect(() => {
-    if (!companyId || !projectId) return;
+    if (!companyId || !projectId || sessionId) return;
     let cancelled = false;
-    setLoadingSessions(true);
-    void apiGet<{ sessions: Array<{ id: string; projectId: string; status: string; mode: SessionMode; summary?: string }> }>(
+    void apiGet<{ sessions: Array<{ id: string; projectId: string; status: string }> }>(
       `${codeBase}/sessions?projectId=${encodeURIComponent(projectId)}`
     )
       .then((data) => {
         if (cancelled) return;
         const list = (data.sessions ?? []).filter((s) => s.projectId === projectId && s.status !== "archived");
-        setSessions(list);
         if (!sessionId && list.length > 0 && list[0]) {
           selectSession(list[0].id);
         }
       })
-      .catch(() => {
-        if (!cancelled) setSessions([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingSessions(false);
-      });
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [codeBase, companyId, projectId, sessionId, selectSession]);
-
-  const createNewSession = async () => {
-    if (!companyId || !projectId || taskBusy) return;
-    setTaskBusy(true);
-    setTaskError(null);
-    try {
-      const created = await apiSend<{ id: string }>("POST", `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/code/sessions`, {
-        mode: persistedSessionMode(mode),
-      });
-      if (created?.id) {
-        selectSession(created.id);
-      }
-    } catch (cause) {
-      setTaskError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setTaskBusy(false);
-    }
-  };
-
-  const deleteCurrentSession = async () => {
-    if (!sessionId || !companyId || taskBusy) return;
-    const agreed = await confirmModal({
-      title: isUk ? "Видалити сесію" : "Delete session",
-      message: isUk
-        ? `Ви дійсно бажаєте видалити сесію #${sessionId.slice(0, 8)}?`
-        : `Are you sure you want to delete session #${sessionId.slice(0, 8)}?`,
-      isDanger: true,
-      confirmText: isUk ? "Видалити" : "Delete",
-    });
-    if (!agreed) return;
-
-    setTaskBusy(true);
-    setTaskError(null);
-    try {
-      try {
-        await apiSend("DELETE", `${codeBase}/sessions/${encodeURIComponent(sessionId)}/data`, { confirm: true });
-      } catch {
-        await apiSend("POST", `${codeBase}/sessions/${encodeURIComponent(sessionId)}/archive`);
-      }
-      const remaining = sessions.filter((s) => s.id !== sessionId);
-      setSessions(remaining);
-      if (remaining.length > 0 && remaining[0]) {
-        selectSession(remaining[0].id);
-      } else {
-        selectSession("");
-      }
-    } catch (cause) {
-      setTaskError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setTaskBusy(false);
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
     setContextReady(false);
-    setSessionRevision(null);
     if (!sessionId) return;
-    void apiGet<{ mode: string; status: string; revision: number }>(`${codeBase}/sessions/${encodeURIComponent(sessionId)}`)
+    void apiGet<{ status: string }>(`${codeBase}/sessions/${encodeURIComponent(sessionId)}`)
       .then(async (session) => {
         if (cancelled) return;
-        setMode(normalizeWorkspaceMode(session.mode));
-        setSessionRevision(session.revision);
         if (session.status === "archived") return;
         const stored = await apiSend<{ persisted: boolean }>("PUT", `${codeBase}/active-context`, { contextType: "project", projectId, sessionId });
         if (!cancelled) {
           if (!stored.persisted) throw new Error("The active code session could not be saved");
           writeActiveCompanyId(companyId);
           setContextReady(true);
-          setTaskError(null);
+          setContextError(null);
         }
-      }).catch((cause) => { if (!cancelled) setTaskError(cause instanceof Error ? cause.message : String(cause)); });
+      }).catch((cause) => { if (!cancelled) setContextError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
   }, [codeBase, companyId, projectId, sessionId]);
-
-  const startTask = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!task.trim() || taskBusy) return;
-    setTaskBusy(true);
-    setTaskError(null);
-    try {
-      let activeSessionId = sessionId;
-      if (!activeSessionId) {
-        const created = await apiSend<{ id: string }>("POST", `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/code/sessions`, {
-          mode: persistedSessionMode(mode),
-          summary: task.trim().slice(0, 100),
-        });
-        activeSessionId = created.id;
-        selectSession(activeSessionId);
-      }
-      const started = await apiSend<{ run: { runId: string } }>("POST", `${codeBase}/runs`, {
-        projectId,
-        sessionId: activeSessionId,
-        prompt: task.trim(),
-      });
-      const next = new URLSearchParams(searchParams);
-      if (!sessionId) next.set("session", activeSessionId);
-      next.set("run", started.run.runId);
-      setSearchParams(next);
-      setTask("");
-    } catch (cause) {
-      setTaskError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setTaskBusy(false);
-    }
-  };
 
   const loadFiles = useCallback(async () => {
     try {
@@ -407,21 +297,6 @@ function CodeWorkspaceContent() {
     }
   }, [codeBase, sessionId]);
 
-  const loadUsage = useCallback(async () => {
-    if (!sessionId) {
-      setUsage(null);
-      setUsageError(null);
-      return;
-    }
-    try {
-      setUsage(await apiGet<UsageResponse>(`${codeBase}/sessions/${sessionId}/usage`));
-      setUsageError(null);
-    } catch (cause) {
-      setUsage(null);
-      setUsageError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [codeBase, sessionId]);
-
   const loadApprovals = useCallback(async () => {
     try {
       const data = await apiGet<{ approvals?: PendingApproval[]; items?: PendingApproval[] }>(
@@ -442,16 +317,15 @@ function CodeWorkspaceContent() {
   useEffect(() => {
     void loadStream();
     void loadChanges();
-    void loadUsage();
-  }, [loadStream, loadChanges, loadUsage]);
+  }, [loadStream, loadChanges]);
 
   useEffect(() => {
     if (!runId) return;
     const timer = window.setInterval(() => {
-      void loadStream(); void loadChanges(); void loadUsage(); void loadApprovals(); void loadFiles();
+      void loadStream(); void loadChanges(); void loadApprovals(); void loadFiles();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [runId, loadStream, loadChanges, loadUsage, loadApprovals, loadFiles]);
+  }, [runId, loadStream, loadChanges, loadApprovals, loadFiles]);
 
   const openFile = useCallback(
     async (path: string) => {
@@ -514,26 +388,6 @@ function CodeWorkspaceContent() {
     }
   };
 
-  const applyMode = useCallback(
-    async (next: SessionMode) => {
-      if (!sessionId) { setMode(next); return; }
-      setModeBusy(true);
-      setModeError(null);
-      try {
-        if (sessionRevision === null) throw new Error("Reload the session before changing its mode.");
-        const request = modeChangeRequest({ companyId, sessionId, mode: next, expectedRevision: sessionRevision });
-        const result = await apiSend<{ session: { mode: string; revision: number } }>("PUT", "/api" + request.path, request.body);
-        setMode(normalizeWorkspaceMode(result.session.mode));
-        setSessionRevision(result.session.revision);
-      } catch (cause) {
-        setModeError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setModeBusy(false);
-      }
-    },
-    [companyId, sessionId, sessionRevision],
-  );
-
   const stopRun = useCallback(async () => {
     if (!sessionId) return;
     setStopBusy(true);
@@ -577,16 +431,16 @@ function CodeWorkspaceContent() {
 
   return (
     <main className="goals-container automations-container code-workspace" data-project-id={projectId} style={{ maxWidth: 1180, margin: "0 auto", paddingBottom: 60 }}>
-      <CodeWorkspaceHeader isUk={isUk} sessionId={sessionId} runId={runId} selectSession={selectSession} sessions={sessions} deleteCurrentSession={deleteCurrentSession} createNewSession={createNewSession} taskBusy={taskBusy} mode={mode} tree={tree} events={events} changedFiles={changedFiles} usage={usage} />
-      <ProjectProductionHeader controller={production} isUk={isUk} />
+      <CodeWorkspaceHeader isUk={isUk} />
+      <ProjectProductionPanels controller={production} companyId={companyId} projectId={projectId} isUk={isUk} />
 
       {/* Dismissible Notices */}
-      {taskError && (
+      {contextError && (
         <div className="workspace-notice" style={{ marginBottom: 16, background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
-          <span>{taskError}</span>
+          <span>{contextError}</span>
           <button
             type="button"
-            onClick={() => setTaskError(null)}
+            onClick={() => setContextError(null)}
             style={{ float: "right", background: "none", border: "none", cursor: "pointer", fontWeight: "bold", color: "#991b1b" }}
           >
             ✕
@@ -664,7 +518,7 @@ function CodeWorkspaceContent() {
         </div>
       </div>
 
-      <CodeWorkspaceExecutionPanel isUk={isUk} asyncInboxEnabled={asyncInboxEnabled} startTask={startTask} mode={mode} modeError={modeError} modeBusy={modeBusy} taskBusy={taskBusy} applyMode={applyMode} task={task} setTask={setTask} usageError={usageError} usage={usage} sessionId={sessionId} stopBusy={stopBusy} stopRun={stopRun} activeTab={activeTab} runId={runId} streamError={streamError} events={events} expanded={expanded} setExpanded={setExpanded} approvals={approvals} approvalError={approvalError} approvalBusy={approvalBusy} decide={decide} denyOpen={denyOpen} setDenyOpen={setDenyOpen} denyComment={denyComment} setDenyComment={setDenyComment} />
+      <CodeWorkspaceExecutionPanel isUk={isUk} sessionId={sessionId} stopBusy={stopBusy} stopRun={stopRun} activeTab={activeTab} runId={runId} streamError={streamError} events={events} expanded={expanded} setExpanded={setExpanded} approvals={approvals} approvalError={approvalError} approvalBusy={approvalBusy} decide={decide} denyOpen={denyOpen} setDenyOpen={setDenyOpen} denyComment={denyComment} setDenyComment={setDenyComment} />
 
       <CodeWorkspaceFilePanel isUk={isUk} activeTab={activeTab} tree={tree} filteredTree={filteredTree} filesError={filesError} fileFilter={fileFilter} setFileFilter={setFileFilter} selectedPath={selectedPath} openFile={openFile} renderFileIcon={renderFileIcon} isFullscreenFile={isFullscreenFile} setIsFullscreenFile={setIsFullscreenFile} fileContent={fileContent} isEditingFile={isEditingFile} setIsEditingFile={setIsEditingFile} savingFile={savingFile} saveFile={saveFile} copied={copied} copyFileContent={copyFileContent} fileError={fileError} setFileContent={setFileContent} saveSuccess={saveSuccess} />
 
@@ -701,7 +555,6 @@ function CodeWorkspaceContent() {
           scope={{ companyId, projectId, sessionId }}
           runId={runId}
           isUk={isUk}
-          onAvailability={setAsyncInboxEnabled}
           onRun={(nextRun) => selectSession(sessionId, nextRun)}
         />
       )}

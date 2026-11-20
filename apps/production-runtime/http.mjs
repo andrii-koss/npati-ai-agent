@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { extname, join, relative } from "node:path";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { ProductionError, safeFile } from "./config.mjs";
 
@@ -25,7 +26,16 @@ export function text(res, status, message) {
   res.end(message);
 }
 
-async function serveStatic(req, res, root, pathname) {
+function countBytes(record) {
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      record.responseBytes += chunk.length;
+      callback(null, chunk);
+    },
+  });
+}
+
+async function serveStatic(req, res, root, pathname, record) {
   if (req.method !== "GET" && req.method !== "HEAD") return text(res, 405, "Method not allowed");
   const relativePath = pathname.slice(1).replace(/\/$/, "");
   if (relativePath && (!safeFile(relativePath) || relativePath.split("/").some(part => part.startsWith(".")))) {
@@ -43,7 +53,7 @@ async function serveStatic(req, res, root, pathname) {
       "x-content-type-options": "nosniff", "cache-control": extname(target).toLowerCase() === ".html" ? "no-cache" : "public, max-age=60",
     });
     if (req.method === "HEAD") res.end();
-    else await pipeline(createReadStream(target), res);
+    else await pipeline(createReadStream(target), countBytes(record), res);
     return;
   }
   text(res, 404, "Not found");
@@ -57,11 +67,11 @@ function endToEnd(headers) {
   return result;
 }
 
-function serveApplication(req, res, socketPath, path, limits) {
+function serveApplication(req, res, socketPath, path, limits, record) {
   return new Promise(resolve => {
     const upstream = request({ socketPath, path, method: req.method, headers: endToEnd(req.headers) }, response => {
       res.writeHead(response.statusCode ?? 502, endToEnd(response.headers));
-      pipeline(response, res).then(resolve, resolve);
+      pipeline(response, countBytes(record), res).then(resolve, resolve);
     });
     const timeout = setTimeout(() => {
       text(res, 504, "Application response deadline exceeded");
@@ -153,12 +163,12 @@ export async function publicRequest(req, res, record, rootFor, getApplication, r
     }
     if (release.kind === "static") {
       const relativePath = path !== "/" ? pathname.slice(path.length) || "/" : pathname;
-      return await serveStatic(req, res, rootFor(record, release), relativePath);
+      return await serveStatic(req, res, rootFor(record, release), relativePath, record);
     }
     const app = await getApplication(record, release);
     if (!app) return text(res, 503, "Application is unavailable");
     const forwardPath = stripPath && path !== "/" ? ((rawPath.slice(path.length) || "/") + req.url.slice(rawPath.length)) : req.url;
-    await serveApplication(req, res, app.socketPath, forwardPath, limits);
+    await serveApplication(req, res, app.socketPath, forwardPath, limits, record);
   } catch (error) {
     if (!res.destroyed) text(res, 500, "Production request failed");
     throw error;

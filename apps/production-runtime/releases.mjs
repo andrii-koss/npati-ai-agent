@@ -129,10 +129,10 @@ export async function buildRelease(record, settings, files, log, environment) {
   }
 }
 
-export function applicationFor(record, release, log) {
+export function applicationFor(record, release, log, signal) {
   if (release.kind !== "node") return Promise.resolve(null);
   return startApplication({
     root: rootFor(record, release), connectionDir: `/tmp/npati-app-${release.uid}`,
-    uid: release.uid, port: release.settings.port, limits: release.settings.limits, env: release.environment, log,
+    uid: release.uid, port: release.settings.port, limits: release.settings.limits, env: release.environment, log, signal,
   });
 }

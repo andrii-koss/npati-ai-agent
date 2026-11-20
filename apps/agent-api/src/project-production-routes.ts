@@ -5,7 +5,7 @@ import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectFileError, type ProjectWorkspace } from "./project-workspace";
 
 interface Params { companyId: string; projectId: string }
-interface Query { domain?: string; defaults?: string }
+interface Query { domain?: string; defaults?: string; metrics?: string }
 const snapshotLimit = 24 * 1024 * 1024;
 const inactive = new Set(["archived", "soft_deleted", "purging", "deleted"]);
 const runtimeExcluded = new Set(["node_modules", "dist", "build", "coverage"]);
@@ -20,7 +20,7 @@ function serviceConfig() {
   return url && token && token.length >= 32 ? { url, token } : null;
 }
 
-async function productionRequest(ctx: AuthContext, params: Params, method: "GET" | "POST" | "DELETE", body?: unknown, query = "") {
+async function productionRequest(ctx: AuthContext, params: Params, method: "GET" | "POST" | "DELETE" | "PATCH", body?: unknown, query = "") {
   const service = serviceConfig();
   if (!service) throw new ProductionRouteError(503, "Project Production is disabled on this installation.");
   const key = createHash("sha256").update(JSON.stringify([ctx.workspaceId, params.companyId, params.projectId])).digest("hex");
@@ -137,7 +137,9 @@ export function registerProjectProductionRoutes(app: FastifyInstance, workspace:
       if (!serviceConfig()) return { enabled: false };
       const { ctx, project } = await authorize(request);
       if (inactive.has(project.status)) return { enabled: false };
-      const query = request.query.domain ? `?domain=${encodeURIComponent(request.query.domain)}` : "";
+      const query = request.query.metrics
+        ? `?metrics=${encodeURIComponent(request.query.metrics)}`
+        : request.query.domain ? `?domain=${encodeURIComponent(request.query.domain)}` : "";
       const data = await productionRequest(ctx, request.params, "GET", undefined, query);
       const suggested = request.query.defaults === "1" ? await readDeploymentSettings(workspace, ctx, request.params) : undefined;
       return { ...data, suggested };
@@ -153,6 +155,14 @@ export function registerProjectProductionRoutes(app: FastifyInstance, workspace:
       const current = await store.getProject(ctx, request.params.companyId, request.params.projectId);
       if (inactive.has(current.status)) throw new ProductionRouteError(409, "Restore this project before publishing it.");
       return reply.code(202).send(await productionRequest(ctx, request.params, "POST", { settings: request.body ?? {}, files }));
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.patch<{ Params: Params; Body: Record<string, unknown> }>(base, { bodyLimit: 16384 }, async (request, reply) => {
+    try {
+      const { ctx, project } = await authorize(request);
+      if (inactive.has(project.status)) throw new ProductionRouteError(409, "Restore this project before managing Production.");
+      return await productionRequest(ctx, request.params, "PATCH", request.body);
     } catch (error) { return sendError(reply, error); }
   });
 

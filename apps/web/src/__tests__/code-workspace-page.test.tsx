@@ -10,6 +10,7 @@ vi.mock("../code-workspace/AsyncWorkspacePanel", () => ({ AsyncWorkspacePanel: (
 vi.mock("../code-workspace/CodeMetricsPanel", () => ({ CodeMetricsPanel: () => null }));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
+const duplicateDomainError = "Enter a valid additional domain different from the primary domain.";
 
 async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<typeof vi.fn>; releaseA: () => void }) => Promise<void>, entry = "/code/co/pr?session=s&run=r") {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -17,6 +18,13 @@ async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<t
   let releaseA!: () => void;
   const fetcher = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input);
+    if (url.endsWith("/projects/pr")) return json({ name: "Production site", type: "website" });
+    if (url.endsWith("/production?defaults=1")) return json({ enabled: true, release: {
+      id: "release-a", runtime: "running", kind: "node", createdAt: "2026-11-19T10:00:00.000Z",
+      settings: { limits: { memoryMiB: 512 } }, domains: [{ host: "sample.localhost", url: "http://sample.localhost/", primary: true, certificate: "disabled" }],
+    } });
+    if (url.includes("/production?metrics=")) return json({ points: [{ at: Date.now() - 1000, cpu: 23, memoryMiB: 42, networkBps: 400 }] });
+    if (url.endsWith("/production") && init?.method === "PATCH") return json({ error: { message: duplicateDomainError } }, 400);
     if (url.includes("/approvals?")) return json({ approvals });
     if (url.endsWith("/decide")) { approvals = approvals.filter(a => !url.includes(a.id)); return json({}); }
     if (url.endsWith("/mode")) { const data = JSON.parse(String(init?.body)); return json({ session: { mode: data.mode === "auto_edit" ? "auto" : "full_auto", revision: data.expectedRevision + 1 } }); }
@@ -56,25 +64,49 @@ it("approves exactly the selected card and leaves another same-command approval 
   });
 });
 
-it("sends the observed session revision and normalizes persisted modes on every change", async () => {
+it("replaces the requested blocks and keeps the linked file and workspace tabs", async () => {
   await view(async ({ host, fetcher }) => {
-    const mode = host.querySelector<HTMLSelectElement>(".composer-options select")!;
-    expect(mode.value).toBe("ask");
-    for (const value of ["auto_edit", "full_auto_sandbox"]) await act(async () => { mode.value = value; mode.dispatchEvent(new Event("change", { bubbles: true })); });
-    const changes = fetcher.mock.calls.filter(([url]) => String(url).endsWith("/mode"));
-    expect(changes.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ mode: "auto_edit", expectedRevision: 7 }, { mode: "full_auto_sandbox", expectedRevision: 8 }]);
-    expect(mode.value).toBe("full_auto_sandbox");
+    expect(host.textContent).toContain("Production site");
+    expect(host.textContent).toContain("sample.localhost");
+    expect(host.querySelectorAll(".workspace-resource-grid > article")).toHaveLength(3);
+    expect(host.textContent).toContain("23%");
+    expect(host.textContent).toContain("42 MiB");
+    expect(host.textContent).toContain("400 B/s");
+    expect(host.querySelector(".code-task-composer, .email-scope-toolbar, .inspector-stats-grid")).toBeNull();
+    expect(host.querySelector(".code-production-bar")).toBeNull();
+    expect(button(host, "Files & Code").getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
+    expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
+    await act(async () => button(host, "24 hours").click());
+    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith("/production?metrics=1440"))).toBe(true);
+  }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
+});
+
+it("clears a domain validation error after five seconds and keeps the form open", async () => {
+  await view(async ({ host, fetcher }) => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => button(host, "Add domain").click());
+      const form = host.querySelector<HTMLFormElement>(".workspace-production-domain-form")!;
+      const input = form.querySelector("input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "sample.localhost");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        button(form, "Save").click();
+      });
+      expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith("/production") && init?.method === "PATCH")).toBe(true);
+      expect(form.querySelector('[role="alert"]')?.textContent).toBe(duplicateDomainError);
+      await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+      expect(form.querySelector('[role="alert"]')?.textContent).toBe(duplicateDomainError);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(host.textContent).not.toContain(duplicateDomainError);
+      expect(form.isConnected).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
-it("uses the creation API mode spelling when starting a new session from a loaded session", async () => {
-  await view(async ({ host, fetcher }) => {
-    await act(async () => button(host, "+ New session").click());
-    const creations = fetcher.mock.calls.filter(([url, init]) => String(url).endsWith("/code/sessions") && init?.method === "POST");
-    expect(creations).toHaveLength(1);
-    expect(JSON.parse(String(creations[0]?.[1]?.body))).toEqual({ mode: "edit" });
-  });
-});
 it("ignores a stale file response and saves the selected file with its own revision", async () => {
   await view(async ({ host, fetcher, releaseA }) => {
     await act(async () => button(host, "Files & Code").click());

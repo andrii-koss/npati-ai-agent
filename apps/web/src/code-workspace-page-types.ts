@@ -87,7 +87,7 @@ export async function apiGet<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function apiSend<T>(method: "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(method: "POST" | "PUT" | "DELETE" | "PATCH", url: string, body?: unknown): Promise<T> {
   const headers = authHeaders();
   if (body !== undefined) headers.set("Content-Type", "application/json");
   const response = await fetch(url, {

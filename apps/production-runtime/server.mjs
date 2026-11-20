@@ -1,23 +1,26 @@
 import { chmod, chown, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { automaticDomain, authorized, defaults, domainProof, domainsFor, localEnabled, ProductionError, projectKey, publicOrigin, publicUrl, runtimeEnvironment, settingsFor, tlsEnabled, verifyDomains, writeJson, writeRoutes } from "./config.mjs";
+import { automaticDomain, authorized, defaults, domainProof, domainsFor, domainSettings, localEnabled, ProductionError, projectKey, publicOrigin, publicUrl, runtimeEnvironment, settingsFor, tlsEnabled, verifyDomains, writeJson, writeRoutes } from "./config.mjs";
 import { publicRequest, readJson, text, trafficSummary } from "./http.mjs";
 import { applicationFor, buildRelease, dataDir, discardRelease, projectDir, readOptionalJson, rootFor, validateSnapshot } from "./releases.mjs";
 import { reserveUid } from "./workloads.mjs";
+import { metricHistory, sampleMetrics } from "./metrics.mjs";
 
 const routesDir = "/routes";
 const records = new Map();
 const hosts = new Map();
 const apps = new Map();
 const pending = new Set();
+const commands = new Set();
 const json = (res, status, value) => {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(value));
 };
-const newRecord = key => ({ key, release: null, job: null, activity: [], logs: [], traffic: {} });
+const newRecord = key => ({ key, release: null, stopped: false, job: null, activity: [], logs: [], traffic: {}, metrics: {}, responseBytes: 0 });
 const statePath = key => join(projectDir(key), "record.json");
 const trafficPath = key => join(projectDir(key), "traffic.json");
+const metricsPath = key => join(projectDir(key), "metrics.json");
 const appKey = (record, release) => `${record.key}:${release.id}`;
 let jobs = Promise.resolve();
 let registry = Promise.resolve();
@@ -46,7 +49,7 @@ const locked = operation => {
 async function persist(record) {
   record.logsDirty = false;
   await mkdir(projectDir(record.key), { recursive: true, mode: 0o711 });
-  await writeJson(statePath(record.key), { release: record.release, job: record.job, activity: record.activity, logs: record.logs });
+  await writeJson(statePath(record.key), { release: record.release, stopped: record.stopped, job: record.job, activity: record.activity, logs: record.logs });
 }
 
 async function refreshRoutes() {
@@ -75,17 +78,19 @@ function applicationLog(record, release, message) {
 }
 
 async function getApplication(record, release) {
+  if (commands.has(record.key) || (record.stopped && record.release?.id === release.id)) return null;
   const key = appKey(record, release);
   const current = apps.get(key);
   if (current) return current.promise;
   if (record.nextAppAttempt && Date.now() < record.nextAppAttempt) return null;
   if (reservedMemory() + buildingMiB + release.settings.limits.memoryMiB > usableMiB) return null;
-  const entry = { memoryMiB: release.settings.limits.memoryMiB, state: "starting" };
-  entry.promise = applicationFor(record, release, message => applicationLog(record, release, message)).then(app => {
+  const entry = { memoryMiB: release.settings.limits.memoryMiB, state: "starting", abort: new AbortController() };
+  entry.promise = applicationFor(record, release, message => applicationLog(record, release, message), entry.abort.signal).then(app => {
     entry.state = "running";
+    entry.app = app;
     void app.done.then(async () => {
       apps.delete(key);
-      if (record.release?.id === release.id) {
+      if (record.release?.id === release.id && !record.stopped && !commands.has(record.key)) {
         record.nextAppAttempt = Date.now() + 5000;
         pushActivity(record, "application_stopped", release.settings.domain);
         await locked(() => persist(record)).catch(console.error);
@@ -94,22 +99,26 @@ async function getApplication(record, release) {
     return app;
   }).catch(error => {
     apps.delete(key);
-    record.nextAppAttempt = Date.now() + 5000;
-    pushLog(record, "application", error.message);
+    if (!entry.abort.signal.aborted) {
+      record.nextAppAttempt = Date.now() + 5000;
+      pushLog(record, "application", error.message);
+    }
     return null;
   });
   apps.set(key, entry);
   return entry.promise;
 }
 
+async function stopApplication(record, release) {
+  const entry = apps.get(appKey(record, release));
+  entry?.abort.abort();
+  const app = entry && await entry.promise;
+  if (app) await app.stopAndWait();
+}
+
 async function stopRelease(record, release) {
   if (!release) return;
-  const entry = apps.get(appKey(record, release));
-  const app = entry && await entry.promise;
-  if (app) {
-    app.stop();
-    await app.done;
-  }
+  await stopApplication(record, release);
   reserveUid(release.uid, false);
   await discardRelease(record, release);
 }
@@ -137,7 +146,9 @@ async function deploy(record, settings, files, environment) {
     await locked(async () => {
       assertDomainsAvailable(record, settings);
       const previousActivity = record.activity;
+      const wasStopped = record.stopped;
       record.release = candidate;
+      record.stopped = false;
       record.job = { state: "ready", at: new Date().toISOString() };
       pushLog(record, "build", `Release ready for ${settings.domain}`);
       pushActivity(record, "published", settings.domain);
@@ -145,13 +156,14 @@ async function deploy(record, settings, files, environment) {
       const previousDomains = previous ? domainsFor(previous.settings) : [];
       if (previous?.settings.aliasDomain !== settings.aliasDomain) pushActivity(record, "alias_changed", settings.aliasDomain ?? previous.settings.aliasDomain);
       for (const domain of domainsFor(settings)) {
-        if (settings.tls && (!previous?.settings.tls || !previousDomains.includes(domain))) pushActivity(record, "https_requested", domain);
+        if (domainSettings(settings, domain).tls && (!previousDomains.includes(domain) || !domainSettings(previous.settings, domain).tls)) pushActivity(record, "https_requested", domain);
       }
       try {
         await persist(record);
         await refreshRoutes();
       } catch (error) {
         record.release = previous;
+        record.stopped = wasStopped;
         record.activity = previousActivity;
         await persist(record);
         await refreshRoutes();
@@ -173,14 +185,17 @@ async function deploy(record, settings, files, environment) {
 }
 
 async function statusFor(record, queryDomain) {
-  const settings = record.release?.settings;
+  const { release } = record;
+  const settings = release?.settings;
+  const domains = settings ? domainsFor(settings).map(host => ({ host, config: domainSettings(settings, host) })) : [];
+  const tlsDomains = domains.filter(domain => domain.config.tls).map(domain => domain.host);
   let certificate = "disabled";
-  if (settings?.tls) {
+  let issued = [];
+  if (tlsDomains.length) {
     const acme = await readOptionalJson("/certs/acme.json").catch(() => null);
-    const domains = domainsFor(settings);
-    const issued = domains.filter(domain => acme?.npati?.Certificates?.some(item =>
+    issued = tlsDomains.filter(domain => acme?.npati?.Certificates?.some(item =>
       item.domain?.main === domain || item.domain?.sans?.includes(domain)));
-    certificate = issued.length === domains.length ? "issued" : "pending";
+    certificate = issued.length === tlsDomains.length ? "issued" : "pending";
     const newlyIssued = issued.filter(domain => !record.activity.some(item => item.event === "https_issued" && item.detail === domain));
     for (const domain of newlyIssued) pushActivity(record, "https_issued", domain);
     if (newlyIssued.length) await locked(() => persist(record));
@@ -188,12 +203,78 @@ async function statusFor(record, queryDomain) {
   return {
     enabled: true, tlsEnabled, localEnabled, defaults, automaticDomain: automaticDomain(record.key),
     proof: queryDomain ? domainProof(record.key, queryDomain) : null,
-    release: record.release && {
-      kind: record.release.kind, createdAt: record.release.createdAt, url: publicUrl(settings), settings, certificate,
-      runtime: record.release.kind === "static" ? "running" : apps.get(appKey(record, record.release))?.state ?? "unavailable",
+    release: release && {
+      id: release.id, kind: release.kind, createdAt: release.createdAt, url: publicUrl(settings), settings, certificate,
+      domains: domains.map(({ host, config }) => ({ host, url: publicUrl(config), primary: host === settings.domain,
+        certificate: !config.tls ? "disabled" : issued.includes(host) ? "issued" : "pending" })),
+      runtime: record.stopped ? "stopped" : commands.has(record.key) ? "starting"
+        : release.kind === "static" ? "running" : apps.get(appKey(record, release))?.state ?? "unavailable",
     },
     job: record.job, logs: record.logs, activity: record.activity, traffic: trafficSummary(record.traffic),
   };
+}
+
+function assertIdle(key) {
+  if (pending.has(key)) throw new ProductionError(409, "A publication is already in progress for this project.");
+  if (commands.has(key)) throw new ProductionError(409, "A Production action is already in progress for this project.");
+}
+
+async function changeRelease(record, input) {
+  const { key, release } = record;
+  if (!release || input?.releaseId !== release.id) throw new ProductionError(409, "The release changed. Refresh Production and try again.");
+  const checkRelease = () => {
+    assertIdle(key);
+    if (record.release !== release) throw new ProductionError(409, "The release changed. Refresh Production and try again.");
+  };
+  if (input.action === "domain") {
+    if (typeof input.domain !== "string" || !input.domain.trim()) throw new ProductionError(400, "Enter an additional domain.");
+    const settings = settingsFor(key, { ...release.settings, aliasDomain: input.domain, redirectAlias: false });
+    await verifyDomains(key, settings, release.settings);
+    await locked(async () => {
+      checkRelease();
+      assertDomainsAvailable(record, settings);
+      const previousActivity = record.activity;
+      record.release = { ...release, settings };
+      pushActivity(record, "alias_changed", settings.aliasDomain ?? release.settings.aliasDomain ?? "");
+      try {
+        await persist(record);
+        await refreshRoutes();
+      } catch (error) {
+        record.release = release;
+        record.activity = previousActivity;
+        await persist(record);
+        await refreshRoutes();
+        throw error;
+      }
+    });
+    return;
+  }
+
+  if (!["stop", "start", "restart"].includes(input.action)) throw new ProductionError(400, "Invalid Production action.");
+  const shouldRun = await locked(async () => {
+    checkRelease();
+    if ((input.action === "start" && !record.stopped) || (input.action === "stop" && record.stopped)) return false;
+    const previous = { stopped: record.stopped, activity: record.activity };
+    record.stopped = input.action === "stop";
+    pushActivity(record, `production_${input.action}`, release.settings.domain);
+    commands.add(key);
+    try { await persist(record); }
+    catch (error) {
+      Object.assign(record, previous);
+      commands.delete(key);
+      throw error;
+    }
+    return true;
+  });
+  if (!shouldRun) return;
+  try {
+    if (input.action !== "start") await stopApplication(record, release);
+    record.lastSample = null;
+    record.nextAppAttempt = 0;
+  } finally {
+    commands.delete(key);
+  }
+  if (!record.stopped && release.kind === "node") void getApplication(record, release);
 }
 
 async function control(req, res) {
@@ -204,15 +285,25 @@ async function control(req, res) {
   if (!projectKey.test(key)) throw new ProductionError(404, "Unknown project");
   const existing = records.get(key);
   const record = existing ?? newRecord(key);
+  if (req.method === "GET" && url.searchParams.has("metrics")) {
+    const minutes = Number(url.searchParams.get("metrics"));
+    if (![15, 60, 360, 1440].includes(minutes)) throw new ProductionError(400, "Invalid metrics time range.");
+    return json(res, 200, { points: metricHistory(record.metrics, minutes) });
+  }
   if (req.method === "GET") return json(res, 200, await statusFor(record, url.searchParams.get("domain")));
-  if (pending.has(key)) throw new ProductionError(409, "A publication is already in progress for this project.");
+  assertIdle(key);
+  if (req.method === "PATCH") {
+    await changeRelease(record, await readJson(req, 16384));
+    return json(res, 200, await statusFor(record));
+  }
   if (req.method === "DELETE") {
     await locked(async () => {
-      if (pending.has(key)) throw new ProductionError(409, "A publication is already in progress for this project.");
+      assertIdle(key);
       if (!records.has(key)) return;
       const previous = record.release;
       if (previous) pushActivity(record, "unpublished", previous.settings.domain);
       record.release = null;
+      record.stopped = false;
       record.job = null;
       await persist(record);
       await refreshRoutes();
@@ -229,14 +320,15 @@ async function control(req, res) {
   const input = await readJson(req, maxBodyBytes);
   if (!input || typeof input !== "object") throw new ProductionError(400, "Invalid publication settings.");
   const settings = settingsFor(key, input.settings ?? {});
-  const environment = runtimeEnvironment(input.settings?.environment, record.release?.environment);
+  const previous = record.release;
+  const environment = runtimeEnvironment(input.settings?.environment, previous?.environment);
   assertDomainsAvailable(record, settings);
-  await verifyDomains(key, settings, record.release?.settings);
+  await verifyDomains(key, settings, previous?.settings);
   validateSnapshot(input.files);
   await locked(async () => {
-    if (pending.has(key)) throw new ProductionError(409, "A publication is already in progress for this project.");
+    assertIdle(key);
     if (pending.size >= 4) throw new ProductionError(429, "Production build queue is full. Try again shortly.");
-    if (records.get(key) !== existing) throw new ProductionError(409, "Project publication changed. Try again.");
+    if (records.get(key) !== existing || record.release !== previous) throw new ProductionError(409, "Project publication changed. Try again.");
     assertDomainsAvailable(record, settings);
     pending.add(key);
     records.set(key, record);
@@ -264,7 +356,8 @@ for (const key of await readdir(dataDir)) {
   if (!projectKey.test(key)) continue;
   const saved = await readOptionalJson(statePath(key));
   if (!saved) continue;
-  const record = { ...newRecord(key), ...saved, traffic: (await readOptionalJson(trafficPath(key))) ?? {} };
+  const record = { ...newRecord(key), ...saved, traffic: (await readOptionalJson(trafficPath(key))) ?? {},
+    metrics: (await readOptionalJson(metricsPath(key))) ?? {} };
   if (["queued", "building"].includes(record.job?.state)) {
     record.job = { state: "failed", at: new Date().toISOString(), error: "Production restarted during the build. Publish again." };
     pushActivity(record, "publish_interrupted", record.release?.settings.domain ?? "");
@@ -293,6 +386,7 @@ const publicServer = createServer((req, res) => {
   const record = hosts.get(host);
   const settings = record?.release?.settings;
   if (!settings || !domainsFor(settings).includes(host)) return text(res, 404, "Unknown project");
+  if (record.stopped || commands.has(record.key)) return text(res, 503, "Production is stopped or restarting");
   const redirectOrigin = host === settings.aliasDomain && settings.redirectAlias ? publicOrigin(settings) : undefined;
   void publicRequest(req, res, record, rootFor, getApplication, redirectOrigin).catch(error => {
     if (!res.destroyed) text(res, 500, "Production request failed");
@@ -305,13 +399,23 @@ publicServer.headersTimeout = 10000;
 publicServer.listen(8090);
 
 for (const record of records.values()) {
-  if (record.release?.kind === "node") void getApplication(record, record.release);
+  if (!record.stopped && record.release?.kind === "node") void getApplication(record, record.release);
 }
+
+setInterval(() => {
+  for (const record of records.values()) {
+    if (!record.release || record.stopped || commands.has(record.key)) continue;
+    sampleMetrics(record, apps.get(appKey(record, record.release))?.app);
+  }
+}, 10000).unref();
 
 setInterval(() => {
   void locked(async () => {
     for (const record of records.values()) {
-      if (record.release) await writeJson(trafficPath(record.key), record.traffic);
+      if (record.release) {
+        await writeJson(trafficPath(record.key), record.traffic);
+        await writeJson(metricsPath(record.key), record.metrics);
+      }
       if (record.logsDirty) await persist(record);
     }
   }).catch(console.error);

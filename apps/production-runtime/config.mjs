@@ -69,9 +69,7 @@ export function settingsFor(key, input) {
   }
   const local = host.endsWith(".localhost");
   if (local && !localEnabled) throw new ProductionError(400, "Local production domains are disabled.");
-  if (aliasDomain && aliasDomain.endsWith(".localhost") !== local) {
-    throw new ProductionError(400, "Use two public domains or two local domains for the same project.");
-  }
+  if (aliasDomain.endsWith(".localhost") && !localEnabled) throw new ProductionError(400, "Local production domains are disabled.");
   const rawPath = typeof input.path === "string" ? input.path.trim() : "/";
   if (!/^\/(?:[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*\/?)?$/.test(rawPath) || rawPath.length > 180) {
     throw new ProductionError(400, "Enter a path such as / or /shop.");
@@ -93,7 +91,7 @@ export function settingsFor(key, input) {
     }
     limits[name] = value;
   }
-  return { domain: host, ...(aliasDomain ? { aliasDomain, redirectAlias: input.redirectAlias !== false } : {}),
+  return { domain: host, ...(aliasDomain ? { aliasDomain, redirectAlias: input.redirectAlias !== false && !(local && !aliasDomain.endsWith(".localhost")) } : {}),
     path: rawPath.replace(/\/$/, "") || "/", stripPath: input.stripPath === true, port, tls, entrypoint, limits };
 }
 
@@ -139,6 +137,13 @@ export function publicOrigin(settings) {
 
 export const publicUrl = settings => publicOrigin(settings) + (settings.path === "/" ? "/" : `${settings.path}/`);
 
+export function domainSettings(settings, domain) {
+  if (domain === settings.domain) return settings;
+  const local = domain.endsWith(".localhost");
+  const mixed = local !== settings.domain.endsWith(".localhost");
+  return { ...settings, domain, tls: mixed ? !local && tlsEnabled : settings.tls, entrypoint: mixed ? "auto" : settings.entrypoint };
+}
+
 export async function writeJson(path, value, mode = 0o600) {
   const tmp = `${path}.tmp`;
   await writeFile(tmp, JSON.stringify(value), { mode });
@@ -152,8 +157,8 @@ export async function writeRoutes(directory, records) {
   } } };
   for (const [key, { release }] of records) {
     if (!release) continue;
-    const { aliasDomain, redirectAlias, path, tls, entrypoint } = release.settings;
     for (const domain of domainsFor(release.settings)) {
+      const { aliasDomain, redirectAlias, path, tls, entrypoint } = domainSettings(release.settings, domain);
       const alias = domain === aliasDomain;
       const id = alias ? `${key}-alias` : key;
       const rule = "Host(`" + domain + "`)" + (path === "/" ? "" : " && (Path(`" + path + "`) || PathPrefix(`" + path + "/`))");

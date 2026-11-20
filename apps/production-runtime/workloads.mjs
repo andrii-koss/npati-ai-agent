@@ -26,6 +26,7 @@ function sample() {
       if (!active.has(uid)) continue;
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (fields[0] === "Z" || fields[0] === "X") continue;
       const group = groups.get(uid) ?? [];
       group.push({ pid: Number(pid), key: `${pid}:${fields[19]}`, cpu: tickMs * (+fields[11] + +fields[12]), rss: pageSize * +fields[21] });
       groups.set(uid, group);
@@ -40,12 +41,15 @@ function sample() {
       if (workload.exited && !processes.length) active.delete(uid);
       continue;
     }
-    if (processes.reduce((sum, proc) => sum + proc.rss, 0) > workload.limits.memoryMiB * 1048576) {
+    const rss = processes.reduce((sum, proc) => sum + proc.rss, 0);
+    if (rss > workload.limits.memoryMiB * 1048576) {
       workload.stop(`Memory limit exceeded (${workload.limits.memoryMiB} MiB RSS)`);
       continue;
     }
     const allowance = sampleMs * workload.limits.cpu;
     const used = processes.reduce((sum, proc) => sum + Math.max(0, proc.cpu - (workload.previous.get(proc.key) ?? 0)), 0);
+    workload.cpuUsed += used;
+    workload.rss = rss;
     workload.previous = new Map(processes.map(proc => [proc.key, proc.cpu]));
     workload.credit = Math.min(allowance, workload.credit + (now - workload.last) * workload.limits.cpu - used);
     workload.last = now;
@@ -98,11 +102,21 @@ export function launch({ uid, command, args, cwd, temp, limits, log, env = {} })
   });
   const state = {
     limits, child, previous: new Map(), credit: sampleMs * limits.cpu, last: performance.now(),
+    cpuUsed: 0, rss: 0,
+    usage: () => ({ cpuUsed: state.cpuUsed, rss: state.rss }),
     stop(reason) {
       if (state.stopped) return;
       state.stopped = true;
       if (reason) log(reason);
       if (child.pid && !state.exited) send(-child.pid, "SIGKILL");
+    },
+    async stopAndWait() {
+      state.stop();
+      await state.done;
+      for (let attempt = 0; active.get(uid) === state && attempt < 30; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, sampleMs));
+      }
+      if (active.get(uid) === state) throw new Error("Production processes did not shut down.");
     },
   };
   active.set(uid, state);
@@ -146,11 +160,12 @@ function probe(socketPath) {
   });
 }
 
-export async function startApplication({ root, connectionDir, uid, port, limits, log, env }) {
+export async function startApplication({ root, connectionDir, uid, port, limits, log, env, signal }) {
   await rm(connectionDir, { recursive: true, force: true });
   await mkdir(connectionDir, { mode: 0o700 });
   await chown(connectionDir, uid, uid);
   const socketPath = join(connectionDir, "http.sock");
+  signal?.throwIfAborted();
   const task = launch({
     uid, cwd: root, temp: connectionDir, limits, log, command: "/usr/local/bin/npm", args: ["start"],
     env: {
@@ -160,6 +175,8 @@ export async function startApplication({ root, connectionDir, uid, port, limits,
       NODE_OPTIONS: `--max-old-space-size=${Math.floor(limits.memoryMiB * 0.65)} --require=/opt/production/unix-listen.cjs`,
     },
   });
+  const stop = () => task.stop();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
     for (let attempt = 0; attempt < 120 && !task.stopped; attempt += 1) {
       if (await probe(socketPath)) return { ...task, socketPath, isRunning: () => !task.stopped };
@@ -167,10 +184,12 @@ export async function startApplication({ root, connectionDir, uid, port, limits,
     }
     throw new Error("Application failed its HTTP readiness check. See Production logs.");
   } catch (error) {
-    task.stop(error.message);
-    await task.done;
+    if (!signal?.aborted) task.stop(error.message);
+    await task.stopAndWait();
     await rm(connectionDir, { recursive: true, force: true });
     throw error;
+  } finally {
+    signal?.removeEventListener("abort", stop);
   }
 }
 

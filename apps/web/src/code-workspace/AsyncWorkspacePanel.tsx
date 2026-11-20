@@ -31,8 +31,8 @@ export function AsyncOperationsView({ snapshot, stale, busy, isUk, onControl, on
 }
 
 /** Durable reads reconnect to the same operations. Execution stays in the existing server dispatcher. */
-export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun }: {
-  scope: AsyncScope; runId: string; isUk: boolean; onAvailability(enabled: boolean): void; onRun(runId: string): void;
+export function AsyncWorkspacePanel({ scope, runId, isUk, onRun }: {
+  scope: AsyncScope; runId: string; isUk: boolean; onRun(runId: string): void;
 }) {
   const [snapshot, setSnapshot] = useState<AsyncWorkspaceSnapshot | null>(null);
   const [inbox, setInbox] = useState<InboxSnapshot | null>(null);
@@ -60,10 +60,10 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
       return { next, messages };
     }, ({ next, messages }) => {
       setSnapshot(next); setInbox(previous => messages && previous && previous.revision > messages.revision ? previous : messages);
-      setError(""); onAvailability(next.capabilities.inbox);
+      setError("");
       if (messages?.runId && messages.runId !== currentRun.current.runId && (!currentRun.current.runId || ["reserved", "running", "sealed"].includes(messages.phase))) currentRun.current.onRun(messages.runId);
     }, reason => {
-      if ((reason as { code?: string }).code === "feature_disabled") { setSnapshot(null); setInbox(null); onAvailability(false); observer.close(); }
+      if ((reason as { code?: string }).code === "feature_disabled") { setSnapshot(null); setInbox(null); observer.close(); }
       else setError(reason instanceof Error ? reason.message : "async_workspace_unavailable");
     });
     refresh.current = observer.refresh; void observer.refresh();
@@ -74,7 +74,7 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
       window.removeEventListener("online", reconnect); document.removeEventListener("visibilitychange", reconnect); };
     // The scope is the identity. New run query parameters must not reset pending request identities.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, onAvailability]);
+  }, [key]);
   const act = async (work: (signal: AbortSignal) => Promise<string | void>) => {
     const controller = lifecycle.current;
     if (!controller || controller.signal.aborted || lock.current || error) return;

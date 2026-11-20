@@ -348,7 +348,8 @@
     font-size: 22px;
   }
 
-  .overview-grid>div {
+  .overview-grid>div,
+  .overview-card {
     padding: 14px 16px;
   }
 
