@@ -72,7 +72,7 @@ function CodeWorkspaceContent() {
 
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string>("");
+  const [selectedPath, setSelectedPath] = useState(() => searchParams.get("file") ?? "");
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 

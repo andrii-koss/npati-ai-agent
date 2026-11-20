@@ -26,12 +26,11 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
   const runtime = release?.runtime;
   const disabled = busy || running || !project;
   const state = running ? t("Публікація…", "Publishing…")
-    : busy ? t("Виконується…", "Working…")
     : runtime === "running" ? t("Працює", "Running")
     : runtime === "stopped" ? t("Зупинено", "Stopped")
     : runtime === "starting" ? t("Запускається", "Starting")
     : runtime === "unavailable" || (!production && (issue || status?.enabled === false)) ? t("Недоступно", "Unavailable")
-    : production ? t("Не опубліковано", "Unpublished") : t("Завантаження…", "Loading…");
+    : production ? t("Не опубліковано", "Unpublished") : null;
 
   useEffect(() => {
     let active = true;
@@ -57,11 +56,11 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
   const date = (value?: string, time = false) => value ? new Intl.DateTimeFormat(isUk ? "uk-UA" : "en-US", {
     dateStyle: "medium", ...(time ? { timeStyle: "short" } : {}),
   }).format(new Date(value)) : "—";
-  const statusClass = runtime === "running" && !busy && !running ? "is-running"
-    : busy || running || runtime === "starting" ? "is-pending" : "";
+  const statusClass = runtime === "running" && !running ? "is-running"
+    : running || runtime === "starting" ? "is-pending" : "";
   const rows = [
     [t("Назва", "Name"), project?.name || "—"],
-    [t("Статус", "Status"), <span className={`workspace-production-indicator ${statusClass}`}>{state}</span>],
+    [t("Статус", "Status"), state ? <span className={`workspace-production-indicator ${statusClass}`}>{state}</span> : "—"],
     [t("Оновлено", "Updated"), date(release?.createdAt && release.createdAt > (project?.updatedAt ?? "") ? release.createdAt : project?.updatedAt, true)],
     [t("Версія релізу", "Release version"), release?.id?.slice(0, 8) ?? "—"],
     [t("Середовище", "Environment"), <span className="workspace-production-status">Production</span>],
@@ -110,7 +109,7 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
         <h2>{project?.name || t("Проєкт", "Project")}</h2>
         <span title={projectId}>ID {projectId.slice(0, 8)}{project?.createdAt && <> · {t("Створено", "Created")} {date(project.createdAt)}</>}</span>
       </div>
-      <span className={`workspace-production-status workspace-production-indicator workspace-production-header-status ${statusClass}`} aria-live="polite">{state}</span>
+      {state && <span className={`workspace-production-status workspace-production-indicator workspace-production-header-status ${statusClass}`} aria-live="polite">{state}</span>}
       <div className="workspace-production-actions">
         <button type="button" className="inspector-tab workspace-production-button" disabled={disabled || !release?.id || runtime === "starting"}
           onClick={() => void control({ action: runtime === "stopped" ? "start" : "restart" })}>
@@ -157,7 +156,7 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
       </section>
       <section className="overview-card workspace-production-card">
         <div className="workspace-production-card-heading">
-          <h3><Globe2 aria-hidden="true" />{t("Домени", "Domains")} ({domains.length})</h3>
+          <h3><Globe2 aria-hidden="true" />{t("Домени", "Domains")}{production && ` (${domains.length})`}</h3>
           <button type="button" className="inspector-tab workspace-production-button"
             disabled={disabled || !production || project?.type === "mobile_app" || Boolean(release && !release.id)}
             onClick={openDomainForm}>{domains.length > 1 ? <Pencil aria-hidden="true" /> : <Plus aria-hidden="true" />}
@@ -187,7 +186,7 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
               </div>}
             </li>;
           })}
-        </ul> : <p className="workspace-production-muted">{t("Домени ще не підключено.", "No domains connected yet.")}</p>}
+        </ul> : production && <p className="workspace-production-muted">{t("Домени ще не підключено.", "No domains connected yet.")}</p>}
         {editingDomain && production && <form className="workspace-production-domain-form" onSubmit={event => {
           event.preventDefault();
           void saveDomain();
@@ -212,6 +211,6 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
       </section>
     </div>
 
-    <ProjectResourceUsage base={controller.base} kind={release?.kind} memoryLimit={release?.settings.limits.memoryMiB} isUk={isUk} />
+    <ProjectResourceUsage base={controller.base} kind={release === null ? null : release?.kind} memoryLimit={release?.settings.limits.memoryMiB} isUk={isUk} />
   </div>;
 }

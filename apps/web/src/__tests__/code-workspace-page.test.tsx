@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi, type Mock } from "vitest";
 import { CodeWorkspacePage } from "../CodeWorkspacePage";
 
 vi.mock("../i18n", () => ({ useTranslation: () => ({ language: "en" }) }));
@@ -12,7 +12,9 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.inn
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const duplicateDomainError = "Enter a valid additional domain different from the primary domain.";
 
-async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<typeof vi.fn>; releaseA: () => void }) => Promise<void>, entry = "/code/co/pr?session=s&run=r") {
+type Fetcher = (input: unknown, init?: RequestInit) => Promise<Response>;
+
+async function view(check: (state: { host: HTMLDivElement; fetcher: Mock<Fetcher>; releaseA: () => void }) => Promise<void>, entry = "/code/co/pr?session=s&run=r") {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let approvals = [{ id: "approval-a", toolName: "code.fs.edit", command: "same command", diff: "first patch" }, { id: "approval-b", toolName: "code.fs.edit", command: "same command", diff: "second patch" }];
   let releaseA!: () => void;
@@ -79,6 +81,31 @@ it("replaces the requested blocks and keeps the linked file and workspace tabs",
     expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
     await act(async () => button(host, "24 hours").click());
     expect(fetcher.mock.calls.some(([url]) => String(url).endsWith("/production?metrics=1440"))).toBe(true);
+  }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
+});
+
+it("keeps the previous chart visible while the requested range loads", async () => {
+  await view(async ({ host, fetcher }) => {
+    const fallback = fetcher.getMockImplementation()!;
+    let respond!: (response: Response) => void;
+    fetcher.mockImplementation((input: unknown, init?: RequestInit) =>
+      String(input).endsWith("/production?metrics=60")
+        ? new Promise<Response>(resolve => { respond = resolve; })
+        : fallback(input, init));
+
+    const network = host.querySelector(".workspace-resource-card.network")!;
+    const originalPlot = network.querySelector("svg");
+    expect(originalPlot).not.toBeNull();
+    await act(async () => button(host, "1 hour").click());
+    expect(network.textContent).toContain("400 B/s");
+    expect(network.querySelector("svg")).toBe(originalPlot);
+    expect(network.querySelector(".workspace-resource-empty")).toBeNull();
+    expect(host.querySelector(".workspace-resource-grid")?.getAttribute("aria-busy")).toBe("true");
+    expect(host.textContent).not.toMatch(/Loading metrics|Initializing and waiting/);
+
+    await act(async () => respond(json({ points: [{ at: Date.now() - 1000, cpu: 19, memoryMiB: 40, networkBps: 700 }] })));
+    expect(network.textContent).toContain("700 B/s");
+    expect(host.querySelector(".workspace-resource-grid")?.getAttribute("aria-busy")).toBe("false");
   }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
 });
 

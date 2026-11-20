@@ -11,7 +11,7 @@ const network = (value: number) => value >= 1000000 ? `${+(value / 1000000).toFi
 
 function ResourceCard({ name, color, samples, field, format, max, range, note, centerNote, limit }: {
   name: string; color: string; samples: Sample[]; field: "cpu" | "memoryMiB" | "networkBps";
-  format: (value: number) => string; max: number; range: Range; note: string; centerNote: boolean; limit?: number;
+  format: (value: number) => string; max: number; range: Range; note: string | null; centerNote: boolean; limit?: number;
 }) {
   const fillId = useId();
   const end = Date.now();
@@ -55,16 +55,19 @@ function ResourceCard({ name, color, samples, field, format, max, range, note, c
       <div className="workspace-resource-scale" aria-hidden="true">
         {[1, 0.5, 0].map(value => <span key={value}>{format(Math.round(max * value))}</span>)}
       </div>
-    </div> : <p className={centerNote ? "workspace-production-muted workspace-resource-note-centered" : "workspace-production-muted"}>{note}</p>}
+    </div> : <div className="workspace-resource-empty">
+      {note && <p className={centerNote ? "workspace-production-muted workspace-resource-note-centered" : "workspace-production-muted"}>{note}</p>}
+    </div>}
   </article>;
 }
 
 export function ProjectResourceUsage({ base, kind, memoryLimit, isUk }: {
-  base: string; kind?: "static" | "node"; memoryLimit?: number; isUk: boolean;
+  base: string; kind?: "static" | "node" | null; memoryLimit?: number; isUk: boolean;
 }) {
   const t = (uk: string, en: string) => isUk ? uk : en;
   const [range, setRange] = useState<Range>(15);
-  const [reading, setReading] = useState<{ range: Range; samples: Sample[]; error?: string }>();
+  const [reading, setReading] = useState<{ range: Range; samples: Sample[] }>();
+  const [failure, setFailure] = useState<{ range: Range; message: string }>();
   useEffect(() => {
     if (!base || !kind) return;
     let active = true;
@@ -74,9 +77,12 @@ export function ProjectResourceUsage({ base, kind, memoryLimit, isUk }: {
       pending = true;
       try {
         const data = await apiGet<{ points?: Sample[] }>(`${base}?metrics=${range}`);
-        if (active) setReading({ range, samples: data.points ?? [] });
+        if (active) {
+          setReading({ range, samples: data.points ?? [] });
+          setFailure(undefined);
+        }
       } catch (error) {
-        if (active) setReading(previous => ({ range, samples: previous?.range === range ? previous.samples : [], error: String(error) }));
+        if (active) setFailure({ range, message: String(error) });
       } finally { pending = false; }
     }
     void load();
@@ -84,10 +90,13 @@ export function ProjectResourceUsage({ base, kind, memoryLimit, isUk }: {
     return () => { active = false; window.clearInterval(timer); };
   }, [base, kind, range]);
 
-  const current = kind && reading?.range === range ? reading : undefined;
-  const samples = current?.samples ?? [];
-  const note = !kind ? t("Дані з’являться після публікації.", "Metrics appear after publication.")
-    : !current ? t("Завантаження метрик…", "Loading metrics…") : t("За цей період даних немає.", "No samples in this time range.");
+  const displayed = kind ? reading : undefined;
+  const shownRange = displayed?.range ?? range;
+  const samples = displayed?.samples ?? [];
+  const error = kind && failure?.range === range ? failure.message : null;
+  const waiting = Boolean(kind && displayed?.range !== range && !error);
+  const note = kind === null ? t("Дані з’являться після публікації.", "Metrics appear after publication.")
+    : kind && displayed?.range === range && !error ? t("За цей період даних немає.", "No samples in this time range.") : null;
   const workloadNote = kind === "static" ? t("Статичний сайт не має окремого процесу.", "Static sites share the server process.") : note;
   const labels = isUk ? ["15 хв", "1 год", "6 год", "24 год"] : ["15 min", "1 hour", "6 hours", "24 hours"];
   const maxNetwork = Math.max(1000, 10 ** Math.ceil(Math.log10(Math.max(1, ...samples.map(sample => sample.networkBps)))));
@@ -96,18 +105,22 @@ export function ProjectResourceUsage({ base, kind, memoryLimit, isUk }: {
       <h3 id="project-resource-heading"><ChartNoAxesColumn aria-hidden="true" />{t("Використання ресурсів", "Resource usage")}</h3>
       <div className="inspector-tabs workspace-resource-ranges" role="group" aria-label={t("Період графіків", "Chart range")}>
         {ranges.map((minutes, index) => <button type="button" className={`inspector-tab workspace-production-button${range === minutes ? " active" : ""}`} key={minutes}
-          aria-pressed={range === minutes} onClick={() => setRange(minutes)}>{labels[index]}</button>)}
+          aria-pressed={range === minutes} onClick={() => {
+            if (range === minutes) return;
+            setFailure(undefined);
+            setRange(minutes);
+          }}>{labels[index]}</button>)}
       </div>
     </div>
-    {current?.error && <p role="status" className="workspace-production-error">{current.error}</p>}
-    <div className="workspace-resource-grid">
+    {error && <p role="status" className="workspace-production-error">{error}</p>}
+    <div className="workspace-resource-grid" aria-busy={waiting}>
       <ResourceCard name="CPU" color="cpu" samples={samples} field="cpu" format={value => `${value}%`}
-        max={Math.max(100, ...samples.map(sample => sample.cpu ?? 0))} range={range} note={workloadNote} centerNote={kind !== "node"} />
+        max={Math.max(100, ...samples.map(sample => sample.cpu ?? 0))} range={shownRange} note={workloadNote} centerNote={kind !== "node"} />
       <ResourceCard name={t("Пам’ять", "Memory")} color="memory" samples={samples} field="memoryMiB" format={memory}
-        max={Math.max(memoryLimit ?? 1024, ...samples.map(sample => sample.memoryMiB ?? 0))} range={range} note={workloadNote}
+        max={Math.max(memoryLimit ?? 1024, ...samples.map(sample => sample.memoryMiB ?? 0))} range={shownRange} note={workloadNote}
         centerNote={kind !== "node"} limit={memoryLimit} />
       <ResourceCard name={t("Мережа · вихідний HTTP", "Network · outbound HTTP")} color="network" samples={samples} field="networkBps" format={network}
-        max={maxNetwork} range={range} note={note} centerNote={!kind} />
+        max={maxNetwork} range={shownRange} note={note} centerNote={kind === null} />
     </div>
   </section>;
 }

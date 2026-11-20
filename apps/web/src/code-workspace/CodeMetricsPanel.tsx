@@ -143,11 +143,11 @@ export function CodeMetricsPanel({ companyId, fetcher, report: supplied, t: supp
 
   const report = supplied !== undefined ? supplied : fetched;
   return (
-    <section className="project-panel code-metrics" aria-label={t("codeMetrics.title")} data-metrics-status={error ? "error" : loading ? "loading" : "ok"}>
+    <section className="project-panel code-metrics" aria-label={t("codeMetrics.title")} aria-busy={loading}
+      data-metrics-status={error ? "error" : loading ? "loading" : "ok"}>
       <h2 className="ds-section-title">{t("codeMetrics.title")}</h2>
       <p className="ds-muted">{t("codeMetrics.subtitle")}</p>
       {error && <p className="ds-hint-error">{`${t("codeMetrics.unavailable")}: ${error}`}</p>}
-      {!error && loading && <p className="ds-muted">{t("codeMetrics.loading")}</p>}
       {!error && !loading && !report && <p className="ds-muted">{t("codeMetrics.empty")}</p>}
       {report && (
         <>

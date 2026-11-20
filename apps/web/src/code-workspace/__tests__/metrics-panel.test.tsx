@@ -161,13 +161,14 @@ describe("[C14-web] metrics panel dictionaries and rendering", () => {
     expect(full).not.toContain("events only");
   });
 
-  it("paints the loading state before any report arrives, and guards the request it will send", () => {
+  it("marks the pending report without a visible loading message and guards the read request", () => {
     // The effect does not run under `renderToStaticMarkup`, so the first paint is the loading state; the request
     // itself is asserted on the component's own source, because this environment cannot click. That is the
     // honest split: formatting and failure states are render-tested, the wiring is source-guarded.
     const markup = renderToStaticMarkup(React.createElement(CodeMetricsPanel, { companyId: "company-1", t: translateWith(en) }));
     expect(markup).toContain('data-metrics-status="loading"');
-    expect(markup).toContain("Loading metrics...");
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).not.toContain("Loading metrics...");
 
     const source = readSource();
     expect(source).toContain("/api/companies/${encodeURIComponent(companyId)}/code/metrics");

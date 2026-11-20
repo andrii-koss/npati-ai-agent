@@ -52,11 +52,6 @@ export function CodeWorkspaceExecutionPanel({ isUk, sessionId, stopBusy, stopRun
         )}
 
         {runId && streamError && <p className="ds-hint-error">{streamError}</p>}
-        {runId && !streamError && events.length === 0 && (
-          <p className="ds-muted" style={{ textAlign: "center", padding: "20px 0" }}>
-            {isUk ? "Ініціалізація та очікування перших подій…" : "Initializing and waiting for first events…"}
-          </p>
-        )}
 
         <ol className="code-stream">
           {events.map((event, index) => {
