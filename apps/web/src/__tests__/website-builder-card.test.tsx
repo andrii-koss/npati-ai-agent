@@ -79,7 +79,7 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Edit in chat");
     expect(markup).toContain("Open Live Preview");
     expect(markup).toContain("Code");
-    expect(markup).toContain('href="/settings/code/comp-1/proj-1?view=files&amp;file=index.html"');
+    expect(markup).toContain('href="/settings/code/comp-1/proj-1?view=all"');
     expect(markup).toContain("More options");
     expect(markup).toContain("No preview yet");
     expect(markup).toContain("A preview will be available after the project is set up.");
@@ -102,7 +102,7 @@ describe("WebsiteProjectCard", () => {
       </MemoryRouter>
     );
     expect(mobileMarkup).toContain('data-project-variant="mobile"');
-    expect(mobileMarkup).toContain('href="/settings/code/comp-1/proj-1?view=files"');
+    expect(mobileMarkup).toContain('href="/settings/code/comp-1/proj-1?view=all"');
     expect(mobileMarkup).toContain("Preview coming soon");
     expect(mobileMarkup).toContain("This project&#x27;s preview will appear here.");
 

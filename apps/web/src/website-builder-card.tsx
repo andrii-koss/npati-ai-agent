@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { MessageSquare, ExternalLink, Code2, Copy, Pencil, Trash2 } from "lucide-react";
 import { openableProjectPreview } from "./catalog-project-preview";
 import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
-import { projectCodeFilesHref } from "./code-workspace/actions";
 import type { WebsiteProject } from "./website-builder-cache";
 import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
 import { projectKindOf } from "@npati/shared";
@@ -29,7 +28,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   handleDelete,
 }: WebsiteProjectCardProps) {
   const editorUrl = `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(site.id)}`;
-  const codeUrl = projectCodeFilesHref(`/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`, site.framework);
+  const codeUrl = `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}?view=all`;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const moreButtonRef = useRef<HTMLButtonElement>(null);

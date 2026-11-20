@@ -21,7 +21,7 @@ async function view(check: (state: { host: HTMLDivElement; fetcher: Mock<Fetcher
   const fetcher = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     if (url.endsWith("/projects/pr")) return json({ name: "Production site", type: "website" });
-    if (url.endsWith("/production?defaults=1")) return json({ enabled: true, release: {
+    if (url.endsWith("/production?defaults=1")) return json({ enabled: true, suggested: { domain: "suggested.localhost" }, release: {
       id: "release-a", runtime: "running", kind: "node", createdAt: "2026-11-19T10:00:00.000Z",
       settings: { limits: { memoryMiB: 512 } }, domains: [{ host: "sample.localhost", url: "http://sample.localhost/", primary: true, certificate: "disabled" }],
     } });
@@ -109,18 +109,21 @@ it("keeps the previous chart visible while the requested range loads", async () 
   }, "/code/co/pr?session=s&run=r&view=files&file=index.html");
 });
 
-it("clears a domain validation error after five seconds and keeps the form open", async () => {
+it("starts with a blank domain, clears validation errors, and drops drafts on cancel", async () => {
   await view(async ({ host, fetcher }) => {
     vi.useFakeTimers();
     try {
       await act(async () => button(host, "Add domain").click());
       const form = host.querySelector<HTMLFormElement>(".workspace-production-domain-form")!;
       const input = form.querySelector("input")!;
+      expect(input.value).toBe("");
+      expect(input.placeholder).toBe("www.example.com");
+      expect(button(form, "Save").disabled).toBe(true);
       await act(async () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "sample.localhost");
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        button(form, "Save").click();
       });
+      await act(async () => button(form, "Save").click());
       expect(fetcher.mock.calls.some(([url, init]) => String(url).endsWith("/production") && init?.method === "PATCH")).toBe(true);
       expect(form.querySelector('[role="alert"]')?.textContent).toBe(duplicateDomainError);
       await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
@@ -128,6 +131,9 @@ it("clears a domain validation error after five seconds and keeps the form open"
       await act(async () => { await vi.advanceTimersByTimeAsync(1); });
       expect(host.textContent).not.toContain(duplicateDomainError);
       expect(form.isConnected).toBe(true);
+      await act(async () => button(form, "Cancel").click());
+      await act(async () => button(host, "Add domain").click());
+      expect(host.querySelector<HTMLInputElement>(".workspace-production-domain-form input")?.value).toBe("");
     } finally {
       vi.useRealTimers();
     }
@@ -170,6 +176,15 @@ it.each(["&file=index.html", ""])("opens Files & Code with the site's entry poin
     expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
     expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
   }, `/code/co/pr?session=s&run=r&view=files${fileQuery}`);
+});
+
+it("opens all panels and selects the main file from a project card link", async () => {
+  await view(async ({ host }) => {
+    expect(button(host, "All panels").getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector(".code-file-tree-item.active")?.textContent).toContain("index.html");
+    expect(host.querySelector(".workspace-source-viewer")?.textContent).toContain("Site entry point");
+    expect(host.textContent).toContain("Project details");
+  }, "/code/co/pr?view=all");
 });
 
 it("shows the selected terminal at the top of the workspace content", async () => {

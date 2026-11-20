@@ -293,3 +293,20 @@ export function projectCodeFilesHref(href: string, framework?: string | null) {
   if (/^(?:HTML\/CSS|static)$/i.test(framework?.trim() ?? "")) params.set("file", "index.html");
   return `${path}?${params}`;
 }
+
+const projectEntryPaths = [
+  "index.html", "app/page.tsx", "app/page.jsx", "src/app/page.tsx", "src/app/page.jsx",
+  "pages/index.tsx", "pages/index.jsx", "src/pages/index.tsx", "src/pages/index.jsx",
+  "src/pages/index.astro", "src/routes/+page.svelte", "app.vue", "app/app.vue",
+  "App.tsx", "App.js", "app/index.tsx", "app/index.jsx", "lib/main.dart",
+  "src/main.tsx", "src/main.jsx", "src/main.ts", "src/main.js", "src/index.html",
+  "src/server.ts", "src/server.js", "server.ts", "server.js", "main.py", "index.php",
+];
+
+export function workspaceEntryFile(files: readonly { path: string }[]) {
+  const paths = new Set(files.map(file => file.path));
+  return projectEntryPaths.find(path => paths.has(path)) ?? files.find(({ path }) =>
+    /\.(?:html|[cm]?[jt]sx?|vue|svelte|astro|dart|py|php|go|rs|java|kt)$/i.test(path) &&
+    !/(?:^|\/)(?:node_modules|dist|build|tests?|__tests__|\.[^/]+)(?:\/|$)|\.(?:config|spec|test|d)\.[^/]+$/i.test(path),
+  )?.path;
+}

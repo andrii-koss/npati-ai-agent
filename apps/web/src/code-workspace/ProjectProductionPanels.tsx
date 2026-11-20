@@ -23,6 +23,7 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
   const release = production?.release;
   const siteUrl = safeExternalUrl(release?.url);
   const domains = release?.domains ?? [];
+  const domainToSave = projectDomain(domain);
   const runtime = release?.runtime;
   const disabled = busy || running || !project;
   const state = running ? t("Публікація…", "Publishing…")
@@ -75,9 +76,9 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
     }
   }
 
-  function openDomainForm() {
+  function openDomainForm(existingDomain = "") {
     setDomainError("");
-    setDomain(release?.settings.aliasDomain ?? production?.suggested?.domain ?? "");
+    setDomain(existingDomain);
     setEditingDomain(true);
   }
 
@@ -90,11 +91,11 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
   }
 
   async function saveDomain() {
-    if (!production || disabled) return;
+    if (!production || disabled || !domainToSave) return;
     setDomainError("");
-    const host = projectDomain(domain);
+    const host = domainToSave;
     const suggested = production.suggested;
-    const tls = production.tlsEnabled && !(host || production.automaticDomain).endsWith(".localhost") && suggested?.tls !== false;
+    const tls = production.tlsEnabled && !host.endsWith(".localhost") && suggested?.tls !== false;
     const saved = release ? await control({ action: "domain", domain: host }, setDomainError) : await publish({
       domain: host, path: suggested?.path ?? "/", port: suggested?.port ?? 3000,
       stripPath: suggested?.stripPath ?? false, tls, entrypoint: tls && suggested?.entrypoint === "websecure" ? "websecure" : "auto",
@@ -159,7 +160,8 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
           <h3><Globe2 aria-hidden="true" />{t("Домени", "Domains")}{production && ` (${domains.length})`}</h3>
           <button type="button" className="inspector-tab workspace-production-button"
             disabled={disabled || !production || project?.type === "mobile_app" || Boolean(release && !release.id)}
-            onClick={openDomainForm}>{domains.length > 1 ? <Pencil aria-hidden="true" /> : <Plus aria-hidden="true" />}
+            onClick={() => openDomainForm(domains.length > 1 ? release?.settings.aliasDomain : undefined)}>
+            {domains.length > 1 ? <Pencil aria-hidden="true" /> : <Plus aria-hidden="true" />}
             {domains.length > 1 ? t("Змінити домен", "Edit domain") : t("Додати домен", "Add domain")}</button>
         </div>
         {domains.length > 0 ? <ul className="workspace-production-domains">
@@ -192,17 +194,20 @@ export function ProjectProductionPanels({ controller, companyId, projectId, isUk
           void saveDomain();
         }}>
           <label>{release ? t("Додатковий домен", "Additional domain") : t("Основний домен", "Primary domain")}
-            <input value={domain} onChange={event => { setDomain(event.target.value); setDomainError(""); }} autoFocus
-              required={Boolean(release || !production.automaticDomain)} placeholder={release ? "app.example.com" : production.automaticDomain} />
+            <span className="inspector-search-box">
+              <input className="inspector-search-input" name="domain" value={domain}
+                onChange={event => { setDomain(event.target.value); setDomainError(""); }}
+                placeholder="www.example.com" inputMode="url" autoComplete="off" autoCapitalize="none" spellCheck={false} autoFocus required />
+            </span>
           </label>
           <ProductionDomainProof companyId={companyId} projectId={projectId} domain={domain} currentDomains={domains.map(item => item.host)}
             automaticDomain={production.automaticDomain} isUk={isUk} />
           {domainError && <p role="alert" className="workspace-production-error">{domainError}</p>}
           <div className="workspace-production-actions">
-            <button className="inspector-tab workspace-production-button" type="submit" disabled={disabled}>
+            <button className="inspector-tab workspace-production-button workspace-domain-save" type="submit" disabled={disabled || !domainToSave}>
               {release ? t("Зберегти", "Save") : t("Опублікувати", "Publish")}
             </button>
-            <button className="inspector-tab workspace-production-button" type="button" onClick={() => {
+            <button className="inspector-tab workspace-production-button workspace-domain-cancel" type="button" onClick={() => {
               setEditingDomain(false);
               setDomainError("");
             }}>{t("Скасувати", "Cancel")}</button>

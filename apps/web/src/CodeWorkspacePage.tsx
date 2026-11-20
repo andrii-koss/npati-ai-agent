@@ -2,7 +2,7 @@ import { isolatedPreviewUrl } from "./preview-origin";
 import { CodeWorkspaceHeader } from "./code-workspace/CodeWorkspaceHeader";
 import { CodeWorkspaceExecutionPanel } from "./code-workspace/CodeWorkspaceExecutionPanel";
 import { CodeWorkspaceFilePanel } from "./code-workspace/CodeWorkspaceFilePanel";
-import { approvalDecisionPlan } from "./code-workspace/actions";
+import { approvalDecisionPlan, workspaceEntryFile } from "./code-workspace/actions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "./i18n";
@@ -357,12 +357,13 @@ function CodeWorkspaceContent() {
     if (path) void openFile(path);
   }, [openFile]);
 
-  const openEntryFile = searchParams.get("view") === "files" && !searchParams.has("file");
+  const requestedView = searchParams.get("view");
   useEffect(() => {
-    if (openEntryFile && !selectedPath && tree.some(file => file.path === "index.html")) {
-      void openFile("index.html");
-    }
-  }, [openEntryFile, selectedPath, tree, openFile]);
+    if (selectedPath || searchParams.has("file")) return;
+    const entry = requestedView === "all" ? workspaceEntryFile(tree)
+      : requestedView === "files" && tree.some(file => file.path === "index.html") ? "index.html" : undefined;
+    if (entry) void openFile(entry);
+  }, [requestedView, searchParams, selectedPath, tree, openFile]);
 
   const saveFile = async () => {
     if (!companyId || !projectId || !selectedPath || fileContent === null || savingFile) return;
