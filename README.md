@@ -69,9 +69,22 @@ it writes the code, checks it, shows the result next to the chat and remembers y
 
 Everything runs on your own computer or server. Your data, your keys, your models.
 
-<img src="docs/media/workspace-overview.gif" width="860" alt="NPATI Agent chat and settings overview"/>
+<img src="docs/media/agent-working-steps.gif" width="860" alt="Agent operations, file changes and Live Preview"/>
 
-<sub>Every part of the agent in one place: AI providers, company, projects, Data Studio, goals, memory, automations, email and more.</sub>
+<sub>See the operations the agent ran, which files changed, and the result in Live Preview.</sub>
+
+</div>
+
+---
+
+<div align="center">
+
+## From chat to a working shopping cart
+
+Ask NPATI Agent to build a storefront with a product catalog and shopping cart.<br/>
+Try adding and removing items right in Live Preview, and see the total update as you go.
+
+<img src="docs/media/bakery-cart-demo.gif" width="860" alt="Adding and removing bakery items in a shopping cart"/>
 
 </div>
 
@@ -128,9 +141,9 @@ Websites and web apps (HTML, React, Next.js), browser games, Python desktop game
 and backends (Node.js, FastAPI). The agent writes the files, runs the checks and opens a live Preview next to the chat.<br/>
 Ask for a change in plain words, and it changes only what you asked for.
 
-<img src="docs/media/game-snake-preview.gif" width="860" alt="Playing Bakery Snake in a browser"/>
+<img src="docs/media/website-framework-starters.gif" width="860" alt="Browsing HTML, React and Next.js project starters"/>
 
-<sub>A browser game made in the chat, playable right away.</sub>
+<sub>Browse HTML/CSS, React + Vite and Next.js starters when creating a website.</sub>
 
 </div>
 
@@ -160,7 +173,7 @@ In **Data Studio** you see tables, columns and rows, add, edit and delete record
 import and export CSV or JSON, and choose which tables a website may read.<br/>
 Your site can show live data from its database: add a product, and it appears in the catalog.
 
-<img src="docs/media/data-studio-rows.gif" width="860" alt="Adding and viewing a row in Data Studio"/>
+<img src="docs/media/data-studio-live-catalog.gif" width="860" alt="Adding a product in Data Studio and refreshing the live catalog"/>
 
 </div>
 
@@ -247,7 +260,7 @@ updates them when they change, and keeps each company's memory separate.
 Posts, articles and descriptions written by the agent, saved in one place to read and edit.<br/>
 It writes in your brand's voice and for your audience.
 
-<img src="docs/media/content-drafting.gif" width="860" alt="Starting a content draft from chat and opening Content Hub"/>
+<img src="docs/media/content-hub-edit-draft.gif" width="860" alt="Opening, editing and saving a social media draft in Content Hub"/>
 
 </div>
 
@@ -330,7 +343,7 @@ The interface and the agent work in **English, Ukrainian, German, French, Spanis
 Dutch, Turkish, Russian, Chinese, Japanese, Korean, Arabic and Hindi**. The agent answers in the language you write in,<br/>
 and understands typos and transliteration.
 
-<img src="docs/media/chat-language-selector.gif" width="860" alt="English chat with a language selector and a prompt containing typos"/>
+<img src="docs/media/screenshots/languages.png" width="860" alt="Language menu with 16 languages"/>
 
 </div>
 
@@ -344,7 +357,7 @@ Deleting projects or data, database changes and risky commands always ask for yo
 Every step of the agent is recorded in **Activity**, and the **Capability inspector** lists honestly what works, what is partial and what is planned.<br/>
 Instructions hidden in web pages, files, emails or database rows are not followed.
 
-<img src="docs/media/capability-inspector-filters.gif" width="860" alt="Filtering tools in Capability Inspector"/>
+<img src="docs/media/web-research-capability.gif" width="860" alt="Finding Web Search in the Capability Inspector"/>
 
 </div>
 
