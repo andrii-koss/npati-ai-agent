@@ -90,9 +90,9 @@ when both probes succeed. If the probes succeed but API startup fails, check
 `MINIO_ENDPOINT`, port, TLS, DNS routing, and bucket permissions. The probe
 intentionally tests the selected instance directly, rather than trusting DNS.
 
-If pulling the default image from Quay fails, `MINIO_IMAGE` can select a
-digest-pinned image from your own registry or a verified mirror. This changes
-the image source only; keep the existing `minio-data` volume and credentials.
+Dokploy pulls a digest-pinned MinIO image from Docker Hub. Set `MINIO_IMAGE`
+to use a digest-pinned image from your own registry or a verified mirror.
+Keep the existing `minio-data` volume and credentials when changing the image source.
 
 ## 2. Configure the domain
 
