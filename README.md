@@ -69,7 +69,7 @@ it writes the code, checks it, shows the result next to the chat and remembers y
 
 Everything runs on your own computer or server. Your data, your keys, your models.
 
-<img src="docs/media/screenshots/overview.png" width="860" alt="All sections of NPATI Agent"/>
+<img src="docs/media/workspace-overview.gif" width="860" alt="NPATI Agent chat and settings overview"/>
 
 <sub>Every part of the agent in one place: AI providers, company, projects, Data Studio, goals, memory, automations, email and more.</sub>
 
@@ -128,7 +128,7 @@ Websites and web apps (HTML, React, Next.js), browser games, Python desktop game
 and backends (Node.js, FastAPI). The agent writes the files, runs the checks and opens a live Preview next to the chat.<br/>
 Ask for a change in plain words, and it changes only what you asked for.
 
-<img src="docs/media/screenshots/game.png" width="860" alt="A browser game made in the chat"/>
+<img src="docs/media/game-snake-preview.gif" width="860" alt="Playing Bakery Snake in a browser"/>
 
 <sub>A browser game made in the chat, playable right away.</sub>
 
@@ -143,7 +143,7 @@ Ask for a change in plain words, and it changes only what you asked for.
 Every website, game, app and API the agent made, on one page. Search, filter by company, type or status,<br/>
 open the live site in a new tab, or jump back to the project chat with **Edit in chat**.
 
-<img src="docs/media/screenshots/projects.png" width="860" alt="Projects page"/>
+<img src="docs/media/project-search.gif" width="860" alt="Searching and filtering the Projects catalog"/>
 
 </div>
 
@@ -160,7 +160,7 @@ In **Data Studio** you see tables, columns and rows, add, edit and delete record
 import and export CSV or JSON, and choose which tables a website may read.<br/>
 Your site can show live data from its database: add a product, and it appears in the catalog.
 
-<img src="docs/media/screenshots/data-studio.png" width="860" alt="Data Studio with tables and rows"/>
+<img src="docs/media/data-studio-rows.gif" width="860" alt="Adding and viewing a row in Data Studio"/>
 
 </div>
 
@@ -173,7 +173,7 @@ Your site can show live data from its database: add a product, and it appears in
 Attach several projects of a company to one database: a few websites, a mobile app and a chat or blog<br/>
 all read and write the same data. Each database has a dev and a prod copy, so you test changes first.
 
-<img src="docs/media/screenshots/data-studio-company.png" width="860" alt="One database with several connected projects"/>
+<img src="docs/media/data-studio-shared-database.gif" width="860" alt="Connected projects and dev and prod tabs in Data Studio"/>
 
 </div>
 
@@ -203,7 +203,7 @@ website, industry, description, products and services, languages, brand tone and
 Add durable facts and rules to the company memory and upload documents (PDF, DOCX, XLSX, CSV and more)<br/>
 to the company knowledge. The AI reads all of this, understands the company and answers in its context.
 
-<img src="docs/media/company-2.gif" width="860" alt="Company page with details, instructions, memory and knowledge"/>
+<img src="docs/media/company-profile.gif" width="860" alt="Company overview, agent chart and profile settings"/>
 
 </div>
 
@@ -218,7 +218,7 @@ country and market, business model, products or services and target audience.<br
 Link a goal and memory facts to the business. When the idea is ready, turn it into a company with one click:<br/>
 the profile, goals and confirmed memory move into the new company.
 
-<img src="docs/media/business.gif" width="860" alt="Business profile"/>
+<img src="docs/media/business-profile.gif" width="860" alt="Finding and opening a business profile"/>
 
 </div>
 
@@ -232,7 +232,7 @@ Set measurable goals with a number, a date and a priority, and assign them to an
 Tell the agent your facts once (prices, hours, suppliers). It remembers them after a restart,<br/>
 updates them when they change, and keeps each company's memory separate.
 
-<img src="docs/media/goals.gif" width="860" alt="Business goals"/>
+<img src="docs/media/business-goal-progress.gif" width="860" alt="Editing a measurable business goal"/>
 
 <sub>Goals with targets, dates and the responsible agent.</sub>
 
@@ -247,7 +247,7 @@ updates them when they change, and keeps each company's memory separate.
 Posts, articles and descriptions written by the agent, saved in one place to read and edit.<br/>
 It writes in your brand's voice and for your audience.
 
-<img src="docs/media/content.gif" width="860" alt="Content hub"/>
+<img src="docs/media/content-drafting.gif" width="860" alt="Starting a content draft from chat and opening Content Hub"/>
 
 </div>
 
@@ -260,7 +260,7 @@ It writes in your brand's voice and for your audience.
 Agents wake up on a schedule: "every Monday at 9:00, write a sales report". Pick the agent, the time and your time zone.<br/>
 Run it now, pause it, and see the history of every run.
 
-<img src="docs/media/automations.gif" width="860" alt="Automations"/>
+<img src="docs/media/automation-setup.gif" width="860" alt="Choosing an agent and a schedule for an automation"/>
 
 </div>
 
@@ -274,7 +274,7 @@ Connect the company mailbox (IMAP/SMTP). All conversations in one inbox, grouped
 The AI writes a draft, you read it, edit it and decide to send. Templates for common answers,<br/>
 spam detection and a block list for unwanted senders.
 
-<img src="docs/media/email.gif" width="860" alt="Email accounts"/>
+<img src="docs/media/email-response-template.gif" width="860" alt="Opening a saved response template in Email Settings"/>
 
 <sub>Company mailboxes.</sub>
 
@@ -290,7 +290,7 @@ See every email the AI has answered and follow each conversation as it happens: 
 Reply to any email yourself, send or edit the AI draft, or press Take Over to handle a thread by hand and Return to AI later.<br/>
 Mark important customers as VIP, see the customer profile with past conversations, archive threads and mark spam.
 
-<img src="docs/media/inbox.gif" width="860" alt="AI inbox"/>
+<img src="docs/media/inbox-review-draft.gif" width="860" alt="Reviewing and editing an email draft in AI Inbox"/>
 
 </div>
 
@@ -303,7 +303,7 @@ Mark important customers as VIP, see the customer profile with past conversation
 Talk to your agent from Telegram: tasks, files, company actions and automations from your phone.<br/>
 Inbound webhooks let other services send events to the agent. The secret URL stays hidden until you ask for it.
 
-<img src="docs/media/integrations.gif" width="860" alt="Integrations"/>
+<img src="docs/media/messaging-integrations.gif" width="860" alt="Messaging integrations and inbound webhooks"/>
 
 </div>
 
@@ -316,7 +316,7 @@ Inbound webhooks let other services send events to the agent. The secret URL sta
 Not tied to one AI. Choose from **334 providers and 3,000+ models**: paid and free, cloud and local.<br/>
 Pick a default model, or give each agent its own. Keys are stored encrypted.
 
-<img src="docs/media/settings-ai.gif" width="860" alt="AI providers"/>
+<img src="docs/media/ai-provider-search.gif" width="860" alt="Searching the AI provider and model catalog"/>
 
 </div>
 
@@ -330,7 +330,7 @@ The interface and the agent work in **English, Ukrainian, German, French, Spanis
 Dutch, Turkish, Russian, Chinese, Japanese, Korean, Arabic and Hindi**. The agent answers in the language you write in,<br/>
 and understands typos and transliteration.
 
-<img src="docs/media/screenshots/languages.png" width="860" alt="Language menu with 16 languages"/>
+<img src="docs/media/chat-language-selector.gif" width="860" alt="English chat with a language selector and a prompt containing typos"/>
 
 </div>
 
@@ -344,7 +344,7 @@ Deleting projects or data, database changes and risky commands always ask for yo
 Every step of the agent is recorded in **Activity**, and the **Capability inspector** lists honestly what works, what is partial and what is planned.<br/>
 Instructions hidden in web pages, files, emails or database rows are not followed.
 
-<img src="docs/media/capabilities.gif" width="860" alt="Capability inspector"/>
+<img src="docs/media/capability-inspector-filters.gif" width="860" alt="Filtering tools in Capability Inspector"/>
 
 </div>
 
