@@ -45,7 +45,7 @@ export function CompanyPage() {
   const { overview, refresh } = useWorkspace();
   const cachedCompaniesRef = useRef(getCachedCompanies());
   const [companies, setCompanies] = useState<Company[]>(cachedCompaniesRef.current);
-  const [companiesLoading, setCompaniesLoading] = useState(() => cachedCompaniesRef.current.length === 0);
+  const [companiesLoading, setCompaniesLoading] = useState(true);
   const [companiesLoadError, setCompaniesLoadError] = useState("");
   const [selectedId, setSelectedId] = useState(() => requestedCompanyId || getCachedSelectedCompanyId() || cachedCompaniesRef.current[0]?.id || "");
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -245,7 +245,7 @@ export function CompanyPage() {
     return () => window.removeEventListener("npati:company-changed", refreshCompanies);
   }, [selectedId, requestedCompanyId]);
   async function initializeCompanies() {
-    if (companies.length === 0) setCompaniesLoading(true);
+    setCompaniesLoading(true);
     setCompaniesLoadError("");
     try {
       const targetId = requestedCompanyId || selectedId;
@@ -532,11 +532,12 @@ export function CompanyPage() {
       onOpenAgentEditor={() => openAgentEditor()}
       onDeleteCompany={() => void deleteCompany()}
     />
-    {companiesLoading ? null : !selected ? <section className="company-first-run">
+    {!companiesLoading && companies.length === 0 && <section className="company-first-run">
       <span className="provider-avatar">CO</span><h2>{t("companySettings.firstRun.title")}</h2>
       <p>{t("companySettings.firstRun.description")}</p>
       <button className="button-primary" onClick={() => openCompanyEditor()}>{t("companySettings.firstRun.createButton")}</button>
-    </section> : <>
+    </section>}
+    {selected && <>
       <ControlStrip
         companies={companies}
         selected={selected}
