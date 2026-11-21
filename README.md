@@ -177,6 +177,19 @@ Publish to the primary domain, then add an optional second domain and open the s
 
 <div align="center">
 
+## Work with spreadsheets in chat
+
+Attach a CSV or Excel workbook and describe the changes in chat.<br/>
+The agent can sort rows, add a column based on your rules, and return the edited file for download.
+
+<img src="docs/media/chat-spreadsheet-edit.gif" width="860" alt="Uploading a bakery inventory CSV, sorting rows by stock, adding a Reorder column, and downloading the edited file"/>
+
+</div>
+
+---
+
+<div align="center">
+
 ## Databases and Data Studio
 
 Ask "create tables for customers and orders" and the agent builds a real database for your project,<br/>
