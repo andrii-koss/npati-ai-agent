@@ -164,6 +164,19 @@ open the live site in a new tab, or jump back to the project chat with **Edit in
 
 <div align="center">
 
+## Project settings and custom domains
+
+From **Projects**, open **Project settings**, then choose **Add domain**.<br/>
+Publish to the primary domain, then add an optional second domain and open the site from the domain list.
+
+<img src="docs/media/project-domain-settings.gif" width="860" alt="Opening project settings, adding two domains, and loading the published site"/>
+
+</div>
+
+---
+
+<div align="center">
+
 ## Databases and Data Studio
 
 Ask "create tables for customers and orders" and the agent builds a real database for your project,<br/>
