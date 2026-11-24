@@ -26,17 +26,21 @@ export function rewriteBrowserApiUrl(request: IncomingMessage): string {
 }
 
 // Some React pages share names with legacy unprefixed API routes.
-const frontendPage = /^\/(?:chat|c|business|b|settings|company|projects|dashboard|activity|content|connections|automations|inbox|email|capabilities|goals|memory|skills)(?:\/|$)/;
+const frontendPage = /^\/(?:login|signup|chat|c|business|b|settings|company|projects|dashboard|activity|content|connections|automations|inbox|email|capabilities|goals|memory|skills)(?:\/|$)/;
 const dataStudioPage = /^\/companies\/[^/]+\/projects\/[^/]+\/data\/?$/;
 
 export function registerWebFrontend(app: FastifyInstance, directory: string): void {
   const root = path.resolve(directory);
   let indexHtml: Buffer;
+  // The public landing page (apps/web/public/landing) answers "/" so search engines get real HTML; the app keeps every other page.
+  let landingHtml: Buffer | null = null;
   // The Preview origin is configured on the server (NPATI_PREVIEW_ORIGIN), so a prebuilt web bundle picks it up from here.
   app.addHook("onReady", async () => {
     const html = (await readFile(path.join(root, "index.html"))).toString("utf8");
-    const meta = previewOriginMeta(previewOriginConfig());
-    indexHtml = Buffer.from(meta ? html.replace("</head>", () => `  ${meta}
+    landingHtml = await readFile(path.join(root, "landing", "index.html")).catch(() => null);
+    // The app reloads "/" after sign-out only when the server has a landing page there; otherwise it would loop.
+    const metas = [previewOriginMeta(previewOriginConfig()), landingHtml ? `<meta name="npati-landing" content="/" />` : ""].filter(Boolean);
+    indexHtml = Buffer.from(metas.length ? html.replace("</head>", () => `  ${metas.join("\n  ")}
 </head>`) : html, "utf8");
   });
   app.register(fastifyStatic, {
@@ -84,6 +88,13 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
       }
     }
     const navigation = request.headers.accept?.includes("text/html");
+    if (pathname === "/" && landingHtml) {
+      return reply.type("text/html; charset=utf-8").header("Cache-Control", "no-cache")
+        .header("X-Content-Type-Options", "nosniff").header("X-Frame-Options", "SAMEORIGIN")
+        .header("Content-Security-Policy", "frame-ancestors 'self'").header("Referrer-Policy", "strict-origin-when-cross-origin")
+        .header("Content-Length", landingHtml.length)
+        .send(request.method === "HEAD" ? undefined : landingHtml);
+    }
     if (pathname === "/" || (navigation && !pathname.startsWith("/assets/") && !path.posix.extname(pathname)
       && (staticRoute || frontendPage.test(pathname) || dataStudioPage.test(pathname)))) {
       // Complete navigation in this hook; asynchronous sendFile can race the

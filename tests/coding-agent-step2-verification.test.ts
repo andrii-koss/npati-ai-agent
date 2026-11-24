@@ -392,7 +392,7 @@ describe("Step 2 — the eight baseline scenarios", () => {
     });
     const result = await harness.run({ responseLanguage: "uk" });
     expect(result.status).toBe("completed");
-    expect(result.message).toMatch(/^Built the Dodger game[^]*Автоматична перевірка знайшла помилку і виправила її:\n[^]*Added pytest/u);
+    expect(result.message).toMatch(/^Built the Dodger game[^]*\*\*Автоматична перевірка знайшла помилку і виправила її:\*\*\n[^]*Added pytest/u);
   });
 
   it("7c. a run without a repair keeps its single answer", async () => {

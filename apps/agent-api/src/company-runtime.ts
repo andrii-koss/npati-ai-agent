@@ -20,6 +20,7 @@ import { companyPlanningGuidanceAllowed, MAX_CANDIDATES, MAX_SELECTED, DEFAULT_T
 import { executeChatCapability, authorizedChatProjectTools, chatCapabilityExecutor } from "./company-runtime-chat-capability";
 import { executeAgentStages } from "./company-runtime-stages";
 import { executeCompanyRunTools } from "./company-runtime-tool-executor";
+import { asAccount } from "./ai-tenant-providers";
 export * from "./company-runtime-types";
 /**
  * A whole company run has no deadline: only Stop (cancel) ends it. The former 120 s run cap ended a multi-agent
@@ -137,7 +138,12 @@ export class CompanyDelegationRuntime {
   async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, key: string) {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto", projectId: input.projectId }, key);
   }
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; conversationId?: string; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
+  /** Runs as `ctx`'s account on a hosted installation, so webhook and automation runs use that account's own AI key. */
+  async execute(...args: Parameters<CompanyDelegationRuntime["executeInAccountScope"]>): Promise<CompanyAgentRunDetails> {
+    return asAccount(args[0], () => this.executeInAccountScope(...args));
+  }
+
+  async executeInAccountScope(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; conversationId?: string; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
     return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, conversationId: input.conversationId, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, onTool: input.onTool, signal });

@@ -46,7 +46,8 @@ function stubFetch(response: { ok?: boolean; status?: number; body?: unknown }):
  * auth layer's own setter.
  *
  * The first version of this fixture wrote the token under a hard-coded key, `"npati.auth.token"`, which is not
- * the key the app uses — `AuthContext.tsx` stores it under `npati_agent_access_token`. The client therefore
+ * the key the app uses — `AuthContext.tsx` stores the (non-secret, since L6 stage 2) session marker under
+ * `npati_agent_session_marker`. The client therefore
  * correctly attached no header, and the test reported a transport bug that did not exist. Going through
  * `setStoredAuthToken` makes the fixture unable to drift from the key the client actually reads.
  */
@@ -69,19 +70,19 @@ function headerValue(call: FetchCall | undefined, name: string): string | null {
 }
 
 describe("C7: project-files client transport", () => {
-  it("attaches the stored bearer token on every file call", async () => {
-    await withStoredToken("test-token", async () => {
+  it("attaches the stored session value on every file call", async () => {
+    await withStoredToken("npati-cookie-session:test", async () => {
       const { fetchImpl, calls } = stubFetch({ body: { files: [{ path: "src/index.ts" }] } });
       const result = await listProjectFiles(SCOPE, fetchImpl);
       expect(result.files).toEqual([{ path: "src/index.ts" }]);
       expect(calls[0]?.url).toBe("/api/companies/company-1/projects/project-1/files/tree");
-      expect(headerValue(calls[0], "Authorization")).toBe("Bearer test-token");
+      expect(headerValue(calls[0], "Authorization")).toBe("Bearer npati-cookie-session:test");
 
       const read = stubFetch({ body: { path: "a.ts", content: "x" } });
       await readProjectFile(SCOPE, "a.ts", read.fetchImpl);
       expect(read.calls[0]?.url).toBe("/api/companies/company-1/projects/project-1/files/read?path=a.ts");
       // "on every file call": the read path carries the token too, not just the tree call.
-      expect(headerValue(read.calls[0], "Authorization")).toBe("Bearer test-token");
+      expect(headerValue(read.calls[0], "Authorization")).toBe("Bearer npati-cookie-session:test");
     });
 
     // With nothing stored the header must be absent — the value comes from storage, not from a constant.

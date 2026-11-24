@@ -304,6 +304,11 @@ export interface OmniRouteConfig {
   ttsModel?: string;
   embeddingModel?: string;
   rerankModel?: string;
+  /**
+   * Hosted installations: every inference must run inside `withOmniRouteCredential` with the calling account's own
+   * key; without one it is refused instead of using `apiKey`, so the shared provider pool is never reachable.
+   */
+  requireScopedCredential?: boolean;
 }
 
 export type ProviderAuthType = "api_key" | "oauth" | "none" | "local" | "web_session" | "other";

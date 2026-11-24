@@ -342,6 +342,7 @@ export class CodeToolRuntime {
       let approved = false;
       if (tool.name.startsWith("code.data.") && write) {
         let autoAllowed = false;
+        let allowedByRunApproval = false;
         if (tool.name === "code.data.backend.attach" && args.dryRun !== true && typeof args.databaseId !== "string" && (typeof args.targetProjectId !== "string" || args.expectedTargetBackendId === undefined)) throw new CodeToolError("invalid_arguments", "Preview and select a target project and its current database attachment", 400, "arguments", false, tool.name);
         if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true) {
           if (!this.options.approvals) throw new CodeToolError("approval_unavailable", "Database changes require the approval system", 503, "approval", false, tool.name);
@@ -350,6 +351,13 @@ export class CodeToolRuntime {
           // Deleting rows, a table or a column still asks: the setting covers ordinary changes (V6 step 17, owner decision).
           autoAllowed = !input.approvalId && !isIrreversibleDataTool(tool.name, args)
             && await this.options.dataAutoAllow?.(ctx, input.companyId).catch(() => false) === true;
+          // One approval per request: once the person approved a database change in this run, the run's further
+          // ordinary database changes go ahead without asking again (irreversible ones still ask).
+          if (!autoAllowed && !input.approvalId && input.runId && !isIrreversibleDataTool(tool.name, args)) {
+            allowedByRunApproval = await this.options.approvals?.approvedDataChangeInRun?.({ ctx, companyId: input.companyId, runId: input.runId })
+              .catch(() => false) === true;
+            autoAllowed = allowedByRunApproval;
+          }
         }
         if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true && !autoAllowed) {
           const payload = { projectId: input.projectId, sessionId, turnId, tool: tool.name, toolVersion: tool.version, args };
@@ -365,7 +373,7 @@ export class CodeToolRuntime {
         }
         if (autoAllowed) approved = true;
         await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
-          turnId, action: autoAllowed ? "pre_schema_write:allowed_by_company_setting" : "pre_schema_write", strict: true,
+          turnId, action: allowedByRunApproval ? "pre_schema_write:allowed_by_run_approval" : autoAllowed ? "pre_schema_write:allowed_by_company_setting" : "pre_schema_write", strict: true,
         });
       } else if (write) {
         if (tool.name === "code.fs.undo_last_turn") {

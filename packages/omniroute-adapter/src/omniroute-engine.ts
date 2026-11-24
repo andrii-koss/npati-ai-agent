@@ -4,6 +4,8 @@ import { providerToolNames } from "./provider-tool-names";
 import { retainProviderContinuation } from "./provider-continuation";
 import { readChatStream } from "./chat-stream";
 import { observeProviderAttempt } from "./provider-attempt";
+import { currentOmniRouteCredential } from "./credential-scope";
+import { OmniRouteError } from "./marketplace-client";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 import {
@@ -30,6 +32,8 @@ export class OmniRouteEngine implements AIEngine {
   private readonly reconciledCombos = new Set<string>();
   private readonly baseUrl?: string;
   private readonly apiKey?: string;
+  /** Hosted installations: inference runs only with the calling account's own key (see credential-scope.ts). */
+  private readonly requireScopedCredential: boolean;
   private readonly timeoutMs: number;
   private readonly transcriptionModel: string;
   private readonly ttsModel: string;
@@ -39,6 +43,7 @@ export class OmniRouteEngine implements AIEngine {
   constructor(config: OmniRouteConfig) {
     this.baseUrl = config.baseUrl?.replace(/\/$/, "");
     this.apiKey = config.apiKey;
+    this.requireScopedCredential = config.requireScopedCredential === true;
     this.timeoutMs = config.timeoutMs ?? 4_000;
     this.transcriptionModel = config.transcriptionModel ?? "openai/whisper-1";
     this.ttsModel = config.ttsModel ?? "openai/gpt-4o-mini-tts";
@@ -46,10 +51,34 @@ export class OmniRouteEngine implements AIEngine {
     this.rerankModel = config.rerankModel;
   }
 
-  private headers(compression?: ChatRequest["compression"], idempotencyKey?: string): HeadersInit {
+  /**
+   * The key for a request that spends model tokens. Inside a credential scope it is the account's own key. On a hosted
+   * installation there is no fallback: an inference outside a scope, or for an account without a key, is refused, so
+   * no code path can reach the shared provider pool.
+   */
+  private inferenceKey(): string | undefined {
+    const scoped = currentOmniRouteCredential();
+    if (scoped?.apiKey) return scoped.apiKey;
+    if (this.requireScopedCredential) {
+      throw new OmniRouteError("Connect your own AI provider in Settings → AI Providers to use NPATI Agent.", 409, "AI_PROVIDER_REQUIRED");
+    }
+    return this.apiKey;
+  }
+
+  /** Platform requests (status, settings, MCP, combo definitions, web search and fetch) use the installation's key. */
+  private platformHeaders(): HeadersInit {
     return {
       "content-type": "application/json",
       ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+      "x-omniroute-no-memory": "true",
+    };
+  }
+
+  private headers(compression?: ChatRequest["compression"], idempotencyKey?: string): HeadersInit {
+    const key = this.inferenceKey();
+    return {
+      "content-type": "application/json",
+      ...(key ? { authorization: `Bearer ${key}` } : {}),
       ...(compression ? { "x-omniroute-compression": compression } : {}),
       ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
       // NPATI owns Business, Goals, Memory and chat history. Prevent a second
@@ -61,6 +90,16 @@ export class OmniRouteEngine implements AIEngine {
   supportsNativeTools() { return true; }
 
   private async chatCandidates(primary?: string, fallback?: string): Promise<string[]> {
+    if (this.requireScopedCredential) {
+      // Hosted: `auto` would expand over the cached catalog of every account's models. It becomes the account's own
+      // default model instead; an automatic fallback is dropped (OmniRoute still limits everything to the account's key).
+      const automatic = (model?: string) => model === undefined || model === "auto" || model.startsWith("auto/");
+      if (automatic(primary)) {
+        primary = await currentOmniRouteCredential()?.resolveAutoModel?.();
+        if (!primary) throw new OmniRouteError("Add a model in Settings → AI Providers and set it as default to use NPATI Agent.", 409, "AI_PROVIDER_REQUIRED");
+      }
+      if (fallback && automatic(fallback)) fallback = undefined;
+    }
     const requested = [primary ?? "auto", fallback].filter((model): model is string => Boolean(model));
     const discover = requested.some((model) => model === "auto" || model.startsWith("auto/"));
     const available = discover && this.chatModelMetadata.size === 0 ? await this.listModels().catch(() => []) : [...this.chatModelMetadata.values()];
@@ -279,12 +318,13 @@ export class OmniRouteEngine implements AIEngine {
     form.set("model", input.model ?? this.transcriptionModel);
     form.set("response_format", "json");
     if (input.language) form.set("language", input.language);
+    // Transcription spends model tokens: it uses the inference key (the account's own on a hosted installation).
+    const transcriptionKey = this.inferenceKey();
+    const transcriptionHeaders: Record<string, string> = { "x-omniroute-no-memory": "true" };
+    if (transcriptionKey) transcriptionHeaders.authorization = `Bearer ${transcriptionKey}`;
     const response = await fetch(this.baseUrl + "/api/v1/audio/transcriptions", {
       method: "POST",
-      headers: {
-        ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
-        "x-omniroute-no-memory": "true",
-      },
+      headers: transcriptionHeaders,
       body: form,
       signal: AbortSignal.timeout(180_000),
     });
@@ -329,19 +369,19 @@ export class OmniRouteEngine implements AIEngine {
   async ensureA2AEnabled(): Promise<void> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const status = await fetch(this.baseUrl + "/api/a2a/status", {
-      headers: this.headers(),
+      headers: this.platformHeaders(),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (status.ok && ((await status.json()) as { enabled?: boolean }).enabled === true) return;
     const response = await fetch(this.baseUrl + "/api/settings", {
       method: "PATCH",
-      headers: this.headers(),
+      headers: this.platformHeaders(),
       body: JSON.stringify({ a2aEnabled: true }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw await this.responseError("A2A enablement", response);
     const verify = await fetch(this.baseUrl + "/api/a2a/status", {
-      headers: this.headers(),
+      headers: this.platformHeaders(),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     const payload = verify.ok ? await verify.json() as { enabled?: boolean; online?: boolean } : {};
@@ -352,18 +392,18 @@ export class OmniRouteEngine implements AIEngine {
   async ensureMCPEnabled(): Promise<void> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const status = await fetch(this.baseUrl + "/api/mcp/status", {
-      headers: this.headers(), signal: AbortSignal.timeout(this.timeoutMs),
+      headers: this.platformHeaders(), signal: AbortSignal.timeout(this.timeoutMs),
     });
     const current = status.ok ? await status.json() as { enabled?: boolean; online?: boolean; transport?: string } : {};
     if (current.enabled && current.online && current.transport === "streamable-http") return;
     const response = await fetch(this.baseUrl + "/api/settings", {
-      method: "PATCH", headers: this.headers(),
+      method: "PATCH", headers: this.platformHeaders(),
       body: JSON.stringify({ mcpEnabled: true, mcpTransport: "streamable-http" }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw await this.responseError("MCP enablement", response);
     const verify = await fetch(this.baseUrl + "/api/mcp/status", {
-      headers: this.headers(), signal: AbortSignal.timeout(this.timeoutMs),
+      headers: this.platformHeaders(), signal: AbortSignal.timeout(this.timeoutMs),
     });
     const ready = verify.ok ? await verify.json() as { enabled?: boolean; online?: boolean; transport?: string } : {};
     if (!ready.enabled || !ready.online || ready.transport !== "streamable-http") throw new Error("OmniRoute MCP endpoint is not online");
@@ -374,7 +414,7 @@ export class OmniRouteEngine implements AIEngine {
     await this.ensureMCPEnabled();
     const url = this.baseUrl + "/api/mcp/stream";
     const signal = requestSignal(request.signal, request.timeoutMs ?? 30_000);
-    const headers = new Headers(this.headers());
+    const headers = new Headers(this.platformHeaders());
     headers.set("accept", "application/json, text/event-stream");
     const initialize = await fetch(url, {
       method: "POST", headers, signal,
@@ -457,7 +497,7 @@ export class OmniRouteEngine implements AIEngine {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const response = await fetch(this.baseUrl + "/api/combos", {
       method: "POST",
-      headers: this.headers(),
+      headers: this.platformHeaders(),
       body: JSON.stringify(input),
       signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)),
     });
@@ -483,7 +523,7 @@ export class OmniRouteEngine implements AIEngine {
   private async reconcileComboConfig(input: OmniRouteComboInput, signal?: AbortSignal) {
     if (!input.config || this.reconciledCombos.has(input.name)) return;
     try {
-      const list = await fetch(this.baseUrl + "/api/combos", { headers: this.headers(), signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)) });
+      const list = await fetch(this.baseUrl + "/api/combos", { headers: this.platformHeaders(), signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)) });
       if (!list.ok) return;
       const payload = await list.json() as { combos?: Array<{ id?: string; name?: string; config?: Record<string, unknown> }> } | Array<{ id?: string; name?: string; config?: Record<string, unknown> }>;
       const stored = (Array.isArray(payload) ? payload : payload.combos ?? []).find((combo) => combo.name === input.name);
@@ -492,7 +532,7 @@ export class OmniRouteEngine implements AIEngine {
       const stale = Object.entries(input.config).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value));
       if (stale) {
         const update = await fetch(`${this.baseUrl}/api/combos/${encodeURIComponent(stored.id)}`, {
-          method: "PUT", headers: this.headers(), body: JSON.stringify({ config: { ...current, ...input.config } }),
+          method: "PUT", headers: this.platformHeaders(), body: JSON.stringify({ config: { ...current, ...input.config } }),
           signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)),
         });
         if (!update.ok) return;
@@ -537,7 +577,7 @@ export class OmniRouteEngine implements AIEngine {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const response = await fetch(this.baseUrl + "/api/v1/search", {
       method: "POST",
-      headers: this.headers(),
+      headers: this.platformHeaders(),
       body: JSON.stringify({
         query: input.query,
         max_results: Math.max(1, Math.min(input.maxResults ?? 5, 20)),
@@ -572,7 +612,7 @@ export class OmniRouteEngine implements AIEngine {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const format = input.format ?? "markdown";
     const response = await fetch(this.baseUrl + "/api/v1/web/fetch", {
-      method: "POST", headers: this.headers(),
+      method: "POST", headers: this.platformHeaders(),
       body: JSON.stringify({ url: input.url, format, depth: 0, include_metadata: input.includeMetadata ?? true, ...(input.provider ? { provider: input.provider } : {}) }),
       signal: AbortSignal.timeout(Math.max(this.timeoutMs, 30_000)),
     });
@@ -719,11 +759,11 @@ export class OmniRouteEngine implements AIEngine {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
     const [configurationResponse, runtimeResponse] = await Promise.all([
       fetch(this.baseUrl + "/api/resilience", {
-        headers: this.headers(),
+        headers: this.platformHeaders(),
         signal: AbortSignal.timeout(this.timeoutMs),
       }),
       fetch(this.baseUrl + "/api/monitoring/health", {
-        headers: this.headers(),
+        headers: this.platformHeaders(),
         signal: AbortSignal.timeout(this.timeoutMs),
       }),
     ]);
@@ -757,7 +797,7 @@ export class OmniRouteEngine implements AIEngine {
     if (!this.baseUrl) return { status: "not_configured", detail: "OMNIROUTE_BASE_URL is empty" };
     try {
       const response = await fetch(`${this.baseUrl}/api/monitoring/health`, {
-        headers: this.headers(),
+        headers: this.platformHeaders(),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (!response.ok) return { status: "unavailable", detail: `HTTP ${response.status}` };

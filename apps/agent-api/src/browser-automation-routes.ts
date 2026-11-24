@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { AuthProvider } from "./auth";
 import { AuthenticationError } from "./auth";
+import { isAdministrator } from "./admin-access";
 import type { AuthContext } from "@npati/workspace";
 import { ManagedBrowserProfileService } from "./multimodal-bridge-and-browser";
 import {
@@ -45,6 +46,11 @@ async function authorize(auth: AuthProvider, request: FastifyRequest, permission
   const scope = await auth.authenticate(request);
   if (!hasPermission(scope, permission)) {
     throw new AuthenticationError(`Missing permission: ${permission}`, 403, "FORBIDDEN");
+  }
+  // Profiles, instances, tabs and downloads live in process-wide maps shared by every account, and tabs drive a
+  // browser on the server. On a hosted installation only the installation owner and NPATI administrators may use them.
+  if (!isAdministrator(scope)) {
+    throw new AuthenticationError("Server browser control is limited to administrators.", 403, "ADMIN_REQUIRED");
   }
   return scope;
 }

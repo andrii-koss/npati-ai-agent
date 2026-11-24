@@ -10,7 +10,8 @@ import { registerWebFrontend, rewriteBrowserApiUrl } from "../apps/agent-api/src
 
 let app: FastifyInstance;
 let root: string;
-const html = "<!doctype html><html><body>NPATI frontend</body></html>";
+// Like the real build (apps/web/index.html), the page has a head: the server adds its meta tags there.
+const html = "<!doctype html><html><head></head><body>NPATI frontend</body></html>";
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "npati-web-test-"));
   await mkdir(path.join(root, "assets"));
@@ -109,4 +110,31 @@ describe("frontend and API in one HTTP server", () => {
     await rm(path.join(root, "index.html"));
     await expect(app.ready()).rejects.toThrow();
   });
+});
+
+describe("public landing page", () => {
+  const landing = "<!doctype html><html><body>NPATI landing</body></html>";
+  beforeEach(async () => {
+    await mkdir(path.join(root, "landing"));
+    await writeFile(path.join(root, "landing", "index.html"), landing);
+  });
+
+  it("serves the landing page at / and keeps the app on its own pages", async () => {
+    const home = await app.inject({ url: "/", headers: { accept: "text/html" } });
+    expect(home.statusCode).toBe(200);
+    expect(home.body).toBe(landing);
+    expect(home.headers["x-frame-options"]).toBe("SAMEORIGIN");
+    for (const url of ["/login", "/signup", "/chat"]) {
+      const page = await app.inject({ url, headers: { accept: "text/html" } });
+      expect(page.body).toContain("NPATI frontend");
+      expect(page.body).toContain('<meta name="npati-landing" content="/" />');
+    }
+  });
+});
+
+it("does not mark the app page when there is no landing page", async () => {
+  await writeFile(path.join(root, "index.html"), "<!doctype html><html><head></head><body>NPATI frontend</body></html>");
+  const page = await app.inject({ url: "/login", headers: { accept: "text/html" } });
+  expect(page.body).toContain("NPATI frontend");
+  expect(page.body).not.toContain("npati-landing");
 });

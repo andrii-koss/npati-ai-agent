@@ -13,11 +13,12 @@ it("keeps a company beyond page one selectable and dispatches only to that compa
   const requested: Array<{url:string;method?:string}> = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url=String(input); requested.push({url,method:init?.method});
-    const body = /\/companies\?/.test(url)
-      ? url.includes("cursor=") ? {companies:[{id:"V6TEST16-late",name:"V6TEST16 late company"}],pagination:{nextCursor:null}}
-        : {companies:Array.from({length:50},(_,i)=>({id:`early-${i}`,name:`Early ${i}`})),pagination:{nextCursor:"V6TEST16-next"}}
-      : init?.method === "POST" ? {error:{message:"V6TEST controlled refusal"}}
-      : {runs:[],nextCursor:null};
+    // The page reads one Activity summary (GET /activity/page) that lists every company of the account: the 51st company,
+    // beyond what used to be the first page of 50, must still be selectable and receive the dispatch.
+    const companies=[...Array.from({length:50},(_,i)=>({id:`early-${i}`,name:`Early ${i}`})),{id:"V6TEST16-late",name:"V6TEST16 late company"}];
+    const body = init?.method === "POST" ? {error:{message:"V6TEST controlled refusal"}}
+      : /\/activity\/page/.test(url) ? {companies,items:[],nextCursor:null,matchingTotal:0,counts:{total:0,completed:0,running:0,failed:0},selected:null,detail:null}
+      : {items:[],nextCursor:null};
     return new Response(JSON.stringify(body),{status:init?.method === "POST" ? 400 : 200});
   }));
   host=document.createElement("div");document.body.append(host);root=createRoot(host);

@@ -18,10 +18,15 @@ services:
       NPATI_ENV: ${NPATI_ENV:-development}
       NPATI_AGENT_API_PORT: 3001
       NPATI_AUTH_STRICT: ${NPATI_AUTH_STRICT:-true}
+      # self_hosted (one owner) or npati_hosted (SaaS: every NPATI account, each with only its own AI providers).
+      NPATI_DEPLOYMENT_TYPE: ${NPATI_DEPLOYMENT_TYPE:-self_hosted}
+      NPATI_HOSTED_REGISTRATION_TOKEN: ${NPATI_HOSTED_REGISTRATION_TOKEN:-}
+      # per_user or shared; empty follows NPATI_DEPLOYMENT_TYPE (npati_hosted = per_user).
+      NPATI_AI_PROVIDER_ISOLATION: ${NPATI_AI_PROVIDER_ISOLATION:-}
       NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:-https://www.npati.com}
       NPATI_JWT_SECRET: ${NPATI_JWT_SECRET:-}
-      NPATI_ENCRYPTION_KEY: ${NPATI_ENCRYPTION_KEY:-npati-local-development-encryption-key-change-before-production}
-      NPATI_REMOTE_ACCESS_TOKEN_SECRET: ${NPATI_REMOTE_ACCESS_TOKEN_SECRET:-npati-local-development-remote-token-key-change-before-production}
+      NPATI_ENCRYPTION_KEY: ${NPATI_ENCRYPTION_KEY:?Set NPATI_ENCRYPTION_KEY in .env - run node scripts/generate-local-secrets.mjs}
+      NPATI_REMOTE_ACCESS_TOKEN_SECRET: ${NPATI_REMOTE_ACCESS_TOKEN_SECRET:?Set NPATI_REMOTE_ACCESS_TOKEN_SECRET in .env - run node scripts/generate-local-secrets.mjs}
       OIDC_ISSUER: ${OIDC_ISSUER:-https://auth.npati.ai}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-npati-dashboard}
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:-}
@@ -38,8 +43,8 @@ services:
       NPATI_PREVIEW_ORIGIN: ${NPATI_PREVIEW_ORIGIN:-}
       NPATI_MESSAGING_WEBHOOK_BASE_URL: ${NPATI_MESSAGING_WEBHOOK_BASE_URL:-}
       OMNIROUTE_BASE_URL: http://omniroute:20128
-      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-npati-agent-internal-local}
-      OMNIROUTE_MANAGEMENT_PASSWORD: ${OMNIROUTE_MANAGEMENT_PASSWORD:-}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:?Set OMNIROUTE_API_KEY in .env - run node scripts/generate-local-secrets.mjs}
+      OMNIROUTE_MANAGEMENT_PASSWORD: ${OMNIROUTE_MANAGEMENT_PASSWORD:?Set OMNIROUTE_MANAGEMENT_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
       OMNIROUTE_TRANSCRIPTION_MODEL: ${OMNIROUTE_TRANSCRIPTION_MODEL:-openai/whisper-1}
       OMNIROUTE_TTS_MODEL: ${OMNIROUTE_TTS_MODEL:-openai/gpt-4o-mini-tts}
       OMNIROUTE_EMBEDDING_MODEL: ${OMNIROUTE_EMBEDDING_MODEL:-}
@@ -52,7 +57,7 @@ services:
       NPATI_PROJECT_RUNTIME_MODE: ${NPATI_PROJECT_RUNTIME_MODE:-shared}
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-npati-local-runner-token-change-before-production}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?Set NPATI_SANDBOX_RUNNER_SECRET in .env - run node scripts/generate-local-secrets.mjs}
       NPATI_TERMINAL_TIMEOUT_MS: ${NPATI_TERMINAL_TIMEOUT_MS:-120000}
       NPATI_TERMINAL_BUILD_TIMEOUT_MS: ${NPATI_TERMINAL_BUILD_TIMEOUT_MS:-600000}
       NPATI_TERMINAL_OUTPUT_LIMIT_BYTES: ${NPATI_TERMINAL_OUTPUT_LIMIT_BYTES:-64000}
@@ -63,9 +68,9 @@ services:
       NPATI_HUB_API_KEY: ${NPATI_HUB_API_KEY:-}
       CRAWL4AI_BASE_URL: http://crawler:11235
       NPATI_SEARXNG_URL: ${NPATI_SEARXNG_URL:-http://searxng:8080}
-      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-npati-local-internal-crawler-token}
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?Set CRAWL4AI_API_TOKEN in .env - run node scripts/generate-local-secrets.mjs}
       BROWSER_USE_WORKER_URL: http://browser-use-worker:8765
-      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:-npati-local-browser-worker-token-change-before-production}
+      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:?Set NPATI_BROWSER_INTERNAL_TOKEN in .env - run node scripts/generate-local-secrets.mjs}
       NPATI_BROWSER_UPLOAD_ROOT: /app/data/browser-uploads
       WEB_RESEARCH_MAX_SEARCH_RESULTS: ${WEB_RESEARCH_MAX_SEARCH_RESULTS:-10}
       WEB_RESEARCH_MAX_COMPETITORS: ${WEB_RESEARCH_MAX_COMPETITORS:-5}
@@ -76,11 +81,11 @@ services:
       WEB_RESEARCH_CACHE_TTL_SECONDS: ${WEB_RESEARCH_CACHE_TTL_SECONDS:-600}
       WEB_RESEARCH_MAX_CONTENT_CHARACTERS: ${WEB_RESEARCH_MAX_CONTENT_CHARACTERS:-80000}
       WEB_RESEARCH_PER_DOMAIN_DELAY_MS: ${WEB_RESEARCH_PER_DOMAIN_DELAY_MS:-750}
-      DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:-npati}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
+      DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:?Set NPATI_POSTGRES_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
       NPATI_PROJECTS_POSTGRES_HOST: postgres-projects
       NPATI_PROJECTS_POSTGRES_PORT: 5432
       NPATI_PROJECTS_POSTGRES_ADMIN_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-npati-local-projects-db-change-before-production}
+      NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:?Set NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
       NPATI_PROJECTS_POSTGRES_ADMIN_DB: postgres
       NPATI_PROJECTS_SNAPSHOT_DIR: /app/project-snapshots
       NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS: ${NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS:-30}
@@ -97,13 +102,13 @@ services:
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${NPATI_REDIS_PASSWORD:?Set NPATI_REDIS_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}@redis:6379
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${MINIO_ROOT_USER:-npati-local-admin}}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-npati-local-change-me}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}}
       MINIO_OPERATION_TIMEOUT_MS: ${MINIO_OPERATION_TIMEOUT_MS:-15000}
       MINIO_STREAM_IDLE_TIMEOUT_MS: ${MINIO_STREAM_IDLE_TIMEOUT_MS:-30000}
       MINIO_STREAM_TOTAL_TIMEOUT_MS: ${MINIO_STREAM_TOTAL_TIMEOUT_MS:-300000}
@@ -112,10 +117,11 @@ services:
       NPATI_STORAGE_RECONCILE_LEASE_MS: ${NPATI_STORAGE_RECONCILE_LEASE_MS:-1800000}
       NPATI_STORAGE_RECONCILE_PAGE_SIZE: ${NPATI_STORAGE_RECONCILE_PAGE_SIZE:-250}
     ports:
-      - "${NPATI_AGENT_API_PORT:-3001}:3001"
-      - "${NPATI_WEB_PORT:-3000}:3001"
+      - "${NPATI_API_BIND:-127.0.0.1}:${NPATI_AGENT_API_PORT:-3001}:3001"
+      - "${NPATI_API_BIND:-127.0.0.1}:${NPATI_WEB_PORT:-3000}:3001"
     volumes:
       - npati-agent-data:/app/data
+      - browser-uploads:/app/data/browser-uploads
       - postgres-projects-snapshots:/app/project-snapshots
     depends_on:
       omniroute:
@@ -134,7 +140,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks: [npati-agent-network, npati-projects-db-network, npati-sandbox-control, npati-production-control]
+    networks: [npati-agent-network, npati-projects-db-network, npati-sandbox-control, npati-production-control, npati-browser]
 
   company-worker:
     container_name: npati-agent-company-worker
@@ -151,6 +157,7 @@ services:
       NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ""
     volumes:
       - npati-agent-data:/app/data
+      - browser-uploads:/app/data/browser-uploads
     depends_on:
       omniroute:
         condition: service_healthy
@@ -168,7 +175,7 @@ services:
       timeout: 8s
       retries: 5
       start_period: 15s
-    networks: [npati-agent-network, npati-sandbox-control]
+    networks: [npati-agent-network, npati-sandbox-control, npati-browser]
 
   sandbox-runner:
     build:
@@ -185,7 +192,7 @@ services:
       NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
       NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-npati-local-runner-token-change-before-production}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?Set NPATI_SANDBOX_RUNNER_SECRET in .env - run node scripts/generate-local-secrets.mjs}
       ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,repo.packagist.org,pub.dev,www.gstatic.com,fonts.gstatic.com,fonts.googleapis.com}
     devices:
       - /dev/net/tun:/dev/net/tun
@@ -229,9 +236,9 @@ services:
     restart: unless-stopped
     shm_size: "1gb"
     environment:
-      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-npati-local-internal-crawler-token}
-      SECRET_KEY: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}
-      REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?Set CRAWL4AI_API_TOKEN in .env - run node scripts/generate-local-secrets.mjs}
+      SECRET_KEY: ${CRAWL4AI_SECRET_KEY:?Set CRAWL4AI_SECRET_KEY in .env - run node scripts/generate-local-secrets.mjs}
+      REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:?Set CRAWL4AI_SECRET_KEY in .env - run node scripts/generate-local-secrets.mjs}
       NPATI_CRAWLER_STATE_DIR: /app/npati-state
       NPATI_CRAWLER_PAGE_TIMEOUT_MS: ${NPATI_CRAWLER_PAGE_TIMEOUT_MS:-45000}
     volumes:
@@ -250,7 +257,7 @@ services:
     image: searxng/searxng:${SEARXNG_VERSION:-2026.10.30-ffa88e3ba}
     restart: unless-stopped
     environment:
-      SEARXNG_SECRET: ${NPATI_SEARXNG_SECRET:-npati-local-searxng-secret-change-before-production}
+      SEARXNG_SECRET: ${NPATI_SEARXNG_SECRET:?Set NPATI_SEARXNG_SECRET in .env - run node scripts/generate-local-secrets.mjs}
       SEARXNG_BASE_URL: http://searxng:8080/
     volumes:
       - ./services/searxng/settings.yml:/etc/searxng/settings.yml:ro
@@ -273,14 +280,14 @@ services:
     shm_size: "2gb"
     environment:
       NPATI_ENV: ${NPATI_ENV:-development}
-      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:-npati-local-browser-worker-token-change-before-production}
+      NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:?Set NPATI_BROWSER_INTERNAL_TOKEN in .env - run node scripts/generate-local-secrets.mjs}
       NPATI_BROWSER_STATE_DIR: /state
       NPATI_BROWSER_MAX_RETRIES: ${NPATI_BROWSER_MAX_RETRIES:-2}
       BROWSER_USE_API_KEY: ${BROWSER_USE_API_KEY:-}
       BROWSER_USE_MODEL: ${BROWSER_USE_MODEL:-bu-2-0}
     volumes:
       - browser-use-state:/state
-      - npati-agent-data:/app/data:ro
+      - browser-uploads:/app/data/browser-uploads:ro
     expose:
       - "8765"
     healthcheck:
@@ -289,7 +296,8 @@ services:
       timeout: 8s
       retries: 5
       start_period: 45s
-    networks: [npati-agent-network]
+    # Not on npati-agent-network: a page must not reach Redis, MinIO, OmniRoute or Postgres (audit H2).
+    networks: [npati-browser]
 
   omniroute:
     container_name: npati-agent-omniroute
@@ -303,9 +311,13 @@ services:
       DASHBOARD_PORT: 20128
       API_PORT: 20129
       API_HOST: 0.0.0.0
-      REDIS_URL: redis://redis:6379
-      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-npati-agent-internal-local}
+      REDIS_URL: redis://:${NPATI_REDIS_PASSWORD:?Set NPATI_REDIS_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}@redis:6379
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:?Set OMNIROUTE_API_KEY in .env - run node scripts/generate-local-secrets.mjs}
       OMNIROUTE_API_KEY_ID: env-key
+      INITIAL_PASSWORD: ${OMNIROUTE_MANAGEMENT_PASSWORD:?Set OMNIROUTE_MANAGEMENT_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
+      # Never answer a request whose key ran out of credit with another provider's model (on a hosted installation that
+      # would be another account's or the platform's key); the user gets the provider's error instead.
+      OMNIROUTE_EMERGENCY_FALLBACK: ${OMNIROUTE_EMERGENCY_FALLBACK:-false}
       # Every /v1 caller must present OMNIROUTE_API_KEY (the 3.8.52 image default, stated so a rollback keeps it).
       REQUIRE_API_KEY: "true"
       # Never resume a cut stream after a tool call was emitted, should mid-stream continuation ever be enabled.
@@ -354,7 +366,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-npati-local-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-npati-local-change-me}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
     volumes:
       - minio-data:/data
     ports:
@@ -373,7 +385,10 @@ services:
     container_name: npati-agent-redis
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    command: ["sh", "-c", "exec redis-server --save 60 1 --loglevel warning --requirepass \"$$NPATI_REDIS_PASSWORD\""]
+    environment:
+      NPATI_REDIS_PASSWORD: ${NPATI_REDIS_PASSWORD:?Set NPATI_REDIS_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
+      REDISCLI_AUTH: ${NPATI_REDIS_PASSWORD:?Set NPATI_REDIS_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
     ports:
       - "127.0.0.1:${NPATI_REDIS_PORT:-6379}:6379"
     volumes:
@@ -391,7 +406,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${NPATI_PROJECTS_POSTGRES_ADMIN_USER:-npati_projects_admin}
-      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:-npati-local-projects-db-change-before-production}
+      POSTGRES_PASSWORD: ${NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD:?Set NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
       POSTGRES_DB: postgres
     volumes:
       - postgres-projects-data:/var/lib/postgresql/data
@@ -414,7 +429,7 @@ services:
       - "127.0.0.1:${NPATI_POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${NPATI_POSTGRES_USER:-npati}
-      POSTGRES_PASSWORD: ${NPATI_POSTGRES_PASSWORD:-npati}
+      POSTGRES_PASSWORD: ${NPATI_POSTGRES_PASSWORD:?Set NPATI_POSTGRES_PASSWORD in .env - run node scripts/generate-local-secrets.mjs}
       POSTGRES_DB: ${NPATI_POSTGRES_DB:-npati_agent}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -490,6 +505,7 @@ services:
       options: {max-size: 10m, max-file: "3"}
 
 networks:
+  npati-browser:
   npati-sandbox-control:
     internal: true
   npati-sandbox-egress:
@@ -502,6 +518,7 @@ networks:
     name: npati-agent-network
 
 volumes:
+  browser-uploads:
   project-runtime-workspaces:
   project-runtime-state:
   npati-production-state:

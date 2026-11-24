@@ -519,8 +519,15 @@ Use activity.run when the user asks the company agents to perform work and wants
         if (!item || !memoryTypes.has(item.type as MemoryInput["type"]) || !clean(item.title, 300) || !clean(item.content)) throw new Error("Invalid memory");
         if (item.confidence !== undefined && (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1)) throw new Error("Invalid confidence");
         const source = `chat:${key}`;
-        const created = (await deps.store.listMemory(auth, business.id)).find((entry) => entry.source === source)
-          ?? await deps.store.createMemory(auth, business.id, { type: item.type!, title: clean(item.title, 300), content: clean(item.content), confidence: item.confidence ?? 1, source });
+        const title = clean(item.title, 300);
+        const existing = await deps.store.listMemory(auth, business.id);
+        // One answer can save the same fact twice (the Business Profile tool and a memory command): a memory with the
+        // same title in this Business is updated instead of duplicated.
+        const sameTitle = existing.find((entry) => entry.title.trim().toLocaleLowerCase() === title.toLocaleLowerCase());
+        const created = existing.find((entry) => entry.source === source)
+          ?? (sameTitle
+            ? await deps.store.updateMemory(auth, business.id, sameTitle.id, { type: item.type!, content: clean(item.content), confidence: item.confidence ?? 1 })
+            : await deps.store.createMemory(auth, business.id, { type: item.type!, title, content: clean(item.content), confidence: item.confidence ?? 1, source }));
         const card = `\`\`\`card:${clean(created.title, 300)}\n**${labels.type}:** ${created.type}\n**${labels.business}:** ${clean(business.name, 300)}\n**${labels.confidence}:** ${Math.round((created.confidence ?? 1) * 100)}%\n\n${clean(created.content)}\n\n[${labels.openMemory}](/settings/memory?business=${encodeURIComponent(business.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, businessId: business.id } };
       }

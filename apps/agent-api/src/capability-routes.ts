@@ -1,6 +1,8 @@
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
+import { AuthenticationError } from "./auth";
+import { isAdministrator } from "./admin-access";
 import { DEFAULT_CODE_MODEL_PROFILES, resolveEnabledModelProfileIds } from "./code-model-profiles";
 import { createCoreServices } from "./core-services";
 import { currentToolManifest } from "./code-tool-registry";
@@ -25,6 +27,7 @@ export interface CapabilityRouteDeps {
 export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityRouteDeps): void {
   const { agent, authProvider, discoverRuntimeMcpCapabilities, featureFlagService, mcpRuntimeCapabilities, workspaceStore } = deps;
   app.get<{ Querystring: { type?: string; domain?: string; callable?: string } }>("/capabilities", async (request) => {
+    await authProvider.authenticate(request);
     const callable = request.query.callable !== undefined ? request.query.callable === "true" : undefined;
     return defaultCapabilityRegistry.list({
       type: request.query.type as any,
@@ -37,6 +40,8 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
 
   app.get<{ Querystring: { slice?: string; companyId?: string; agentId?: string; includeRuntime?: string } }>("/capabilities/inspect", async (request) => {
     const auth = await authProvider.authenticate(request);
+    // The inspector is a developer and operator tool over the whole capability catalog and its risk policies.
+    if (!isAdministrator(auth)) throw new AuthenticationError("The Capability Inspector is limited to administrators.", 403, "ADMIN_REQUIRED");
     let resolutionContext;
     if (request.query.companyId) {
       const company = await workspaceStore.getCompany(auth, request.query.companyId).catch(() => undefined);

@@ -25,6 +25,7 @@ export interface ConnectionManagerProps {
   companies: Company[];
   initialConnection?: Connection | null;
   initialPairingCommand?: string;
+  initialPairingLink?: string;
   onChanged: () => Promise<void>;
   onRemoved: () => void;
 }
@@ -34,6 +35,7 @@ export function ConnectionManager({
   companies,
   initialConnection,
   initialPairingCommand = "",
+  initialPairingLink,
   onChanged,
   onRemoved,
 }: ConnectionManagerProps) {
@@ -44,6 +46,7 @@ export function ConnectionManager({
   const [message, setMessage] = useState("");
   const [token, setToken] = useState("");
   const [pairing, setPairing] = useState(initialPairingCommand);
+  const [pairingLink, setPairingLink] = useState<string | undefined>(initialPairingLink);
   const [inviteUrl, setInviteUrl] = useState("");
   const [draft, setDraft] = useState<Connection | null>(() => initialConnection ? { ...initialConnection, settings: initialConnection.settings ? { ...initialConnection.settings, access: { ...defaults().access, ...initialConnection.settings.access }, discord: { ...defaults().discord, ...initialConnection.settings.discord }, slack: { ...defaults().slack, ...initialConnection.settings.slack } } : defaults() } : null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -140,9 +143,10 @@ export function ConnectionManager({
   const replaceToken = (event: FormEvent) => {
     event.preventDefault();
     void run(t("integrationsPage.drawer.manager.general.updatingToken"), async () => {
-      const result = await api<{ pairingCommand: string }>(`/integrations/messaging/${connectionId}/token`, { method: "POST", body: JSON.stringify({ botToken: token }) });
+      const result = await api<{ pairingCommand: string; pairingLink?: string }>(`/integrations/messaging/${connectionId}/token`, { method: "POST", body: JSON.stringify({ botToken: token }) });
       setToken("");
       setPairing(result.pairingCommand);
+      setPairingLink(result.pairingLink);
       setMessage(t("integrationsPage.drawer.manager.general.tokenUpdatedMessage"));
     });
   };
@@ -167,8 +171,9 @@ export function ConnectionManager({
   const activeAgentId = activeSession?.activeAgentId || draft.activeAgentId;
 
   const createPairing = () => run(t("integrationsPage.drawer.manager.access.creatingPairing"), async () => {
-    const result = await api<{ pairingCommand: string }>(`/integrations/messaging/${connectionId}/pairing`, { method: "POST" });
+    const result = await api<{ pairingCommand: string; pairingLink?: string }>(`/integrations/messaging/${connectionId}/pairing`, { method: "POST" });
     setPairing(result.pairingCommand);
+    setPairingLink(result.pairingLink);
     setMessage(t("integrationsPage.drawer.manager.access.pairingCreatedMessage"));
   });
 
@@ -248,6 +253,7 @@ export function ConnectionManager({
           data={data}
           connectionId={connectionId}
           pairing={pairing}
+          pairingLink={pairingLink}
           inviteUrl={inviteUrl}
           qr={qr}
           usersText={usersText}

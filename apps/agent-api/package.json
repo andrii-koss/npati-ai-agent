@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
-    "@fastify/static": "^10.1.7",
+    "@fastify/static": "^10.1.12",
     "@npati/agent": "*",
     "@npati/hub-connector": "*",
     "@npati/memory": "*",
@@ -19,6 +19,7 @@
     "@npati/shared": "*",
     "@npati/web-research": "*",
     "@npati/workspace": "*",
+    "@simplewebauthn/server": "14.1.0",
     "@whiskeysockets/baileys": "^7.0.0-rc14",
     "better-sqlite3": "12.11.1",
     "exceljs": "^4.4.0",

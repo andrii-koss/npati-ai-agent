@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { WorkspaceAccessError, WorkspaceNotFoundError, type WorkspaceStore } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError, type AuthContext, type ProjectCheckpoint, type WorkspaceStore } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectFileError, type ProjectWorkspace } from "./project-workspace";
 import { ProjectMediaError, type ProjectMediaService } from "./project-media-service";
@@ -50,6 +50,10 @@ export function registerProjectFileRoutes(
   auth: AuthProvider,
   mediaService?: ProjectMediaService,
   projectService?: ProjectService,
+  checkpoints?: {
+    listCheckpoints(ctx: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectCheckpoint[]>;
+    readCheckpointFile(ctx: AuthContext, companyId: string, projectId: string, checkpointId: string, file: string): Promise<{ content: string | null }>;
+  },
 ) {
   app.get<{ Params: Params; Querystring: Query }>("/companies/:companyId/projects/:projectId/files/tree", async (request, reply) => {
     try {
@@ -62,6 +66,29 @@ export function registerProjectFileRoutes(
   app.get<{ Params: Params; Querystring: Query }>("/companies/:companyId/projects/:projectId/files/read", async (request, reply) => {
     try { return await workspace.readFile(await authorize(auth, request), request.params.companyId, request.params.projectId, request.query.path ?? "", request.query.workspaceId); }
     catch (error) { return fail(reply, error); }
+  });
+
+  /**
+   * The file as it was before an agent run, so the chat viewer can mark the lines the run changed. Only a file the
+   * user may read now is served (the same read as files/read), from the run's first automatic checkpoint.
+   */
+  app.get<{ Params: Params; Querystring: Query & { runId?: string } }>("/companies/:companyId/projects/:projectId/files/before-run", async (request, reply) => {
+    try {
+      if (!checkpoints) return reply.code(404).send({ error: { code: "checkpoints_unavailable", message: "Checkpoints are not available" } });
+      const runId = request.query.runId ?? "";
+      if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(runId)) return reply.code(400).send({ error: { code: "invalid_run_id", message: "A run id is required" } });
+      const context = await authorize(auth, request);
+      const { companyId, projectId } = request.params;
+      const filePath = request.query.path ?? "";
+      await workspace.readFile(context, companyId, projectId, filePath, request.query.workspaceId);
+      const runCheckpoints = (await checkpoints.listCheckpoints(context, companyId, projectId, 200))
+        .filter(checkpoint => checkpoint.runId === runId && checkpoint.trigger === "pre_run" && checkpoint.commitHash);
+      // The store returns createdAt as a Date; the type says string.
+      const first = runCheckpoints.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+      if (!first) return reply.code(404).send({ error: { code: "checkpoint_not_found", message: "No checkpoint for this run" } });
+      const before = await checkpoints.readCheckpointFile(context, companyId, projectId, first.id, filePath);
+      return { content: before.content, checkpointId: first.id };
+    } catch (error) { return fail(reply, error); }
   });
 
   app.get<{ Params: Params; Querystring: Query }>("/companies/:companyId/projects/:projectId/files/search", async (request, reply) => {
@@ -191,13 +218,30 @@ export function registerProjectFileRoutes(
       } catch (error) { return fail(reply, error); }
     });
 
-    // Scoped Media stream for Live Preview & Website Visitors
+    /**
+     * Project media for the signed-in owner (editor, agent tools). Security audit 2026-11-24, L7: this used to answer
+     * anyone who knew a project id, drafts included. Generated sites never depend on it: uploads are mirrored into the
+     * project's own `public/` directory, which the Preview and the published site serve themselves. The caller now needs
+     * the Authorization header (or a stream ticket for elements that cannot send it) and access to the project.
+     */
     const handleMediaStream = async (request: FastifyRequest<{ Params: { projectId: string; "*": string } }>, reply: FastifyReply) => {
       try {
         const { projectId } = request.params;
         const relativePath = request.params["*"];
+        try { await auth.authenticate(request); }
+        catch (error) {
+          const status = Number((error as { status?: number }).status) || 401;
+          return reply.code(status).send({ error: { code: (error as { code?: string }).code ?? "UNAUTHORIZED", message: "Sign in to open project media" } });
+        }
         if (!relativePath) {
           return reply.code(400).send({ error: { code: "invalid_path", message: "Media path is required" } });
+        }
+        // The id names a directory below; nothing but an id-shaped value may reach the filesystem lookup.
+        if (!/^[A-Za-z0-9_-]{1,100}$/.test(projectId)) {
+          return reply.code(404).send({ error: { code: "project_not_found", message: "Project not found" } });
+        }
+        if (!projectService) {
+          return reply.code(503).send({ error: { code: "project_state_unavailable", message: "Project access cannot be verified" } });
         }
 
         let companyId: string | undefined;
@@ -292,6 +336,9 @@ export function registerProjectFileRoutes(
         if (projectStatus === "soft_deleted" || projectStatus === "purging" || projectStatus === "deleted") {
           return reply.code(404).send({ error: { code: "project_deleted", message: "Project media is unavailable because the project is deleted" } });
         }
+        // L7: the caller must be allowed to read this very project (workspace, company and project scope).
+        try { await authorize(auth, request, companyId, projectId, projectService); }
+        catch { return reply.code(404).send({ error: { code: "project_not_found", message: "Project not found" } }); }
 
         const { stream, mimeType } = await mediaService.getMedia(companyId, projectId, relativePath);
         const res = reply

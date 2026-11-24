@@ -2,7 +2,8 @@ import { Fragment, useRef, useState, type ReactNode } from "react";
 
 // A bare URL ends at a quote or backtick: `src="https://x/p.js"` and `https://x/` in inline code linked to "p.js%22" and
 // "x/%60" (V6 step 17). Neither character is valid unencoded in a URL.
-export const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()"`]+))/g;
+// Group 6 is inline code (`app.js`): agent replies showed the raw backticks. A URL in backticks stays a link.
+export const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()"`]+)|`(?!https?:\/\/)([^`\n]+)`)/g;
 export const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 export const genericSourceLabel = /^(?:джерело|джерела|source|sources|посилання)$/iu;
 export const sourceHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:джерела|sources)(?:\*\*)?(?:\s*\(?\d*\)?)?:?$/iu;
@@ -239,6 +240,8 @@ export function renderInlineMarkdown(
           match[5]
         )
       );
+    } else if (match[6]) {
+      nodes.push(<code key={key} className="chat-inline-code">{match[6]}</code>);
     }
     cursor = inlineMarkdown.lastIndex;
   }

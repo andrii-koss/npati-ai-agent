@@ -2,7 +2,7 @@ import { parseExactHttpOrigin } from "./project-preview-origin";
 export { parseExactHttpOrigin } from "./project-preview-origin";
 import { PreviewTokenPayload, ActivePreviewSession, PreviewOriginRegistrar } from "./project-preview-session-types";
 export { PreviewTokenPayload, ActivePreviewSession, PreviewOriginRegistrar } from "./project-preview-session-types";
-import { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue, previewSameSite, isIsolatedPreviewHost } from "./project-preview-cookies";
+import { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue, previewSameSite, isIsolatedPreviewHost, previewHostAllowed } from "./project-preview-cookies";
 export { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue } from "./project-preview-cookies";
 import { validateStaticProjectResources } from "./static-project-validation";
 import { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
@@ -10,7 +10,7 @@ export { detectProjectStack, extractPortFromCommand } from "./project-preview-st
 export type { DetectedStack } from "./project-preview-stack";
 import { canReusePreviewSession, reuseDevelopmentPreview } from "./project-preview-reuse";
 import { previewBrowserBridge, rewritePreviewSsrResources } from "./preview-browser-bridge";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthContext, Project, ProjectStatus, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
@@ -125,8 +125,9 @@ export class ProjectPreviewService {
     if (!body || !signature) {
       throw new PreviewError("invalid_token", "Invalid preview token structure", 401);
     }
-    const expected = createHmac("sha256", this.secret).update(body).digest("base64url");
-    if (signature !== expected) {
+    const expected = Buffer.from(createHmac("sha256", this.secret).update(body).digest("base64url"));
+    const provided = Buffer.from(signature);
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
       throw new PreviewError("invalid_token", "Preview token signature verification failed", 403);
     }
     let payload: PreviewTokenPayload;
@@ -606,6 +607,13 @@ export class ProjectPreviewService {
     reply: FastifyReply,
   ) {
     const { companyId, projectId } = request.params;
+    // H1: never run project JavaScript on the app's origin, where it could read the stored session tokens.
+    if (!previewHostAllowed(request.headers.host)) {
+      return reply.code(421).header("cache-control", "no-store").type("text/html").send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview needs its own origin</title></head>
+        <body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem"><h1>Preview needs its own origin</h1>
+        <p>A Preview runs the project's own code, so it is served only from an isolated host such as <code>&lt;project&gt;.preview.localhost</code>
+        or the domain set in <code>NPATI_PREVIEW_ORIGIN</code> (for example <code>https://{project}.preview.example.com</code>).</p></body></html>`);
+    }
     const cookieName = previewAuthCookieName(projectId);
     const token = request.query.token
       || (request.headers.authorization?.replace(/^Bearer\s+/i, ""))
@@ -615,33 +623,11 @@ export class ProjectPreviewService {
     try {
       tokenPayload = this.validateTokenForRequest(token, companyId, projectId);
     } catch (error) {
-      if (error instanceof PreviewError && error.code === "token_expired") {
-        try {
-          const [body, signature] = (token || "").split(".");
-          if (body && signature) {
-            const expected = createHmac("sha256", this.secret).update(body).digest("base64url");
-            if (signature === expected) {
-              const rawPayload = JSON.parse(base64UrlDecode(body)) as PreviewTokenPayload;
-              if (rawPayload.companyId === companyId && rawPayload.projectId === projectId) {
-                tokenPayload = rawPayload;
-                const cookiePath = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
-                const fresh = this.generateToken({
-                  workspaceId: rawPayload.workspaceId,
-                  userId: rawPayload.userId,
-                  companyId,
-                  projectId,
-                  sandboxId: rawPayload.sandboxId || "default",
-                });
-                reply.header("Set-Cookie", `${cookieName}=${fresh.token}; Path=${cookiePath}; HttpOnly; ${previewSameSite(isIsolatedPreviewHost(request.headers.host)).join("; ")}; Max-Age=86400`);
-              }
-            }
-          }
-        } catch { }
-      }
-      if (!tokenPayload) {
-        const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
-        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
-      }
+      // M3: an expired token is refused. It used to be renewed here whenever its signature was valid, which made every
+      // preview link that ever leaked (history, Referer, a pasted chat message) valid forever. The app asks the API for
+      // a fresh link instead, which re-checks the signed-in user's access.
+      const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
+      return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
     }
     const scope = { workspaceId: tokenPayload.workspaceId ?? this.sessions.get(projectId)?.workspaceId ?? "", userId: tokenPayload.userId, permissions: ["workspace:read"] };
     try {

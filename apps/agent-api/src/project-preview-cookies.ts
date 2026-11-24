@@ -51,6 +51,18 @@ export function isIsolatedPreviewHost(host: string | undefined): boolean {
   const configured = previewOriginConfig();
   return !!configured && !!host && configured.hostPattern.test(host);
 }
+/**
+ * Security audit 2026-11-24, H1: a Preview runs the project's own JavaScript. Served from the app's origin it could read
+ * the access and refresh tokens the app keeps in localStorage, and a preview link sent to another user handed their
+ * session to whoever wrote the project. The proxy therefore answers only on an isolated Preview host.
+ *
+ * A self-hosted owner who cannot provide a wildcard Preview domain may accept that risk explicitly with
+ * NPATI_PREVIEW_ALLOW_APP_ORIGIN=true; an NPATI-hosted (multi-tenant) installation never may.
+ */
+export function previewHostAllowed(host: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (isIsolatedPreviewHost(host)) return true;
+  return env.NPATI_PREVIEW_ALLOW_APP_ORIGIN === "true" && env.NPATI_DEPLOYMENT_TYPE !== "npati_hosted";
+}
 export function filterIncomingCookies(
   rawCookieHeader: string | undefined,
   projectPrefix: string,

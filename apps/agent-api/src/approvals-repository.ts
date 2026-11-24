@@ -255,6 +255,20 @@ export class CompanyApprovalsRepository {
   }
 
   /**
+   * Whether this person approved a database change that this run (or one of its repair passes) already used. Only the
+   * person's own approvals count, and only approved-and-consumed ones: a pending, rejected or expired request never does.
+   */
+  async hasApprovedDataChangeInRun(ctx: AuthContext, companyId: string, runId: string): Promise<boolean> {
+    if (!runId) return false;
+    const result = await this.pool.query(`SELECT 1 FROM company_approvals
+      WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3 AND run_id IS NOT NULL
+        AND split_part(run_id, ':', 1)=split_part($4, ':', 1)
+        AND tool_name LIKE 'code.data.%' AND status='approved' AND consumed_at IS NOT NULL
+      LIMIT 1`, [ctx.workspaceId, companyId, ctx.userId, runId]);
+    return Boolean(result.rowCount);
+  }
+
+  /**
    * C5a (additive): approvals whose audience is a role, visible to another holder of that role. Requests
    * with the default `self` audience never appear here, so the existing self-only paths are unchanged.
    */

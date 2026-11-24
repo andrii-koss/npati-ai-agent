@@ -9,6 +9,7 @@ import type {
   EmailPriority,
 } from "./email-inbox-types";
 import type { InboundEmailPayload } from "./email-ai-processor-types";
+import { asAccount } from "./ai-tenant-providers";
 
 export interface GenerateDraftResponseOptions {
   repo: EmailInboxRepository;
@@ -45,7 +46,12 @@ export interface GeneratedDraftResult {
   attachmentAnalysisPerformed: boolean;
 }
 
-export async function generateEmailDraftResponse(
+/** Drafts run as the mailbox owner's account: on a hosted installation they use that account's own AI key. */
+export async function generateEmailDraftResponse(options: GenerateDraftResponseOptions): Promise<GeneratedDraftResult> {
+  return asAccount(options.ctx, () => generateEmailDraftResponseInScope(options));
+}
+
+async function generateEmailDraftResponseInScope(
   options: GenerateDraftResponseOptions
 ): Promise<GeneratedDraftResult> {
   const {

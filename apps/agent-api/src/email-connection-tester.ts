@@ -2,6 +2,7 @@ import * as net from "node:net";
 import * as tls from "node:tls";
 import type { ConnectionTestResult, ImapConfig, SmtpConfig } from "./email-inbox-types";
 import { ImapEmailTransport, SmtpEmailTransport } from "./email-transport";
+import { resolveMailDestination } from "./email-destination-policy";
 
 export class EmailConnectionTester {
   /**
@@ -13,6 +14,10 @@ export class EmailConnectionTester {
     if (!host || !port) {
       return { ok: false, message: "IMAP host and port must be specified.", latencyMs: 0 };
     }
+    // Audit M2: never probe private/internal destinations or non-mail ports.
+    let address: string;
+    try { address = await resolveMailDestination(host, port); }
+    catch (error) { return { ok: false, message: `IMAP destination refused: ${error instanceof Error ? error.message : String(error)}`, latencyMs: 0 }; }
 
     const start = Date.now();
     return new Promise((resolve) => {
@@ -30,8 +35,8 @@ export class EmailConnectionTester {
       try {
         const isSecure = config.secure !== false && (port === 993 || config.tls);
         const socket = isSecure
-          ? tls.connect({ host, port, rejectUnauthorized: false })
-          : net.connect({ host, port });
+          ? tls.connect({ host: address, port, servername: net.isIP(host) ? undefined : host, rejectUnauthorized: false })
+          : net.connect({ host: address, port });
 
         socket.on("connect", () => {
           clearTimeout(timer);
@@ -76,6 +81,10 @@ export class EmailConnectionTester {
     if (!host || !port) {
       return { ok: false, message: "SMTP host and port must be specified.", latencyMs: 0 };
     }
+    // Audit M2: never probe private/internal destinations or non-mail ports.
+    let address: string;
+    try { address = await resolveMailDestination(host, port); }
+    catch (error) { return { ok: false, message: `SMTP destination refused: ${error instanceof Error ? error.message : String(error)}`, latencyMs: 0 }; }
 
     const start = Date.now();
     return new Promise((resolve) => {
@@ -93,8 +102,8 @@ export class EmailConnectionTester {
       try {
         const isSecure = config.secure !== false && (port === 465 || (config as any).tls);
         const socket = isSecure
-          ? tls.connect({ host, port, rejectUnauthorized: false })
-          : net.connect({ host, port });
+          ? tls.connect({ host: address, port, servername: net.isIP(host) ? undefined : host, rejectUnauthorized: false })
+          : net.connect({ host: address, port });
 
         socket.on("connect", () => {
           clearTimeout(timer);

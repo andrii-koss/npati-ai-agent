@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure, runnerFailure } from "./sandbox-runner-diagnostics";
 import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
-import { InMemoryWorkspaceStore, PostgresWorkspaceStore } from "@npati/workspace";
+import { InMemoryWorkspaceStore, PostgresWorkspaceStore, isInsecureDefaultSecret } from "@npati/workspace";
 import { resolveRunnerStore } from "./sandbox-runner-store";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
 import { FeatureFlagService } from "./feature-flags";
@@ -113,6 +113,8 @@ const runnerMountGate = new RunnerMountGate({
 assertProjectRuntimeProvider("isolated");
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
+// The compose default is public; a runner that accepted it would execute commands for anyone on its network (audit C1).
+if (isInsecureDefaultSecret(secret)) throw new Error("NPATI_SANDBOX_RUNNER_SECRET is a publicly known default; generate a random value");
 if ((process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote") === "remote" && process.env.NPATI_SANDBOX_RUNNER_ISOLATED_HOST !== "true") throw new Error("Remote sandbox runner requires an isolated host");
 /**
  * C4b: enforcement readiness. `NPATI_SANDBOX_EGRESS_ENFORCED` is advisory only — the provider asks this

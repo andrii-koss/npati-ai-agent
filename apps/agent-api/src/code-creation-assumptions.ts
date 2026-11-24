@@ -19,6 +19,12 @@ const notices: Record<CompanyChatLanguage, string> = {
   hi: "इस छोटे अनुरोध के लिए धारणाएँ: एक बुनियादी कार्यशील वेबसाइट। आपके द्वारा न दिए गए जनरेट किए गए नाम, पाठ और व्यावसायिक विवरण उदाहरण हैं जिन्हें अपने डेटा से बदलना है।",
 };
 
+/** The notice as the closing note of the final reply: the result comes first, the assumption is a quoted aside. */
+export function assumptionsNote(notice: string): string {
+  const split = notice.match(/^([^:：]+[:：])\s*(.+)$/su);
+  return split ? `> **${split[1]}** ${split[2]}` : `> ${notice}`;
+}
+
 /** Only the creation lifecycle uses this notice; it never grants permission to expand an edit. */
 export function briefCreationAssumptions(message: string, language: CompanyChatLanguage = "en"): string | null {
   const brief = message.trim();

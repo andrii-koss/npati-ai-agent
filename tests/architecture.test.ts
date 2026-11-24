@@ -39,7 +39,9 @@ describe("architecture boundaries", () => {
     const dokployCompose = readFileSync(join(process.cwd(), "docker-compose.dokploy.yml"), "utf8");
     const supervisor = readFileSync(join(process.cwd(), "services", "crawler", "supervisord.conf"), "utf8");
 
-    expect(compose).toContain("REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:-npati-local-internal-crawler-secret}");
+    // Security audit 2026-11-24 (C1): the local compose requires the secret instead of a committed default.
+    expect(compose).toContain("REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:?");
+    expect(compose).not.toContain("npati-local-internal-crawler-secret");
     expect(dokployCompose).toContain("REDIS_PASSWORD: ${CRAWL4AI_SECRET_KEY:?CRAWL4AI_SECRET_KEY is required}");
     expect(dokployCompose).toContain("image: npati-agent-crawler:${CRAWL4AI_VERSION:-0.9.2}");
     expect(supervisor).toMatch(/^user=root$/m);

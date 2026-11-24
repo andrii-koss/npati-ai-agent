@@ -1,4 +1,5 @@
 import { buildApp } from "../apps/agent-api/src/app";
+import { LocalDevAuthProvider } from "../apps/agent-api/src/auth";
 import { AIPreferencesStore } from "../apps/agent-api/src/ai-preferences";
 import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
@@ -24,8 +25,9 @@ afterEach(async () => {
 });
 
 describe("Agent API", () => {
-  it("exposes OmniRoute resilience read-only with tenant permission enforcement", async () => {
-    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read"] };
+  it("exposes OmniRoute resilience read-only to administrators only", async () => {
+    // The breakers and lockouts cover every account's connections, so ordinary accounts are refused.
+    let active: AuthContext = { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "admin:all"] };
     const authProvider: AuthProvider = { authenticate: async () => ({ ...active, permissions: [...active.permissions] }) };
     const aiEngine = {
       chat: async () => ({ content: "ok" }), stream: async function* () { yield "ok"; },
@@ -42,6 +44,8 @@ describe("Agent API", () => {
     const response = await app.inject({ method: "GET", url: "/ai/resilience" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ source: "omniroute", runtime: { status: "healthy" } });
+    active = { ...active, permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    expect((await app.inject({ method: "GET", url: "/ai/resilience" })).statusCode).toBe(403);
     active = { ...active, permissions: [] };
     expect((await app.inject({ method: "GET", url: "/ai/resilience" })).statusCode).toBe(403);
   });
@@ -630,8 +634,22 @@ describe("Agent API", () => {
     expect(editedSheet.getRow(3).values).toEqual([undefined, "PDF capture", "Mark", "Запланувати"]);
   });
 
+  // The component report is for administrators; everyone else learns only whether the service is up.
+  const healthAdmin = () => new LocalDevAuthProvider({ permissions: ["workspace:read", "admin:all"] });
+
+  it("shows only the overall status to anyone who is not an administrator", async () => {
+    const app = buildApp({ authProvider: { authenticate: async () => { throw Object.assign(new Error("unauthenticated"), { statusCode: 401 }); } } as never });
+    apps.push(app);
+    const response = await app.inject({ method: "GET", url: "/health" });
+    expect(response.statusCode).toBe(200);
+    expect(Object.keys(response.json()).sort()).toEqual(["status", "timestamp"]);
+    const ordinary = buildApp({ authProvider: new LocalDevAuthProvider() });
+    apps.push(ordinary);
+    expect(Object.keys((await ordinary.inject({ method: "GET", url: "/health" })).json()).sort()).toEqual(["status", "timestamp"]);
+  });
+
   it("starts and exposes aggregate health", async () => {
-    const app = buildApp();
+    const app = buildApp({ authProvider: healthAdmin() });
     apps.push(app);
     const liveness = await app.inject({ method: "GET", url: "/health/live" });
     expect(liveness.statusCode).toBe(200);
@@ -646,6 +664,7 @@ describe("Agent API", () => {
 
   it("reports probed Redis and NPATI Core Backend health instead of static operational values", async () => {
     const app = buildApp({
+      authProvider: healthAdmin(),
       redisHealthCheck: async () => ({ status: "ok", detail: "Redis PING succeeded" }),
       coreBackendHealthCheck: async () => ({
         status: "unavailable",
@@ -676,6 +695,7 @@ describe("Agent API", () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
     const app = buildApp({
+      authProvider: healthAdmin(),
       npatiBackendUrl: "https://www.npati.test",
       redisHealthCheck: async () => ({ status: "not_configured" }),
     });

@@ -31,6 +31,10 @@ import { CompanyToolRuntime } from "../apps/agent-api/src/company-tool-runtime";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 import type { AIEngine } from "@npati/omniroute-adapter";
 
+// These suites test the proxy mechanics on the app host; host isolation itself (audit H1) is pinned in
+// tests/security-audit-h1-preview-isolation.test.ts. Self-hosted opt-in, never honoured on npati_hosted.
+process.env.NPATI_PREVIEW_ALLOW_APP_ORIGIN = "true";
+
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));

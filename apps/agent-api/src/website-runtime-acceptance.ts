@@ -22,7 +22,7 @@ function browserFailureMessage(prompt: string, diagnostics: unknown[], brokenLin
   }), ...findings.map((finding) => finding.message), ...brokenLinks.map((link) => String((link as { url?: unknown; href?: unknown })?.url ?? (link as { href?: unknown })?.href ?? link))].map((line) => "- " + line.split("\n")[0]!.slice(0, 200));
   const uk = resolveCodingConversationLanguage(prompt) === "uk";
   const head = uk ? "Проєкт зібрався, але під час відкриття в браузері є помилки, які не вдалося виправити автоматично:" : "The project builds, but opening it in a browser shows errors that could not be fixed automatically:";
-  return [head, ...details].join("\n");
+  return ["**" + head + "**", ...details].join("\n");
 }
 
 /** A successful build cannot certify browser hydration or local navigation. Reference runs already have this gate. */

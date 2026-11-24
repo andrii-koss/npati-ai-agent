@@ -108,3 +108,21 @@ describe("chat mutation progress", () => {
     }
   });
 });
+
+describe("progress links follow the installation the user is on", () => {
+  it.each([
+    ["https://ai.npati.com", "ai.npati.com"],
+    ["https://agent.example.org", "agent.example.org"],
+    ["http://localhost:3000", "localhost:3000"],
+  ])("names %s pages, never a fixed host", (origin, host) => {
+    const previous = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { location: { origin } };
+    try {
+      const [target] = mutationProgressTargets("Додай ціль для бізнесу", "none");
+      expect(target).toMatchObject({ url: `${origin}/settings/goals`, domain: host });
+      expect(mutationProgressTargets("hello", "company")[0]).toMatchObject({ url: `${origin}/settings/company`, domain: host });
+    } finally {
+      (globalThis as { window?: unknown }).window = previous;
+    }
+  });
+});

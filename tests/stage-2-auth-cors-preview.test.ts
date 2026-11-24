@@ -8,6 +8,10 @@ import { ProjectApiGatewayService } from "../apps/agent-api/src/data-studio/gate
 import { MockEmailProvider, UnconfiguredEmailProvider } from "../apps/agent-api/src/data-studio/email-provider";
 import { DataStudioError } from "../apps/agent-api/src/data-studio/identifier";
 
+// These suites test the proxy mechanics on the app host; host isolation itself (audit H1) is pinned in
+// tests/security-audit-h1-preview-isolation.test.ts. Self-hosted opt-in, never honoured on npati_hosted.
+process.env.NPATI_PREVIEW_ALLOW_APP_ORIGIN = "true";
+
 describe("Stage 2: NPATI Website Integration - Auth, CORS & Preview Proxy", () => {
   describe("1. Exact Origin & CORS Synchronization", () => {
     it("parseExactHttpOrigin validates exact HTTP(S) origins and rejects wildcards / malformed origins", () => {

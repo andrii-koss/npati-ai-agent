@@ -7,6 +7,8 @@ export interface ConnectionAccessSectionProps {
   data: ManageData;
   connectionId: string;
   pairing: string;
+  /** Audit L8: server-issued t.me deep link with an unguessable start token (preferred over the 6-digit code). */
+  pairingLink?: string;
   inviteUrl: string;
   qr: string;
   usersText: string;
@@ -27,6 +29,7 @@ export function ConnectionAccessSection({
   data,
   connectionId,
   pairing,
+  pairingLink,
   inviteUrl,
   qr,
   usersText,
@@ -42,7 +45,7 @@ export function ConnectionAccessSection({
 }: ConnectionAccessSectionProps) {
   const botUrl = draft.botUsername ? `https://t.me/${draft.botUsername.replace(/^@/, "")}` : "";
   const pairingCode = /^\/connect\s+(\d{6})/i.exec(pairing)?.[1];
-  const deepLink = pairingCode && botUrl ? `${botUrl}?start=connect_${pairingCode}` : botUrl;
+  const deepLink = pairingLink || (pairingCode && botUrl ? `${botUrl}?start=connect_${pairingCode}` : botUrl);
 
   if (draft.channel === "slack") {
     return (

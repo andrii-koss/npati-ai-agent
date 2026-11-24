@@ -495,6 +495,9 @@ describe("security-gate: C9 self-review — a review fix is re-verified, a revie
     expect(result.status).toBe("completed");
     expect(result.reason).toBe("completed");
     expect(result.selfReview?.status).not.toBe("repaired");
+    // Not certified, but not reported as a failed fix either: the code was changed for these findings.
+    expect(result.message).toContain("the agent changed the code to fix them (not re-checked automatically)");
+    expect(result.message).not.toContain("issues that were not fixed");
   });
 
   it("does not run an extra verification when the review changed nothing", async () => {

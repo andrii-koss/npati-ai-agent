@@ -25,6 +25,8 @@ services:
       # apps get no PROJECT_API_URL/PROJECT_PUBLISHABLE_KEY and the SDK is not vendored.
       NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
       NPATI_AUTH_STRICT: "true"
+      # The API sits behind one reverse proxy (Dokploy Traefik); only that hop may set X-Forwarded-For (audit L2).
+      NPATI_TRUST_PROXY: ${NPATI_TRUST_PROXY:-1}
       NPATI_ALLOW_LEGACY_PASSWORD_AUTH: "false"
       NPATI_BACKEND_URL: ${NPATI_BACKEND_URL:?NPATI_BACKEND_URL is required}
       NPATI_WEB_ORIGIN: ${NPATI_WEB_ORIGIN:?NPATI_WEB_ORIGIN is required}
@@ -33,6 +35,7 @@ services:
       NPATI_AGENT_VERSION: ${NPATI_AGENT_VERSION:-0.1.0}
       NPATI_TERMINAL_POLICY_LOG: ${NPATI_TERMINAL_POLICY_LOG:-true}
       NPATI_DEPLOYMENT_TYPE: ${NPATI_DEPLOYMENT_TYPE:-self_hosted}
+      NPATI_AI_PROVIDER_ISOLATION: ${NPATI_AI_PROVIDER_ISOLATION:-}
       NPATI_HOSTED_REGISTRATION_TOKEN: ${NPATI_HOSTED_REGISTRATION_TOKEN:-}
       NPATI_ENCRYPTION_KEY: ${NPATI_ENCRYPTION_KEY:?NPATI_ENCRYPTION_KEY is required}
       NPATI_REMOTE_ACCESS_TOKEN_SECRET: ${NPATI_REMOTE_ACCESS_TOKEN_SECRET:?NPATI_REMOTE_ACCESS_TOKEN_SECRET is required}
@@ -84,7 +87,7 @@ services:
       NPATI_DATA_BACKUP_DISABLED: ${NPATI_DATA_BACKUP_DISABLED:-}
       NPATI_PROMOTE_DATA_MAX_ROWS: ${NPATI_PROMOTE_DATA_MAX_ROWS:-500}
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${NPATI_REDIS_PASSWORD:?NPATI_REDIS_PASSWORD is required}@redis:6379
       # Domains can attach the API to a shared proxy network. Avoid the generic
       # "minio" alias there: always address this Compose project's own storage.
       MINIO_ENDPOINT: ${COMPOSE_PROJECT_NAME:-npati-agent}-minio-internal
@@ -108,6 +111,7 @@ services:
       - "127.0.0.1:${NPATI_AGENT_PUBLISHED_PORT:-3001}:3001"
     volumes:
       - agent-data:/app/data
+      - browser-uploads:/app/data/browser-uploads
       - postgres-projects-snapshots:/app/project-snapshots
     depends_on:
       omniroute:
@@ -130,7 +134,7 @@ services:
       timeout: 8s
       retries: 10
       start_period: 300s
-    networks: [npati-agent, npati-sandbox-control, npati-projects-db]
+    networks: [npati-agent, npati-sandbox-control, npati-projects-db, npati-browser]
 
   company-worker:
     build:
@@ -147,6 +151,7 @@ services:
       NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD: ""
     volumes:
       - agent-data:/app/data
+      - browser-uploads:/app/data/browser-uploads
     depends_on:
       agent-api:
         condition: service_healthy
@@ -160,7 +165,7 @@ services:
       timeout: 8s
       retries: 8
       start_period: 30s
-    networks: [npati-agent, npati-sandbox-control]
+    networks: [npati-agent, npati-sandbox-control, npati-browser]
 
   sandbox-runner:
     build:
@@ -272,7 +277,7 @@ services:
       BROWSER_USE_MODEL: ${BROWSER_USE_MODEL:-bu-2-0}
     volumes:
       - browser-use-state:/state
-      - agent-data:/app/data:ro
+      - browser-uploads:/app/data/browser-uploads:ro
     expose:
       - 8765
     healthcheck:
@@ -287,7 +292,8 @@ services:
       timeout: 8s
       retries: 8
       start_period: 30s
-    networks: [npati-agent]
+    # Not on npati-agent: a page must not reach Redis, MinIO, OmniRoute or Postgres (audit H2).
+    networks: [npati-browser]
 
   omniroute:
     image: docker.io/diegosouzapw/omniroute:3.8.52@sha256:b08a12e876baa8a5ccadd1ebbe346fe7267dba3b1c9f4fd6bb02070fae41ab6c
@@ -300,9 +306,12 @@ services:
       DASHBOARD_PORT: 20128
       API_PORT: 20129
       API_HOST: 0.0.0.0
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${NPATI_REDIS_PASSWORD:?NPATI_REDIS_PASSWORD is required}@redis:6379
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:?OMNIROUTE_API_KEY is required}
       OMNIROUTE_API_KEY_ID: env-key
+      # Never answer a request whose key ran out of credit with another provider's model (on a hosted installation that
+      # would be another account's or the platform's key); the user gets the provider's error instead.
+      OMNIROUTE_EMERGENCY_FALLBACK: ${OMNIROUTE_EMERGENCY_FALLBACK:-false}
       # Every /v1 caller must present OMNIROUTE_API_KEY (the 3.8.52 image default, stated so a rollback keeps it).
       REQUIRE_API_KEY: "true"
       # Never resume a cut stream after a tool call was emitted, should mid-stream continuation ever be enabled.
@@ -354,7 +363,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    command: ["sh", "-c", "exec redis-server --save 60 1 --loglevel warning --requirepass \"$$NPATI_REDIS_PASSWORD\""]
+    environment:
+      NPATI_REDIS_PASSWORD: ${NPATI_REDIS_PASSWORD:?NPATI_REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${NPATI_REDIS_PASSWORD:?NPATI_REDIS_PASSWORD is required}
     volumes:
       - redis-data:/data
     expose:
@@ -405,6 +417,7 @@ services:
     networks: [npati-agent]
 
 networks:
+  npati-browser:
   npati-projects-db:
     internal: true
   npati-agent:
@@ -413,6 +426,7 @@ networks:
   npati-sandbox-egress:
 
 volumes:
+  browser-uploads:
   project-runtime-workspaces:
   project-runtime-state:
   agent-data:

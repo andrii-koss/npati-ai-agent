@@ -694,4 +694,32 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+
+    const pairingLinkMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='099_messaging_pairing_link'");
+    if (!pairingLinkMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('099_messaging_pairing_link'))");
+        const { runMigration099 } = await import("./migration-099");
+        await runMigration099(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('099_messaging_pairing_link') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+
+    const passkeyMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='100_passkeys_step_up'");
+    if (!passkeyMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('100_passkeys_step_up'))");
+        const { runMigration100 } = await import("./migration-100");
+        await runMigration100(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('100_passkeys_step_up') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
 }

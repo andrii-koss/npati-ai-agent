@@ -402,10 +402,14 @@ export class OmniRouteMarketplace {
     return normalizeModels(provider, rawModels, new Set(addedModelIds));
   }
 
-  async connect(providerId: string, input: ProviderConnectInput) {
+  /**
+   * `ownedBy`: on a hosted installation every account adds its own connection next to other accounts' connections of
+   * the same provider; the label names the owner in OmniRoute. Without it a provider has one shared connection.
+   */
+  async connect(providerId: string, input: ProviderConnectInput, options: { ownedBy?: string } = {}) {
     const provider = await this.provider(providerId);
     if (!provider.connectable) throw new OmniRouteError(provider.availabilityReason ?? "This registry entry cannot be connected", 400, "PROVIDER_SETUP_REQUIRED");
-    if (provider.connections.length > 0) throw new OmniRouteError("Provider is already configured", 409, "ALREADY_CONNECTED");
+    if (!options.ownedBy && provider.connections.length > 0) throw new OmniRouteError("Provider is already configured", 409, "ALREADY_CONNECTED");
     if (provider.authType === "oauth") throw new OmniRouteError("Use the OAuth connection flow", 400, "OAUTH_REQUIRED");
     const credential = input.apiKey?.trim();
     if (!provider.credentialOptional && !credential) throw new OmniRouteError("A credential is required", 400, "CREDENTIAL_REQUIRED");
@@ -433,7 +437,7 @@ export class OmniRouteMarketplace {
       method: "POST",
       body: JSON.stringify({
         provider: providerId,
-        name: input.name?.trim() || "NPATI",
+        name: options.ownedBy ? `NPATI account ${options.ownedBy}` : input.name?.trim() || "NPATI",
         ...(credential ? { apiKey: credential } : {}),
         ...(Object.keys(providerSpecificData).length ? { providerSpecificData } : {}),
         testStatus: validated ? "active" : "unknown",
@@ -471,6 +475,56 @@ export class OmniRouteMarketplace {
     }
     this.invalidate();
     return { disconnected: true, providerId };
+  }
+
+  // ---- One connection by id: a hosted account manages only the connections it owns. ----
+
+  async deleteConnection(connectionId: string) {
+    await this.request(`/api/providers/${encodeURIComponent(connectionId)}`, { method: "DELETE" }, { management: true });
+    this.invalidate();
+    return { disconnected: true, connectionId };
+  }
+
+  async testConnection(connectionId: string) {
+    return this.request<Json>(`/api/providers/${encodeURIComponent(connectionId)}/test`, { method: "POST", body: "{}" }, { management: true, timeoutMs: 30_000 });
+  }
+
+  async refreshConnectionModels(connectionId: string) {
+    const result = await this.request<Json>(`/api/providers/${encodeURIComponent(connectionId)}/sync-models`, { method: "POST", body: "{}" }, { management: true, timeoutMs: 90_000 });
+    this.invalidate();
+    return result;
+  }
+
+  // ---- Per-account OmniRoute API keys (hosted installations) ----
+  // OmniRoute treats an empty `allowedConnections` as "every connection", so an account without connections gets a
+  // placeholder id that matches none: its key can then reach nothing.
+
+  static readonly NO_CONNECTION = "00000000-0000-4000-8000-000000000000";
+
+  private static allowlist(connectionIds: string[]) {
+    const ids = [...new Set(connectionIds.filter(Boolean))];
+    return ids.length ? ids : [OmniRouteMarketplace.NO_CONNECTION];
+  }
+
+  async createScopedApiKey(name: string, connectionIds: string[]): Promise<{ id: string; key: string }> {
+    const payload = await this.request<Json>("/api/keys", {
+      method: "POST",
+      body: JSON.stringify({ name, allowedConnections: OmniRouteMarketplace.allowlist(connectionIds), noLog: true }),
+    }, { management: true });
+    const id = typeof payload.id === "string" ? payload.id : "", key = typeof payload.key === "string" ? payload.key : "";
+    if (!id || !key) throw new OmniRouteError("The AI engine did not return an account key", 502, "ACCOUNT_KEY_FAILED");
+    return { id, key };
+  }
+
+  async setApiKeyConnections(keyId: string, connectionIds: string[]) {
+    await this.request(`/api/keys/${encodeURIComponent(keyId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ allowedConnections: OmniRouteMarketplace.allowlist(connectionIds) }),
+    }, { management: true });
+  }
+
+  async deleteApiKey(keyId: string) {
+    await this.request(`/api/keys/${encodeURIComponent(keyId)}`, { method: "DELETE" }, { management: true });
   }
 
   async test(providerId: string) {

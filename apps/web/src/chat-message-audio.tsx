@@ -23,7 +23,8 @@ export function AudioAttachmentPlayer({
       setError(null);
       try {
         const token = getStoredAuthToken();
-        const url = `/api/attachments/${id}${token ? "?token=" + encodeURIComponent(token) : ""}`;
+        // Audit L6: the session token travels in the Authorization header only, never in the URL.
+        const url = `/api/attachments/${encodeURIComponent(id)}`;
         const res = await fetch(url, {
           headers: token ? { authorization: `Bearer ${token}` } : {},
         });

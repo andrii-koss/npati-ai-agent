@@ -599,7 +599,8 @@ describe("P1.4 — Multi-agent, MCP & A2A Control Plane", () => {
   // -------------------------------------------------------------
 
   it("28. HTTP API: routes, validates, and exposes control plane endpoints under authentication", async () => {
-    const app = buildApp({ authProvider: new LocalDevAuthProvider() });
+    // The control plane is shared, process-wide state, so it is limited to administrators (ordinary accounts: 403).
+    const app = buildApp({ authProvider: new LocalDevAuthProvider({ permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use", "admin:all"] }) });
     await app.ready();
 
     // 1. Strategies list

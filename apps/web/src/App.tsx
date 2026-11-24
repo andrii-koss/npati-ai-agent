@@ -27,6 +27,7 @@ import { prefetchProjectCatalog } from "./project-catalog-client";
 import { prefetchSettingsPage } from "./settings-prefetch";
 import { I18nProvider, useTranslation } from "./i18n";
 import { ChatAvatarImage } from "./ChatAvatarImage";
+import { AdminOnly, useIsAdmin } from "./use-is-admin";
 
 // Pages other than the chat load when first opened: the chat page does not download and parse their code.
 function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType<any>>>, name: K) {
@@ -47,6 +48,7 @@ const EmailSettingsPage = lazyPage(() => import("./EmailSettingsPage"), "EmailSe
 const GoalsPage = lazyPage(() => import("./GoalsPage"), "GoalsPage");
 const IntegrationsPage = lazyPage(() => import("./IntegrationsPage"), "IntegrationsPage");
 const MemoryPage = lazyPage(() => import("./MemoryPage"), "MemoryPage");
+const SecurityPage = lazyPage(() => import("./SecurityPage"), "SecurityPage");
 const ProjectPage = lazyPage(() => import("./ProjectPage"), "ProjectPage");
 const WebsiteBuilderDashboard = lazyPage(() => import("./WebsiteBuilderDashboard"), "WebsiteBuilderDashboard");
 const AIProviderMarketplace = lazyPage(() => import("./AIProviderMarketplace"), "AIProviderMarketplace");
@@ -66,6 +68,9 @@ export function ChatUserMenu() {
   const { t, language } = useTranslation();
   const location = useLocation();
   const { overview } = useWorkspace();
+  // Everyone is "owner" of their own workspace, so that label told nothing and suggested ownership of the installation.
+  // The badge marks administrators only: NPATI admins and moderators, and the owner of a self-hosted installation.
+  const isAdmin = useIsAdmin();
   const { user, signOutEverywhere } = useAuth();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -119,16 +124,16 @@ export function ChatUserMenu() {
             <span><strong>{displayName}</strong><small>{email}</small></span>
           </div>
           <div className="chat-user-role-row">
-            <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
+            {isAdmin && <span className="chat-user-role">{language === "uk" ? "Адмін" : "Admin"}</span>}
             <a className="chat-user-support" href="https://www.npati.com/support" target="_blank" rel="noopener noreferrer" onClick={closeMenu}>
               {language === "uk" ? "Підтримка" : "Support"}
             </a>
           </div>
           <nav aria-label="Registered user links">
-            <Link to="/settings/email/inbox" onClick={closeMenu}>{t("userMenu.emailInbox")} <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/ai" onClick={closeMenu}>{t("userMenu.aiProvider")} <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/company" onClick={closeMenu}>{t("userMenu.company")} <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/memory" onClick={closeMenu}>{t("userMenu.memory")} <span aria-hidden="true">&rarr;</span></Link>
+            <Link to="/settings/security" onClick={closeMenu}>{language === "uk" ? "Безпека" : "Security"} <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings" onClick={closeMenu}>{t("userMenu.settings")} <span aria-hidden="true">&rarr;</span></Link>
             <button
               type="button"
@@ -142,19 +147,6 @@ export function ChatUserMenu() {
               }}
             >
               {t("userMenu.signOut")} <span aria-hidden="true">&rarr;</span>
-            </button>
-            <button
-              type="button"
-              className="chat-user-signout chat-user-signout-all"
-              onClick={() => {
-                closeMenu();
-                void signOutEverywhere(true).catch((cause) => alertModal({
-                  title: t("userMenu.signOutIncompleteTitle"),
-                  message: cause instanceof Error ? cause.message : t("userMenu.signOutIncompleteDesc"),
-                }));
-              }}
-            >
-              {t("userMenu.signOutAllDevices")} <span aria-hidden="true">&rarr;</span>
             </button>
           </nav>
         </aside>
@@ -373,11 +365,14 @@ function CanonicalChatRoute() {
 
 function SettingsPage() {
   const { t, language } = useTranslation();
+  const isAdmin = useIsAdmin();
   const cards: Array<{
     to: string;
     icon: React.ReactNode;
     title: string;
     description: string;
+    /** Server health and the capability catalog are operator tools: shown to administrators only. */
+    adminOnly?: boolean;
   }> = [
     {
       to: "/settings/ai",
@@ -533,6 +528,7 @@ function SettingsPage() {
     },
     {
       to: "/settings/connections",
+      adminOnly: true,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8z" />
@@ -553,6 +549,7 @@ function SettingsPage() {
     },
     {
       to: "/settings/capabilities",
+      adminOnly: true,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
@@ -573,7 +570,7 @@ function SettingsPage() {
       </div>
 
       <div className="settings-card-grid">
-        {cards.map((card) => (
+        {cards.filter((card) => !card.adminOnly || isAdmin === true).map((card) => (
           <Link className="settings-ai-card" to={card.to} key={card.to} onMouseEnter={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(card.to); }} onFocus={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); else prefetchSettingsPage(card.to); }}>
             <span className="provider-avatar" aria-hidden="true">{card.icon}</span>
             <span>
@@ -634,6 +631,8 @@ export function App() {
           <Suspense fallback={<div className="workspace" />}>
           <Routes>
             <Route path="/" element={<Home userMenu={<ChatUserMenu />} logo={<NpatiAgentLogo />} />} />
+            <Route path="/login" element={<Home userMenu={<ChatUserMenu />} logo={<NpatiAgentLogo />} />} />
+            <Route path="/signup" element={<Home userMenu={<ChatUserMenu />} logo={<NpatiAgentLogo />} />} />
             <Route path="/chat" element={<LegacyChatRoute />} />
             <Route path="/c/:conversationId" element={<CanonicalChatRoute />} />
             <Route path="/business" element={<Workspace><BusinessPage /></Workspace>} />
@@ -657,15 +656,15 @@ export function App() {
             <Route path="/settings/activity" element={<Workspace><ActivityPage /></Workspace>} />
             <Route path="/content" element={<Workspace><ContentPage /></Workspace>} />
             <Route path="/settings/content" element={<Workspace><ContentPage /></Workspace>} />
-            <Route path="/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
-            <Route path="/settings/connections" element={<Workspace><ConnectionsPage /></Workspace>} />
+            <Route path="/connections" element={<Workspace><AdminOnly><ConnectionsPage /></AdminOnly></Workspace>} />
+            <Route path="/settings/connections" element={<Workspace><AdminOnly><ConnectionsPage /></AdminOnly></Workspace>} />
             <Route path="/automations" element={<Workspace><AutomationsPage /></Workspace>} />
             <Route path="/settings/automations" element={<Workspace><AutomationsPage /></Workspace>} />
             <Route path="/settings/email" element={<Workspace><EmailSettingsPage /></Workspace>} />
             <Route path="/settings/email/inbox" element={<Workspace><EmailInboxPage /></Workspace>} />
             <Route path="/inbox" element={<Navigate to="/settings/email/inbox" replace />} />
             <Route path="/email" element={<Navigate to="/settings/email/inbox" replace />} />
-            <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
+            <Route path="/settings/capabilities" element={<Workspace><AdminOnly><CapabilityInspectorPage /></AdminOnly></Workspace>} />
             <Route path="/settings/data-studio/:databaseName?" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
             <Route path="/settings/code" element={<Workspace><CodeAgentsPage /></Workspace>} />
             <Route path="/settings/code/:companyId/:projectId" element={<Workspace><CodeWorkspacePage /></Workspace>} />
@@ -674,6 +673,7 @@ export function App() {
             <Route path="/settings/goals" element={<Workspace><GoalsPage /></Workspace>} />
             <Route path="/memory" element={<Workspace><MemoryPage /></Workspace>} />
             <Route path="/settings/memory" element={<Workspace><MemoryPage /></Workspace>} />
+            <Route path="/settings/security" element={<Workspace><SecurityPage /></Workspace>} />
             <Route path="/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings/skills" element={<Workspace><SkillsPage /></Workspace>} />
             <Route path="/settings" element={<SettingsPage />} />

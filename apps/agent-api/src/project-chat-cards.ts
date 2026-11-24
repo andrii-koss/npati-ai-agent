@@ -299,6 +299,12 @@ export async function saveChatProjectCard(
 
 /** The database block of a chat message (owner, V6 step 14), kept beside the project cards of the same chat. */
 const databaseCardKey = (conversationId: string) => "chat-database-cards:" + conversationId;
+/** The database blocks of a conversation, keyed by the message they belong to. */
+export async function readChatDatabaseCards(store: WorkspaceStore, context: AuthContext, conversationId: string): Promise<Record<string, DatabaseCardData>> {
+  const setting = await store.getUserSetting(context, databaseCardKey(conversationId)).catch(() => null);
+  return setting?.value && typeof setting.value === "object" && !Array.isArray(setting.value) ? setting.value as Record<string, DatabaseCardData> : {};
+}
+
 export async function saveChatDatabaseCard(store: WorkspaceStore, context: AuthContext, conversationId: string, messageId: string, card: DatabaseCardData): Promise<void> {
   const key = databaseCardKey(conversationId);
   for (let attempt = 0; attempt < 5; attempt += 1) {

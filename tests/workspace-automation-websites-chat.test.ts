@@ -217,6 +217,8 @@ it("finds a named automation in a recently updated company beyond the oldest twe
   const store = new InMemoryWorkspaceStore();
   const automations = new CompanyAutomationsRepository();
   for (let index = 0; index < 22; index++) await store.createCompany(alice, { name: "Old company " + index }, "old-company-" + index);
+  // Created in the same millisecond, the "recent" company could tie with the old ones and miss the newest twenty.
+  await new Promise((resolve) => setTimeout(resolve, 5));
   const recent = await store.createCompany(alice, { name: "Recent Bakery" }, "recent-bakery");
   const agent = await store.createCompanyAgent(alice, recent.id, { name: "Runner", role: "Operator", tools: [] }, "recent-bakery-agent");
   await automations.create(alice, recent.id, { name: "Recent Weekly", prompt: "Report OK", cronExpression: "0 9 * * 1", agentId: agent.id });

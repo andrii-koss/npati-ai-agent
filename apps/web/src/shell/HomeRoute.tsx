@@ -1,5 +1,5 @@
-import { ReactNode, useCallback, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { ReactNode, useCallback, useEffect, useState } from "react";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 import { AuthModal } from "../AuthModal";
 import { useWorkspace } from "../BusinessWorkspace";
@@ -12,7 +12,16 @@ export function Home({ userMenu, logo }: { userMenu?: ReactNode; logo?: ReactNod
   const navigate = useNavigate();
   const { overview } = useWorkspace();
   const { isAuthenticated, isLoading } = useAuth();
-  const [authModal, setAuthModal] = useState<{ open: boolean; mode: "login" | "register" }>({ open: false, mode: "login" });
+  const { pathname } = useLocation();
+  // /login and /signup are the landing page's buttons: they open the sign-in dialog right away.
+  const authPath = pathname === "/login" ? "login" : pathname === "/signup" ? "register" : null;
+  const [authModal, setAuthModal] = useState<{ open: boolean; mode: "login" | "register" }>({ open: authPath !== null, mode: authPath ?? "login" });
+  // The server shows the public landing page at "/" (it marks the app page with this meta). A signed-out visitor who
+  // reaches "/" inside the app, for example after signing out, reloads it to see that page.
+  const landingAtRoot = pathname === "/" && typeof document !== "undefined" && document.querySelector('meta[name="npati-landing"]') !== null;
+  useEffect(() => {
+    if (landingAtRoot && !isLoading && !isAuthenticated) window.location.replace("/");
+  }, [landingAtRoot, isLoading, isAuthenticated]);
   const closeAuthModal = useCallback(() => setAuthModal((prev) => ({ ...prev, open: false })), []);
   const handleAuthSuccess = useCallback(() => navigate("/chat"), [navigate]);
 
@@ -51,6 +60,7 @@ export function Home({ userMenu, logo }: { userMenu?: ReactNode; logo?: ReactNod
 
   if (isLoading && !isAuthenticated) return <div className="workspace" />;
   if (isAuthenticated) return <Navigate to="/chat" replace />;
+  if (landingAtRoot) return <div className="workspace" />;
 
   return (
     <main className="home-shell">

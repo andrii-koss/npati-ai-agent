@@ -2,8 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { NpatiAuthClient } from "@npati/hub-connector";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
-import { AuthenticationError, createMockNpatiJwt } from "./auth";
-import { OidcDashboardGate } from "./security-guardrails-and-tokens";
+import { AuthenticationError, createMockNpatiJwt, sessionBearer } from "./auth";
+import { REFRESH_COOKIE, accessTokenFromCookie, appendSetCookies, clearSessionCookies, readCookie } from "./browser-session";
+import { OidcDashboardGate, configuredOidc } from "./security-guardrails-and-tokens";
 
 /**
  * G1 (item 4): the workspace store's lazy initialization on the registration/login path.
@@ -222,7 +223,8 @@ export function registerAuthRoutes(
       refreshToken?: string;
     };
   }>, reply: FastifyReply) => {
-    const refreshToken = request.body?.refreshToken;
+    // L6 stage 2: a browser keeps its refresh token in an HttpOnly cookie (Path=/api/auth).
+    const refreshToken = request.body?.refreshToken || readCookie(request.headers.cookie, REFRESH_COOKIE);
     if (!refreshToken) {
       return reply.code(400).send({
         success: false,
@@ -264,7 +266,9 @@ export function registerAuthRoutes(
       everywhere?: boolean;
     };
   }>, reply: FastifyReply) => {
-    const refreshToken = request.body?.refreshToken;
+    // L6 stage 2: a browser signs out with its session cookies; they are cleared whatever happens below.
+    const refreshToken = request.body?.refreshToken || readCookie(request.headers.cookie, REFRESH_COOKIE);
+    if (request.headers.cookie) appendSetCookies(reply, clearSessionCookies(request));
     // The access token of this request stops working now, not when it expires (V6 step 17: it kept opening the API for
     // up to 15 minutes after "Sign out" answered "Successfully logged out").
     let revoked = false;
@@ -288,7 +292,7 @@ export function registerAuthRoutes(
     try {
       const auth = await authProvider.authenticate(request);
       const overview = await workspaceStore.overview(auth);
-      const bearerToken = request.headers.authorization?.match(/^Bearer (.+)$/i)?.[1];
+      const bearerToken = sessionBearer(request.headers.authorization) || accessTokenFromCookie(request);
       const centralUser = bearerToken && authClient && !bearerToken.startsWith("npati_live_") && !bearerToken.startsWith("rat_")
         ? await authClient.getCurrentUser(bearerToken).catch(() => null)
         : null;
@@ -339,12 +343,10 @@ export function registerAuthRoutes(
       });
     }
 
+    const configured = configuredOidc();
+    if (!configured) return reply.code(404).send({ success: false, error: { code: "OIDC_NOT_CONFIGURED", message: "OIDC sign-in is not configured on this installation." } });
     const config = {
-      expectedIssuer: process.env.OIDC_ISSUER || "https://auth.npati.ai",
-      expectedAudience: process.env.OIDC_AUDIENCE || "npati-dashboard",
-      jwksUri: process.env.OIDC_JWKS_URI,
-      sharedSecret: process.env.OIDC_SHARED_SECRET,
-      allowedAlgorithms: process.env.OIDC_SHARED_SECRET ? (["RS256", "HS256"] as const) : (["RS256"] as const),
+      ...configured,
     };
 
     const verification = await OidcDashboardGate.verifyOidcToken(rawToken, config);

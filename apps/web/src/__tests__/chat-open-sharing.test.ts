@@ -14,8 +14,8 @@ it("shares a slow pending open beyond five seconds and starts its TTL after comp
 });
 it("never reuses another authentication token's pending response", async () => {
   const fetch = vi.fn(() => new Promise<Response>(() => {})); vi.stubGlobal("fetch", fetch);
-  localStorage.setItem("npati_agent_access_token", "first"); const first = chatOpen("same");
-  localStorage.setItem("npati_agent_access_token", "second");
+  localStorage.setItem("npati_agent_session_marker", "npati-cookie-session:first"); const first = chatOpen("same");
+  localStorage.setItem("npati_agent_session_marker", "npati-cookie-session:second");
   expect(sharedChatOpen("same")).toBeNull(); expect(chatOpen("same")).not.toBe(first); expect(fetch).toHaveBeenCalledTimes(2);
 });
 

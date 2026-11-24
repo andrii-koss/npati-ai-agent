@@ -22,7 +22,8 @@ const liveStatuses = new Set(["queued", "planning", "running", "cancelling"]);
 
 function pageRuns(page?: ActivityPageSummary | null) {
   if (!page) return emptyRuns;
-  const { selected, items } = page;
+  // A reply without items (an older server, a proxy error page) shows an empty list instead of crashing the page.
+  const { selected, items = emptyRuns } = page;
   return selected && !items.some(run => run.id === selected.id) ? [selected, ...items] : items;
 }
 

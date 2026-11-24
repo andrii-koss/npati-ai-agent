@@ -1,4 +1,8 @@
 import cors from "@fastify/cors";
+import { registerSensitiveRateLimits } from "./sensitive-rate-limit";
+import { registerStreamTicketRoutes } from "./stream-ticket-routes";
+import { registerBrowserSessionCookies } from "./browser-session";
+import { PasskeyService, PasskeyStore, registerPasskeyRoutes } from "./passkeys";
 import Fastify from "fastify";
 import path from "node:path";
 import { OmniRouteEngine, type OmniRouteMarketplace, type AIEngine } from "@npati/omniroute-adapter";
@@ -63,6 +67,7 @@ import { createAppCompanyAutomationsWiring } from "./app-company-automations";
 import { createAppChatOrchestration } from "./app-chat-orchestration";
 import { registerAppRoutesAndLifecycle } from "./app-routes-and-lifecycle";
 import type { GitWriteIntent } from "./code-git-write-policy";
+import { TenantAIProviders, aiProviderIsolationEnabled, installTenantScope, setProcessTenantProviders, tenantMarketplace, tenantScopedAuth } from "./ai-tenant-providers";
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
@@ -125,10 +130,28 @@ export interface AppConfig {
   projectSandbox?: ProjectSandboxService;
 }
 
+/**
+ * Audit L2: which reverse proxies may set X-Forwarded-For. Unset = none (the socket address is the client), a number =
+ * that many proxy hops, otherwise a comma-separated list of proxy addresses/CIDRs. Never "trust everyone" by default:
+ * a directly exposed API would let any client choose its own IP for remote-token IP allowlists.
+ */
+export function resolveTrustProxy(value: string | undefined): boolean | string[] | ((address: string, hop: number) => boolean) {
+  const raw = value?.trim();
+  if (!raw || raw === "false" || raw === "0") return false;
+  if (/^\d+$/.test(raw)) { const hops = Number(raw); return (_address: string, hop: number) => hop < hops; }
+  if (raw === "true") return true;
+  return raw.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ rewriteUrl: rewriteBrowserApiUrl, logger: process.env.NODE_ENV !== "test" ? {serializers:{req:redactedRequestSerializer},redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ rewriteUrl: rewriteBrowserApiUrl, logger: process.env.NODE_ENV !== "test" ? {serializers:{req:redactedRequestSerializer},redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024, trustProxy: resolveTrustProxy(process.env.NPATI_TRUST_PROXY) });
 
   if (config.webDistDirectory) registerWebFrontend(app, config.webDistDirectory);
+
+  // Hosted (SaaS): every account uses only the AI providers it connected itself (see ai-tenant-providers.ts).
+  const providerIsolation = aiProviderIsolationEnabled(config.deploymentType);
+  if (providerIsolation) installTenantScope(app);
+  let tenantProviders: TenantAIProviders | undefined;
 
   const redisHealthWiring = createRedisHealthWiring({
     config,
@@ -142,6 +165,7 @@ export function buildApp(config: AppConfig = {}) {
     transcriptionModel: config.omnirouteTranscriptionModel,
     ttsModel: config.omnirouteTtsModel,
     embeddingModel: config.omnirouteEmbeddingModel, rerankModel: config.omnirouteRerankModel,
+    requireScopedCredential: providerIsolation,
   });
 
   let engineDataPolicyResolver: ReturnType<typeof createEnginePolicyResolver> | undefined;
@@ -185,7 +209,7 @@ export function buildApp(config: AppConfig = {}) {
   const {
     researchBundle,
     webResearch,
-    marketplace,
+    marketplace: sharedMarketplace,
     attachmentDirectory,
     hub,
     agent,
@@ -203,7 +227,7 @@ export function buildApp(config: AppConfig = {}) {
     apiKeysRepo,
     installationAuthStore,
     selfHosted,
-    authProvider,
+    authProvider: coreAuthProvider,
     aiPreferences,
     codePreferences,
     activeContextResolver,
@@ -212,6 +236,10 @@ export function buildApp(config: AppConfig = {}) {
     scopedMemory,
     guardrailPolicies,
   } = createCoreServices({ config, log: app.log, baseAiEngine, aiEngine });
+  if (providerIsolation) tenantProviders = new TenantAIProviders({ store: workspaceStore, marketplace: sharedMarketplace, preferences: aiPreferences });
+  const marketplace = providerIsolation ? tenantMarketplace(sharedMarketplace, () => tenantProviders) : sharedMarketplace;
+  setProcessTenantProviders(tenantProviders);
+  const authProvider = providerIsolation ? tenantScopedAuth(coreAuthProvider, () => tenantProviders) : coreAuthProvider;
 
   const {
     auditRepo,
@@ -675,7 +703,17 @@ export function buildApp(config: AppConfig = {}) {
     runNeutralMessage,
   } = chatOrchestrationWiring;
 
-  app.register(cors, { origin: config.webOrigin ?? true });
+  // Audit L3: per-client limits on sign-in, OAuth callbacks, webhooks, connection probes and paid media generation.
+  registerSensitiveRateLimits(app, { disabled: process.env.NPATI_RATE_LIMIT_DISABLED === "true" || (process.env.NODE_ENV === "test" && process.env.NPATI_RATE_LIMIT_IN_TESTS !== "true") });
+  // Audit L6 stage 2: token-issuing responses to browsers set HttpOnly session cookies instead of returning tokens.
+  registerBrowserSessionCookies(app);
+  // Residual XSS risk: credentials that outlive the page and stored-secret reveals need a passkey confirmation.
+  registerPasskeyRoutes(app, authProvider, new PasskeyService(new PasskeyStore(config.databaseUrl ? (workspaceStore as unknown as { pool?: import("pg").Pool }).pool : undefined)),
+    async (ctx, action, details) => { app.log.info({ audit: action, userId: ctx.userId, workspaceId: ctx.workspaceId, ...details }, action); });
+  // Audit L6: short-lived single-path tickets replace the session token in URLs.
+  registerStreamTicketRoutes(app, authProvider);
+  // Audit L5: without a configured web origin a production API answers same-origin only instead of reflecting any origin.
+  app.register(cors, { origin: config.webOrigin ?? (process.env.NODE_ENV === "production" ? false : true) });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AuthenticationError) {
       return reply.code(error.status).send({

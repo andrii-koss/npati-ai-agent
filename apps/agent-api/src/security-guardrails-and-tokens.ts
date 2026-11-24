@@ -1,4 +1,5 @@
 import { randomUUID, createHmac, createHash, createPublicKey, timingSafeEqual, verify as verifySignature, type JsonWebKey as CryptoJsonWebKey } from "node:crypto";
+import { isInsecureDefaultSecret, isProductionEnvironment } from "@npati/workspace";
 
 export interface VisualInspectionResult {
   isSafe: boolean;
@@ -34,6 +35,20 @@ export interface OidcVerificationConfig {
   jwksUri?: string;
   sharedSecret?: string;
   allowedAlgorithms?: ReadonlyArray<"RS256" | "RS384" | "RS512" | "HS256">;
+}
+
+/**
+ * OIDC sign-in exists only when an operator configured it: an issuer, an audience and a key source (JWKS or a shared
+ * secret). There is deliberately no default issuer — a default pointed at an unregistered domain, so whoever registered
+ * it could publish signing keys and mint tokens for any workspace, with administrator roles, on every installation.
+ */
+export function configuredOidc(env: NodeJS.ProcessEnv = process.env, overrides: Partial<OidcVerificationConfig> = {}): OidcVerificationConfig | null {
+  const expectedIssuer = overrides.expectedIssuer || env.OIDC_ISSUER;
+  const expectedAudience = overrides.expectedAudience || env.OIDC_AUDIENCE;
+  const jwksUri = overrides.jwksUri || env.OIDC_JWKS_URI;
+  const sharedSecret = overrides.sharedSecret || env.OIDC_SHARED_SECRET;
+  if (!expectedIssuer || !expectedAudience || (!jwksUri && !sharedSecret)) return null;
+  return { expectedIssuer, expectedAudience, jwksUri, sharedSecret, allowedAlgorithms: overrides.allowedAlgorithms || (sharedSecret ? ["RS256", "HS256"] : ["RS256"]) };
 }
 
 export interface RemoteAccessToken {
@@ -217,10 +232,13 @@ export class ScopedRemoteAccessTokenManager {
 
   constructor(secretKey?: string) {
     const configuredKey = secretKey || process.env.NPATI_REMOTE_ACCESS_TOKEN_SECRET || process.env.NPATI_ENCRYPTION_KEY;
-    if (!configuredKey && process.env.NODE_ENV === "production") {
+    // NODE_ENV=production OR NPATI_ENV=production: compose runs NODE_ENV=production with NPATI_ENV=development by
+    // default, and a check on NPATI_ENV alone accepted the public compose key (audit C1).
+    const production = isProductionEnvironment();
+    if (!configuredKey && production) {
       throw new Error("NPATI_REMOTE_ACCESS_TOKEN_SECRET_REQUIRED");
     }
-    if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) {
+    if (production && isInsecureDefaultSecret(configuredKey)) {
       throw new Error("NPATI_REMOTE_ACCESS_TOKEN_SECRET_UNSAFE_DEFAULT");
     }
     this.secretKey = configuredKey || "npati-development-only-remote-token-key";
@@ -291,8 +309,9 @@ export class ScopedRemoteAccessTokenManager {
         return { isValid: false, error: "INVALID_CLAIMS: Required remote-token claims are missing." };
       }
 
-      // Check Expiration
-      if (new Date(details.expiresAt).getTime() < Date.now()) {
+      // Check Expiration. An unparsable expiry is expired: `NaN < now` is false and used to mean "never expires".
+      const expiresAt = new Date(details.expiresAt).getTime();
+      if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
         return { isValid: false, error: "TOKEN_EXPIRED: Remote token has expired." };
       }
 

@@ -75,7 +75,7 @@ try {
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage();
   await page.addInitScript(({ accessToken, user }) => {
-    localStorage.setItem("npati_agent_access_token", accessToken);
+    (document.cookie='npati_access='+encodeURIComponent(accessToken)+'; path=/; samesite=lax',document.cookie.includes('npati_csrf=')||(document.cookie='npati_csrf=qa-'+Math.random().toString(36).slice(2)+'; path=/; samesite=strict'),localStorage.setItem('npati_agent_session_marker','npati-cookie-session:qa'));
     localStorage.setItem("npati_agent_user", JSON.stringify(user));
   }, { accessToken: token, user: login.user });
   await page.goto(webBase + "/company", { waitUntil: "networkidle" });

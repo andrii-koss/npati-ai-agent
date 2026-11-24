@@ -26,7 +26,7 @@ it("keeps the root reply first when an automatic repair answers", async () => {
   const out = withRootReply(repaired, root, "uk") as { message: string; status: string };
   expect(out.status).toBe("completed");
   expect(out.message.startsWith(root)).toBe(true);
-  expect(out.message).toContain("Автоматична перевірка знайшла помилку і виправила її:\nЗамінив crypto.randomUUID()");
+  expect(out.message).toContain("**Автоматична перевірка знайшла помилку і виправила її:**\nЗамінив crypto.randomUUID()");
   expect(withRootReply(out, root, "uk")).toBe(out);
   expect((withRootReply({ status: "failed", message: "" }, root, "uk") as { message: string }).message).toBe(root);
   expect(withRootReply(repaired, undefined, "uk")).toBe(repaired);

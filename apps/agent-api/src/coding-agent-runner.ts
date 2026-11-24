@@ -68,6 +68,7 @@ import { compactConversationContextIfNeeded } from "./coding-agent-context-compa
 import { CodingAgentInboxManager } from "./coding-agent-inbox-manager";
 import { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator";
 import { CodingAgentToolWaves } from "./coding-agent-tool-waves";
+import { asAccount } from "./ai-tenant-providers";
 
 export * from "./coding-agent-runner-contracts";
 
@@ -118,7 +119,12 @@ export class CodingAgentRunner {
   referenceContext(ctx: CodingAgentRunInput["ctx"], session: CodeSession, parentRunId: string) {
     return this.visualContexts.get(this.visualContextKey(ctx, session, parentRunId));
   }
+  /** Runs as the run's account: a resumed run starts outside any request and must still use that account's AI key. */
   async run(input: CodingAgentRunInput): Promise<CodingAgentRunResult> {
+    return asAccount(input.ctx, () => this.runInAccountScope(input));
+  }
+
+  private async runInAccountScope(input: CodingAgentRunInput): Promise<CodingAgentRunResult> {
     if (!input.images?.length) return this.runOwned(input);
     input = { ...input, runId: input.runId ?? randomUUID(), runDetails: { ...input.runDetails, referenceImageCount: input.images.length } };
     const key = this.visualContextKey(input.ctx, input.session, input.runId!);

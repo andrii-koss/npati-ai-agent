@@ -13,6 +13,7 @@ import type { FileMetadataRepository, StoredFile } from "./file-metadata";
 import type { ProductionMemoryEngineRegistry } from "./knowledge-memory-engine";
 import type { ParsedMemoryImport } from "./production-memory-import";
 import { MemoryRerankEngine, TypedDecayMemoryManager, type DecayingMemoryItem, type MemoryDecayType } from "./advanced-memory-management";
+import { asAccount } from "./ai-tenant-providers";
 
 export type KnowledgeStatus="uploaded"|"processing"|"ready"|"failed"|"deleted";
 export interface KnowledgeDocument { id:string; workspaceId:string; companyId:string; userId:string; fileId:string; status:KnowledgeStatus; errorMessage?:string; chunkCount:number; embeddingModel?:string; attemptCount:number; createdAt:string; updatedAt:string; file?:StoredFile; filename?:string; sizeBytes?:number; mimeType?:string; }
@@ -135,7 +136,8 @@ export class CompanyKnowledgeProcessor {
    let embeddingModel="";
    for(let i=0;i<parts.length;i+=32){
     const batch=parts.slice(i,i+32);
-    const embedded=await this.ai.embed({input:batch,timeoutMs:120000});
+    // Runs as the document owner's account: on a hosted installation the embedding uses that account's own AI key.
+    const embedded=await asAccount({workspaceId:doc.workspaceId,userId:doc.userId,permissions:[]},()=>this.ai.embed!({input:batch,timeoutMs:120000}));
     vectors.push(...embedded.vectors);
     embeddingModel=embedded.model;
    }

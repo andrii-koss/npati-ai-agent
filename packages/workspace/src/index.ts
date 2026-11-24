@@ -12,6 +12,7 @@ export * from "./onboarding";
 export * from "./in-memory-store";
 export * from "./postgres-store";
 export * from "./crypto-vault";
+export * from "./insecure-secrets";
 /**
  * C9: the shared validators for plan bodies and todo lists. They live next to the goal store because both
  * backends apply the same rules, and they are exported here so the tool layer validates with exactly the

@@ -29,7 +29,7 @@ export function IntegrationDrawer({
   const [manageId, setManageId] = useState(initialConnectionId || "");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
-  const [pairing, setPairing] = useState<{ command: string; bot?: string } | null>(null);
+  const [pairing, setPairing] = useState<{ command: string; bot?: string; link?: string } | null>(null);
 
   const hasConnected = connections.some((item) => item.status === "connected");
   const hasPending = !hasConnected && connections.some((item) => item.status === "pending");
@@ -96,6 +96,7 @@ export function IntegrationDrawer({
             initialConnection={connections.find((item) => item.id === manageId)}
             companies={companies}
             initialPairingCommand={pairing?.command}
+            initialPairingLink={pairing?.link}
             onChanged={onChanged}
             onRemoved={() => { setManageId(""); setMode("details"); void onChanged(); }}
           />

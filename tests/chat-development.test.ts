@@ -130,6 +130,16 @@ describe("durable coding activity", () => {
     await vi.waitFor(()=>expect(f.controls.size).toBe(1));
     const process=(await f.service.list(owner))[0]!;expect(process.responseLanguage).toBe("uk");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("Reply entirely in Ukrainian");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("2-4 concise sentences");
   });
+  it("shows a database created during the run with its block at once, not only after the final reply", async () => {
+    const f = await fixture(); await f.start("Create a minimal website and a database"); await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!;
+    const announced = await f.store.appendNeutralMessage(owner, process.conversationId!, "assistant", "Database created");
+    const { saveChatDatabaseCard } = await import("../apps/agent-api/src/project-chat-cards");
+    await saveChatDatabaseCard(f.store, owner, process.conversationId!, announced.id, { id: "db-1", name: "minimal-site-db", companyId: process.companyId, projectId: process.projectId, engine: "PostgreSQL", status: "ready" });
+    const live = (await f.service.list(owner))[0]!;
+    expect(["queued", "preparing", "running"]).toContain(live.status);
+    expect(live.conversationMessages).toEqual(expect.arrayContaining([expect.objectContaining({ id: announced.id, role: "assistant", databaseCard: expect.objectContaining({ id: "db-1", name: "minimal-site-db" }) })]));
+  });
   it("projects accepted queue messages and real replies from existing inbox and replay after refresh",async()=>{
     const f=await fixture();await f.start("Create a Next.js website");await vi.waitFor(()=>expect(f.controls.size).toBe(1));const process=(await f.service.list(owner))[0]!;
     const inbox={isEnabled:async()=>true,transact:async()=>({state:{messages:[{id:"queued",authorId:owner.userId,text:"Please change the footer to green",status:"admitted",runId:"queued-run",createdAt:new Date().toISOString()},{id:"foreign",authorId:"other",text:"foreign",status:"admitted",runId:"foreign-run",createdAt:new Date().toISOString()}]}})};
@@ -154,7 +164,7 @@ describe("durable coding activity", () => {
     await f.service.recordActivity({...owner,userId:"other"},f.company.id,process.sessionId!,process.conversationId,event);
     expect((await f.service.list(owner))[0]!.progress!.filter(x=>x.id===event.id)).toHaveLength(1);
     f.controls.get(process.projectId!)!.finish({status:"completed",runId:process.runId,message:"Implemented the requested storefront.",summary:{verification:{status:"passed",requestedTools:["build"]}}});
-    await vi.waitFor(async () => expect((await f.store.getNeutralConversation(owner,process.conversationId!)).messages.at(-1)?.content).toBe("Assumptions for this brief request: a basic working website. Generated names, copy and business details you did not provide are examples to replace with your own data.\n\nImplemented the requested storefront."));
+    await vi.waitFor(async () => expect((await f.store.getNeutralConversation(owner,process.conversationId!)).messages.at(-1)?.content).toBe("Implemented the requested storefront.\n\n> **Assumptions for this brief request:** a basic working website. Generated names, copy and business details you did not provide are examples to replace with your own data."));
     expect((await f.store.getNeutralConversation(owner,started.conversationId)).messages[0]?.role).toBe("user");
     await restored.close();
   });

@@ -37,6 +37,7 @@ import { coreRouteOwns } from "./chat-core-routing";
 import { linkTurnCompanyAndBusiness } from "./chat-business-company-link";
 import { scopeBusinessPageLinks } from "./business-page-links"; import { businessMemoryNote, currentBusinessRecordsNote } from "./business-memory-context";
 import { defaultSkillRegistry } from "@npati/skills";
+import { newChatTurnRecords } from "./chat-actions";
 
 export function createChatTurn(deps: ChatTurnDeps) {
   const { admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, automationsRepo, availableCoreChatTools, browserCredentials, chatFiles, completeCreatedBusinessGoal, completeCreatedBusinessMemory, config, contentLibrary, coreChatRoutingDecision, emailInboxRepo, executeCompanyChatAction, executeCompositeBusinessCompanyCreation, executeCompositeCompanyDeletion, executeCoreChatTool, executeEmailChatAction, executeWorkspaceChatAction, getAIContext, integrationsRepo, log, logToolModelStep, logToolSelectionConfiguration, logToolSelectionTrace, memoryDocuments, persistBusinessLogo, researchBundle, webResearch, workspaceStore } = deps;
@@ -506,6 +507,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
           activeConversationLanguage,
           semanticFiltering: routing,
         });
+        const turnRecords = newChatTurnRecords();
         const loop = await runChatToolLoop({
           ai: aiEngine,
           request: liveText ? { ...chatRequest, onTextDelta: (text: string) => { streamedLive = true; liveText(text.replace(/[—–]/g, " - ")); } } : chatRequest,
@@ -518,7 +520,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
           recoveryCall: companyPrimary && !needsResearch && plan?.entity?.trim() && (plan.company_agent_count === undefined || plan.company_agents?.length === plan.company_agent_count)
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
-          execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest, coreRoute, projectCapabilityScope, noMemory:memoryPolicy.noMemoryActive,
+          execute: (call, args) => executeCoreChatTool({ auth, call, args, turn: turnRecords, requestMessage: safeUserRequest, coreRoute, projectCapabilityScope, noMemory:memoryPolicy.noMemoryActive,
             emailAddressReferences: emailReferences.addresses,
             selectedProjectId: projectContext?.id,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,

@@ -163,12 +163,16 @@ describe("Section 15: Developer / Capability Inspector", () => {
       const { InMemoryWorkspaceStore } = await import("@npati/workspace");
       const app = buildApp({
         workspaceStore: new InMemoryWorkspaceStore(),
-        authProvider: { authenticate: async () => ({ workspaceId: "ws-dev", userId: "u-dev", permissions: ["workspace:read"] }) },
+        authProvider: { authenticate: async (request: { headers: Record<string, string | undefined> }) => ({ workspaceId: "ws-dev", userId: "u-dev",
+          permissions: request.headers["x-test-admin"] ? ["workspace:read", "admin:all"] : ["workspace:read"] }) },
         marketplace: { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as any,
         aiEngine: { healthCheck: async () => ({ status: "ok" }) } as any,
       });
 
-      const res = await app.inject({ method: "GET", url: "/capabilities/inspect?slice=agent-callable" });
+      // The Inspector is an operator tool: an ordinary account is refused, an administrator gets the catalog.
+      const ordinary = await app.inject({ method: "GET", url: "/capabilities/inspect?slice=agent-callable" });
+      expect(ordinary.statusCode).toBe(403);
+      const res = await app.inject({ method: "GET", url: "/capabilities/inspect?slice=agent-callable", headers: { "x-test-admin": "1" } });
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);

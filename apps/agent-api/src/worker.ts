@@ -1,7 +1,8 @@
 import { logBuildInfo } from "./build-info";
 import path from "node:path";
-import { OmniRouteEngine } from "@npati/omniroute-adapter";
-import { PostgresWorkspaceStore } from "@npati/workspace";
+import { OmniRouteEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import { TenantAIProviders, aiProviderIsolationEnabled, setProcessTenantProviders } from "./ai-tenant-providers";
+import { PostgresWorkspaceStore, assertProductionSecrets } from "@npati/workspace";
 import { createWebResearch } from "@npati/web-research";
 import { CompanyDelegationRuntime } from "./company-runtime";
 import { AIPreferencesStore, selectedCompanyInferenceModels } from "./ai-preferences";
@@ -32,16 +33,21 @@ import { RemoteSandboxProvider } from "./sandbox-provider";
 import { createProviderDataGuard, conservativeHostedPolicy } from "./provider-data-guard";
 import { keepPoolErrorsFromCrashing } from "./pg-pool-errors";
 
+// Audit C1: never run with a secret that ships in this repository (or a missing encryption key).
+assertProductionSecrets();
 keepPoolErrorsFromCrashing();
 const databaseUrl=process.env.DATABASE_URL,redisUrl=process.env.REDIS_URL;
 if(!databaseUrl||!redisUrl)throw new Error("DATABASE_URL and REDIS_URL are required by the Company worker");
-const baseAi=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL});
+// Hosted (SaaS): background runs and document processing use the owning account's own AI key, as in the API process.
+const providerIsolation=aiProviderIsolationEnabled(process.env.NPATI_DEPLOYMENT_TYPE);
+const baseAi=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL,requireScopedCredential:providerIsolation});
 // C5b: this process builds its own engine, so it must apply the same provider data guard as the API process;
 // otherwise background work (knowledge processing, email AI, memory engines) would be an unguarded path.
 const ai=process.env.NPATI_CODE_PROVIDER_DATA_ENFORCEMENT==="true"
   ?createProviderDataGuard(baseAi,{resolvePolicy:(input)=>conservativeHostedPolicy(input)})
   :baseAi;
 const store=new PostgresWorkspaceStore(databaseUrl);await store.initialize();
+if(providerIsolation)setProcessTenantProviders(new TenantAIProviders({store,preferences:new AIPreferencesStore(store),marketplace:new OmniRouteMarketplace({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,managementPassword:process.env.OMNIROUTE_MANAGEMENT_PASSWORD})}));
 const research=createWebResearch(baseAi,process.env.CRAWL4AI_BASE_URL);
 const attachments=process.env.NPATI_DATA_DIR?path.join(process.env.NPATI_DATA_DIR,"chat-attachments"):undefined;
 const required=["MINIO_ENDPOINT","MINIO_ACCESS_KEY","MINIO_SECRET_KEY"] as const;for(const name of required)if(!process.env[name])throw new Error(name+" is required by the Company worker");

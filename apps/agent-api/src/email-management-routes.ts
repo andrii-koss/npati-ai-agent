@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { AuthContext } from "@npati/workspace";
 import { EmailDnsVerifier } from "./email-dns-verifier";
 import { EmailConnectionTester } from "./email-connection-tester";
+import { assertOAuthTokenEndpoint, postOAuthTokenRequest } from "./email-destination-policy";
 import {
   type EmailRoutesContext,
   presentEmailAccount,
@@ -188,6 +189,10 @@ export function registerEmailManagementRoutes(
       if (!safeProtocol(authorizationUrl) || !safeProtocol(tokenUrl) || !safeProtocol(redirectUri)) {
         throw new Error("OAuth endpoints and redirect URI must use HTTPS (localhost HTTP is allowed for development)");
       }
+      // Audit M1: the server itself calls the token endpoint, so it must pass the full SSRF policy, not a string check.
+      await assertOAuthTokenEndpoint(tokenUrl.toString()).catch(() => {
+        throw Object.assign(new Error("The OAuth token endpoint must be a public HTTPS address on port 443"), { status: 400 });
+      });
       if (!r.body.clientId?.trim()) throw new Error("OAuth clientId is required");
       const state = randomBytes(32).toString("base64url");
       const stateHash = createHash("sha256").update(state).digest("hex");
@@ -235,12 +240,13 @@ export function registerEmailManagementRoutes(
           client_id: state.clientId, redirect_uri: state.redirectUri, code_verifier: state.verifier
         });
         if (state.clientSecret) body.set("client_secret", state.clientSecret);
-        const tokenResponse = await fetch(state.tokenUrl, {
-          method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-          body, redirect: "error", signal: AbortSignal.timeout(15_000)
+        // Audit M1: SSRF-safe exchange (public HTTPS only, pinned address, no redirects). The provider's error text is
+        // not echoed back: only the HTTP status is reported.
+        const tokenResponse = await postOAuthTokenRequest(state.tokenUrl, body).catch(() => {
+          throw new Error("OAuth token exchange failed: the token endpoint is not a reachable public HTTPS address");
         });
-        const token = await tokenResponse.json() as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
-        if (!tokenResponse.ok || !token.access_token) throw new Error(`OAuth token exchange failed: ${token.error || tokenResponse.status}`);
+        const token = tokenResponse.json as { access_token?: string; refresh_token?: string; expires_in?: number };
+        if (!tokenResponse.ok || typeof token.access_token !== "string" || !token.access_token) throw new Error(`OAuth token exchange failed (HTTP ${tokenResponse.status})`);
         const internalCtx: AuthContext = { userId: state.userId, workspaceId: state.workspaceId, permissions: ["admin:all"] };
         const account = await repo.getAccount(internalCtx, state.companyId, state.accountId);
         if (!account) throw Object.assign(new Error("Email account no longer exists"), { status: 404 });

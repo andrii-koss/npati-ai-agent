@@ -21,7 +21,7 @@ import { usageQuotasEnabled } from "./usage-quota-policy";
  */
 
 import type { FastifyInstance } from "fastify";
-import { WorkspaceAccessError } from "@npati/workspace";
+import { WorkspaceAccessError, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { CodeRunQueueEntry, CodeRunQueueState } from "./code-run-queue";
 import type { CodeRunRateLimitState } from "./code-run-rate-limit";
@@ -89,6 +89,8 @@ export interface CodeQueueStatusDeps {
   queue: { state(): CodeRunQueueState };
   /** R1 A.1: the periodic limiter's counters, so the panel shows the whole limit story in one place. */
   rateLimits: { state(): CodeRunRateLimitState };
+  /** Resolves only when the caller may see the company (throws otherwise), so one account never reads another's queue. */
+  companyAccess?: (ctx: AuthContext, companyId: string) => Promise<unknown>;
 }
 
 export function registerCodeQueueStatusRoutes(app: FastifyInstance, deps: CodeQueueStatusDeps): void {
@@ -99,6 +101,9 @@ export function registerCodeQueueStatusRoutes(app: FastifyInstance, deps: CodeQu
       // feature flag: this route changes nothing, and a status page must work while the feature is off.
       if (!ctx.permissions.includes("workspace:read") && !ctx.permissions.includes("*")) {
         throw new WorkspaceAccessError("Missing permission: workspace:read");
+      }
+      if (deps.companyAccess && !(await deps.companyAccess(ctx, request.params.companyId).then(() => true, () => false))) {
+        return reply.code(404).send({ error: { code: "COMPANY_NOT_FOUND", message: "Company not found" } });
       }
       return buildCodeQueueStatusView(deps.queue.state(), deps.rateLimits.state(), {
         userId: ctx.userId,

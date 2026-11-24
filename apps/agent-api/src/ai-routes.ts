@@ -5,6 +5,7 @@ import { OmniRouteError, type AIEngine, type MarketplaceQuery, type OmniRouteMar
 import { AIPreferencesStore, type AICompressionMode, type AIMode } from "./ai-preferences";
 import type { AuthProvider } from "./auth";
 import { ResilientEmbeddingPipeline } from "./resilient-inference-pipeline";
+import { isAdministrator } from "./admin-access";
 
 const publicMarketplaceMessage = (error: unknown) => error instanceof Error ? error.message.replace(/OmniRoute/gi, "NPATI AI") : "Unexpected AI marketplace error";
 
@@ -168,7 +169,8 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
 
   app.get("/ai/resilience", async (request, reply) => {
     try {
-      await authorize(auth, request, "workspace:read");
+      // Breakers and connection lockouts of the whole installation (every account's connections): operators only.
+      if (!isAdministrator(await authorize(auth, request, "workspace:read"))) return reply.code(403).send({ error: { code: "ADMIN_REQUIRED", message: "AI routing status is limited to administrators." } });
       if (!ai.resilienceStatus) return reply.code(503).send({ error: { code: "OMNIROUTE_RESILIENCE_UNAVAILABLE", message: "NPATI AI routing status is unavailable" } });
       return await ai.resilienceStatus();
     } catch (error) { return sendError(reply, error); }
@@ -205,6 +207,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
 
   app.get<{ Querystring: Record<string, string | undefined> }>("/ai/providers", async (request, reply) => {
     try {
+      await authorize(auth, request, "workspace:read");
       const scope = (request.query.scope as MarketplaceQuery["scope"]) || "ai";
       return (await marketplace.marketplace({ limit: 400, scope })).providers;
     }
@@ -222,7 +225,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   });
 
   app.get<{ Params: { providerId: string } }>("/ai/providers/:providerId", async (request, reply) => {
-    try { return await marketplace.provider(request.params.providerId); }
+    try { await authorize(auth, request, "workspace:read"); return await marketplace.provider(request.params.providerId); }
     catch (error) { return sendError(reply, error); }
   });
 
@@ -249,7 +252,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
       baseUrl: { type: "string", maxLength: 2000 }, providerSpecificData: { type: "object", additionalProperties: true },
     } } } },
     async (request, reply) => {
-      try { return await marketplace.connect(request.params.providerId, request.body); }
+      try { await authorize(auth, request, "workspace:write"); return await marketplace.connect(request.params.providerId, request.body); }
       catch (error) { return sendError(reply, error); }
     },
   );
@@ -266,29 +269,29 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
   });
 
   app.post<{ Params: { providerId: string } }>("/ai/providers/:providerId/test", async (request, reply) => {
-    try { return await marketplace.test(request.params.providerId); }
+    try { await authorize(auth, request, "workspace:write"); return await marketplace.test(request.params.providerId); }
     catch (error) { return sendError(reply, error); }
   });
 
   app.post<{ Params: { providerId: string } }>("/ai/providers/:providerId/refresh-models", async (request, reply) => {
-    try { return await marketplace.refreshModels(request.params.providerId); }
+    try { await authorize(auth, request, "workspace:write"); return await marketplace.refreshModels(request.params.providerId); }
     catch (error) { return sendError(reply, error); }
   });
 
   app.post<{ Params: { providerId: string } }>("/ai/providers/:providerId/oauth/start", async (request, reply) => {
-    try { return await marketplace.startOAuth(request.params.providerId); }
+    try { await authorize(auth, request, "workspace:write"); return await marketplace.startOAuth(request.params.providerId); }
     catch (error) { return sendError(reply, error); }
   });
 
   app.post<{ Params: { flowId: string } }>("/ai/oauth/:flowId/poll", async (request, reply) => {
-    try { return await marketplace.pollOAuth(request.params.flowId); }
+    try { await authorize(auth, request, "workspace:write"); return await marketplace.pollOAuth(request.params.flowId); }
     catch (error) { return sendError(reply, error); }
   });
 
   app.post<{ Params: { flowId: string }; Body: { code: string } }>("/ai/oauth/:flowId/complete", {
     schema: { body: { type: "object", required: ["code"], additionalProperties: false, properties: { code: { type: "string", minLength: 1, maxLength: 10000 } } } },
   }, async (request, reply) => {
-    try { return await marketplace.completeOAuth(request.params.flowId, request.body.code); }
+    try { await authorize(auth, request, "workspace:write"); return await marketplace.completeOAuth(request.params.flowId, request.body.code); }
     catch (error) { return sendError(reply, error); }
   });
 

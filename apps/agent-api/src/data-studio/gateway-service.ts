@@ -10,7 +10,7 @@ import type { DataBackend, DataEnvironmentName } from "./types";
 import { ProjectApiKeyManager } from "./api-key-manager";
 import { ProjectApiRateLimiter } from "./rate-limiter";
 import { generateOpenApiSpec, generateProjectTypeScriptTypes } from "./openapi-generator";
-import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH, ensureProjectSdkFile } from "./project-sdk-file";
+import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH, ensureProjectBrowserConfigFile, ensureProjectSdkFile } from "./project-sdk-file";
 import type { ProjectAuthService } from "./auth-service";
 import type { ProjectWorkspace } from "../project-workspace";
 import type { DataProvider, SchemaSnapshot } from "./data-provider";
@@ -117,6 +117,8 @@ export class ProjectApiGatewayService {
     const env = await this.repository.environment(ctx, companyId, backend.id, "dev");
     const keys = ProjectApiKeyManager.ensureKeys(env.providerConfig, "dev", this.vault);
     if (keys.secretKey) await this.repository.setEnvironment(ctx, companyId, backend.id, "dev", { providerConfig: keys.updatedConfig });
+    // A plain HTML site loads npati-config.js instead of the agent copying the public key by hand.
+    await ensureProjectBrowserConfigFile(ctx, companyId, projectId, keys.publishableKey, this.workspace).catch(() => undefined);
     return {
       PROJECT_API_URL: `${publicBase.replace(/\/+$/, "")}/v1/projects/${encodeURIComponent(projectId)}`,
       PROJECT_PUBLISHABLE_KEY: keys.publishableKey,

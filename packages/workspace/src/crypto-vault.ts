@@ -1,5 +1,39 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 
+/**
+ * Secrets that ship in this repository (compose defaults, development fallbacks, test fixtures) are public. They live
+ * here, not in `insecure-secrets.ts`, because this module must import nothing but node:crypto (security gate G1);
+ * `insecure-secrets.ts` re-exports them. Security audit 2026-11-24, C1.
+ */
+const INSECURE_SECRET_PATTERNS: readonly RegExp[] = [
+  /^npati-local-/i,
+  /^npati-development-/i,
+  /change-before-production/i,
+  /change-me/i,
+  /^npati-agent-internal-local$/i,
+  /^oidc_test_secret$/i,
+  // Placeholders from .env.example / .env.production.example copied verbatim.
+  /^replace[-_ ]?with/i,
+  /^your[-_]/i,
+];
+const INSECURE_PASSWORDS = new Set(["npati", "postgres", "password", "admin", "minioadmin", "changeme", "secret"]);
+
+/** True when the value is one of the publicly known defaults shipped with NPATI. */
+export function isInsecureDefaultSecret(value: string | undefined | null): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return INSECURE_PASSWORDS.has(trimmed.toLowerCase()) || INSECURE_SECRET_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/**
+ * Production is NODE_ENV=production OR NPATI_ENV=production: compose runs every service with NODE_ENV=production
+ * while NPATI_ENV defaults to development, and a check keyed on NPATI_ENV alone accepted the public compose keys.
+ */
+export function isProductionEnvironment(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === "production" || env.NPATI_ENV === "production";
+}
+
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits for GCM
 const SALT_LENGTH = 16;
@@ -27,10 +61,22 @@ export interface EncryptedPayload {
  * eagerly validated (explicit key) and the deferred (ambient `process.env` key) paths cannot drift apart.
  */
 function detectRefusal(configuredKey: string | undefined, masterKey: string): string | null {
-  if (!configuredKey && process.env.NODE_ENV === "production") return PRODUCTION_KEY_REQUIRED;
-  if (process.env.NPATI_ENV === "production" && configuredKey?.startsWith("npati-local-development-")) return UNSAFE_DEVELOPMENT_KEY;
+  // Production is NODE_ENV=production OR NPATI_ENV=production: compose runs NODE_ENV=production with NPATI_ENV
+  // defaulting to development, and a check on NPATI_ENV alone accepted the public compose default (audit C1).
+  const production = isProductionEnvironment();
+  if (!configuredKey && production) return PRODUCTION_KEY_REQUIRED;
+  if (production && isInsecureDefaultSecret(configuredKey)) return UNSAFE_DEVELOPMENT_KEY;
   if (masterKey.length < 32) return KEY_TOO_SHORT;
   return null;
+}
+
+/**
+ * Decrypt-only keys (`NPATI_ENCRYPTION_KEY_PREVIOUS`, comma separated) for data written before a key rotation.
+ * They may be the leaked development default: that is the case they exist for. New data is always written with
+ * the current key, and `scripts/reencrypt-vault-secrets.ts` rewrites old ciphertext so the old key can be removed.
+ */
+function previousKeys(): string[] {
+  return (process.env.NPATI_ENCRYPTION_KEY_PREVIOUS ?? "").split(",").map((key) => key.trim()).filter(Boolean);
 }
 
 export class CryptoVault {
@@ -48,11 +94,14 @@ export class CryptoVault {
    * unusable configuration throws instead of falling back to the development key. What moved is the moment.
    */
   private readonly refusal: string | null;
+  /** Decrypt-only keys from before a rotation; only for the ambient (environment) configuration. */
+  private readonly decryptOnlyKeys: string[];
 
-  constructor(masterKey?: string) {
+  constructor(masterKey?: string, options: { previousKeys?: string[] } = {}) {
     const configuredKey = masterKey || process.env.NPATI_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
     this.masterKey = configuredKey || DEVELOPMENT_MASTER_KEY;
     this.refusal = detectRefusal(configuredKey, this.masterKey);
+    this.decryptOnlyKeys = (options.previousKeys ?? (masterKey ? [] : previousKeys())).filter((key) => key !== this.masterKey);
     // A key handed to this constructor explicitly is validated **here**: the caller is asking for that key at
     // that moment, so a bad one is that call's failure and there is nothing to wait for.
     //
@@ -78,6 +127,12 @@ export class CryptoVault {
     return scryptSync(this.masterKey, salt, KEY_LENGTH);
   }
 
+  /** The same derivation for a decrypt-only previous key; guarded identically. */
+  private derivePreviousKey(salt: Buffer, previousKey: string): Buffer {
+    this.assertUsable();
+    return scryptSync(previousKey, salt, KEY_LENGTH);
+  }
+
   /**
    * Encrypts plaintext string with AES-256-GCM at rest.
    * Produces a formatted string `v1$salt$iv$tag$ciphertext` in hex/base64.
@@ -100,6 +155,27 @@ export class CryptoVault {
    * Throws an error if ciphertext or tag was tampered with.
    */
   decrypt(encryptedString: string): string {
+    return this.decryptWithKeyInfo(encryptedString).plaintext;
+  }
+
+  /**
+   * Decrypts with the current key, then with each decrypt-only previous key. `usedPreviousKey` tells the
+   * re-encryption script which values still depend on a key that is being retired.
+   */
+  decryptWithKeyInfo(encryptedString: string): { plaintext: string; usedPreviousKey: boolean } {
+    try {
+      return { plaintext: this.decryptWith(encryptedString, this.masterKey), usedPreviousKey: false };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("INVALID_ENCRYPTED_PAYLOAD")) throw error;
+      if (error instanceof Error && error.message.startsWith("NPATI_ENCRYPTION_KEY_")) throw error;
+      for (const key of this.decryptOnlyKeys) {
+        try { return { plaintext: this.decryptWith(encryptedString, key), usedPreviousKey: true }; } catch { /* next key */ }
+      }
+      throw error;
+    }
+  }
+
+  private decryptWith(encryptedString: string, masterKey: string): string {
     this.assertUsable();
     const parts = encryptedString.split("$");
     if (parts.length !== 5 || parts[0] !== "v1") {
@@ -118,7 +194,7 @@ export class CryptoVault {
     const salt = Buffer.from(saltHex, "hex");
     const iv = Buffer.from(ivHex, "hex");
     const authTag = Buffer.from(authTagHex, "hex");
-    const key = this.deriveKey(salt);
+    const key = masterKey === this.masterKey ? this.deriveKey(salt) : this.derivePreviousKey(salt, masterKey);
 
     const decipher = createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);

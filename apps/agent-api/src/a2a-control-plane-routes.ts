@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore, type AuthContext } from "@npati/workspace";
-import type { AuthProvider } from "./auth";
+import { AuthenticationError, type AuthProvider } from "./auth";
+import { isAdministrator } from "./admin-access";
 import {
   type RoutingStrategyName,
   type StrategyResolutionResult,
@@ -49,7 +50,14 @@ export function registerA2AControlPlaneRoutes(
         permissions: ["*"],
       };
     }
-    return deps.auth.authenticate(req);
+    const scope = await deps.auth.authenticate(req);
+    // The control plane (routing, quotas, message bus, registries) is one shared, process-wide state: the code-run
+    // quota and every registry here serve all accounts. On a hosted installation any account could otherwise read or
+    // change it for everyone, so only the installation owner and NPATI administrators may use it.
+    if (!isAdministrator(scope)) {
+      throw new AuthenticationError("The orchestration control plane is limited to administrators.", 403, "ADMIN_REQUIRED");
+    }
+    return scope;
   };
 
   // -------------------------------------------------------------

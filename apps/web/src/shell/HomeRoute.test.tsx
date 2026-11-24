@@ -7,7 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const auth = vi.hoisted(() => ({ isAuthenticated: false, isLoading: false }));
 vi.mock("../AuthContext", () => ({ useAuth: () => auth }));
 vi.mock("../BusinessWorkspace", () => ({ useWorkspace: () => ({ overview: null }) }));
-vi.mock("../AuthModal", () => ({ AuthModal: () => null }));
+let lastAuthModal: { isOpen: boolean; initialMode?: string } | null = null;
+vi.mock("../AuthModal", () => ({ AuthModal: (props: { isOpen: boolean; initialMode?: string }) => { lastAuthModal = props; return null; } }));
 vi.mock("../i18n", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("./auth-helpers", () => ({ authFetch: vi.fn() }));
 import { Home } from "./HomeRoute";
@@ -67,4 +68,15 @@ it("opens chat for an authenticated visitor and shows landing after sign-out", a
   expect(host.textContent).toBe("Sign out");
   await act(async () => host.querySelector("button")!.click());
   expect(host.querySelector(".home-shell")).not.toBeNull();
+});
+
+it.each([["/login", "login"], ["/signup", "register"]])("opens the sign-in dialog on %s", async (path, mode) => {
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes><Route path={path} element={<Home />} /></Routes>
+    </MemoryRouter>,
+  ));
+  expect(host.querySelector(".home-shell")).not.toBeNull();
+  expect(lastAuthModal?.isOpen).toBe(true);
+  expect(lastAuthModal?.initialMode).toBe(mode);
 });

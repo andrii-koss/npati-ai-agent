@@ -48,7 +48,7 @@ function ScopeFields({ scope, setScope, companyId, setCompanyId, companies, agen
 export interface ConnectFormsProps {
   channel: Channel;
   companies: Company[];
-  onConnected: (connectionId: string, pairing?: { command: string; bot?: string }) => void;
+  onConnected: (connectionId: string, pairing?: { command: string; bot?: string; link?: string }) => void;
   onChanged: () => Promise<void>;
   setMessage: (msg: string) => void;
   busy: string;
@@ -80,7 +80,7 @@ export function ConnectForms({
           ? t("integrationsPage.drawer.connect.defaultBotNames.slack")
           : t("integrationsPage.drawer.connect.defaultBotNames.telegram"),
   );
-  const [pairing, setPairing] = useState<{ command: string; bot?: string } | null>(null);
+  const [pairing, setPairing] = useState<{ command: string; bot?: string; link?: string } | null>(null);
   const [waMethod, setWaMethod] = useState<"qr" | "cloud">("qr");
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [accessToken, setAccessToken] = useState("");
@@ -124,12 +124,12 @@ export function ConnectForms({
     setBusy(t("integrationsPage.drawer.connect.connecting"));
     setMessage("");
     try {
-      const result = await api<{ connection: Connection; pairingCommand: string }>("/integrations/telegram", {
+      const result = await api<{ connection: Connection; pairingCommand: string; pairingLink?: string }>("/integrations/telegram", {
         method: "POST",
         body: JSON.stringify({ scope, displayName: name, botToken: token, ...(scope !== "account" ? { companyId } : {}), ...(scope === "agent" ? { agentId } : {}) }),
       });
       setToken("");
-      const pair = { command: result.pairingCommand, bot: result.connection.botUsername || undefined };
+      const pair = { command: result.pairingCommand, bot: result.connection.botUsername || undefined, link: result.pairingLink };
       setPairing(pair);
       setMessage(t("integrationsPage.drawer.connect.messages.telegramSuccess"));
       await onChanged();
@@ -371,6 +371,7 @@ export function ConnectForms({
       {pairing && (
         <div className="provider-setup-note">
           <strong>{t("integrationsPage.drawer.connect.finishPairingInBot", { bot: pairing.bot || "your bot" })}</strong>
+          {pairing.link && <a className="button-primary" href={pairing.link} target="_blank" rel="noopener noreferrer">Telegram ↗</a>}
           <code>{pairing.command}</code>
         </div>
       )}

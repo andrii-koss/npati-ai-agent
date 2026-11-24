@@ -11,7 +11,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 /** F5 with an access token that expired: /auth/me says 401 and the installation session decides what happens next. */
 async function reloadWithExpiredToken(installationSession: () => Response | Promise<Response>) {
-  localStorage.setItem("npati_agent_access_token", "expired-token");
+  localStorage.setItem("npati_agent_session_marker", "npati-cookie-session:expired");
   localStorage.setItem("npati_agent_user", JSON.stringify({ id: "u1", email: "owner@example.com", displayName: "Owner", username: "owner", role: "user" }));
   const calls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -32,7 +32,7 @@ async function reloadWithExpiredToken(installationSession: () => Response | Prom
 describe("reloading the app while the access token has expired", () => {
   it("keeps the stored avatar when a local fallback profile omits it", async () => {
     const stored = { id: "u1", email: "owner@example.com", displayName: "Owner", username: "owner", role: "user", avatar: "/uploads/avatar.png" };
-    localStorage.setItem("npati_agent_access_token", "stored-token");
+    localStorage.setItem("npati_agent_session_marker", "npati-cookie-session:stored");
     setStoredAuthUser(stored);
     vi.stubGlobal("fetch", vi.fn(async (url: string) => json(200, url.endsWith("/auth/me")
       ? { success: true, data: { user: { id: "u1", displayName: "Owner" } } }
@@ -66,10 +66,17 @@ describe("reloading the app while the access token has expired", () => {
     expect(localStorage.getItem("npati_agent_user")).toContain("owner@example.com");
   });
 
-  it("takes the new token when the installation session answers", async () => {
-    const { seen } = await reloadWithExpiredToken(() => json(200, { success: true, data: { accessToken: "fresh-token", user: { id: "u1", email: "owner@example.com" } } }));
-    expect(seen.token).toBe("fresh-token");
-    expect(localStorage.getItem("npati_agent_access_token")).toBe("fresh-token");
+  it("takes the renewed cookie session and keeps the same session identity (audit L6 stage 2)", async () => {
+    const { seen } = await reloadWithExpiredToken(() => json(200, { success: true, data: { session: { mode: "cookie", expiresAt: new Date(Date.now() + 900_000).toISOString() }, user: { id: "u1", email: "owner@example.com" } } }));
+    expect(seen.token).toBe("npati-cookie-session:expired");
+    expect(seen.user?.email).toBe("owner@example.com");
+  });
+
+  it("never stores a credential in page storage, even when an older server still returns one", async () => {
+    await reloadWithExpiredToken(() => json(200, { success: true, data: { accessToken: "eyJ.fresh.token", user: { id: "u1", email: "owner@example.com" } } }));
+    const stored = Object.keys(localStorage).map((key) => localStorage.getItem(key) ?? "").join(" ");
+    expect(stored).not.toContain("eyJ.fresh.token");
+    expect(localStorage.getItem("npati_agent_session_marker")).toMatch(/^npati-cookie-session:/);
   });
 
   it("signs out when the installation session is refused for good", async () => {

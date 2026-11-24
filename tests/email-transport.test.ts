@@ -6,6 +6,10 @@ import { EmailInboxWorker } from "../apps/agent-api/src/email-worker";
 import type { CompanyEmailAccount, CompanyEmailMessage } from "../apps/agent-api/src/email-inbox-types";
 import type { AuthContext } from "@npati/workspace";
 
+// These suites talk to in-process mail servers on 127.0.0.1. The destination policy (audit M2) refuses private
+// addresses unless a self-hosted owner opts in; that policy is pinned in tests/security-audit-m1-m2-email-ssrf.test.ts.
+process.env.NPATI_MAIL_ALLOW_PRIVATE_HOSTS = "true";
+
 const servers: net.Server[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));

@@ -7,6 +7,7 @@ import { EmailAIProcessor, type EmailAutomationHooks } from "./email-ai-processo
 import type { EmailInboxRepository } from "./email-inbox-repository";
 import type { CompanyEmailAccount, CompanyEmailJob } from "./email-inbox-types";
 import { ImapEmailTransport, SmtpEmailTransport } from "./email-transport";
+import { postOAuthTokenRequest } from "./email-destination-policy";
 import type { EmailAttachmentStorage } from "./email-attachment-storage";
 
 function workerContext(account: CompanyEmailAccount): AuthContext {
@@ -282,15 +283,11 @@ export class EmailInboxWorker {
     if (config.accessToken && expiresAt > Date.now() + 60_000) return account;
     const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: config.refreshToken, client_id: config.clientId });
     if (config.clientSecret) body.set("client_secret", config.clientSecret);
-    const response = await fetch(config.tokenUrl, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-      signal: AbortSignal.timeout(15_000),
-    });
+    // Audit M1: SSRF-safe (public HTTPS only, pinned address, redirects refused instead of followed).
+    const response = await postOAuthTokenRequest(config.tokenUrl, body);
     if (!response.ok) throw new Error(`OAuth token refresh failed (${response.status})`);
-    const token = await response.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
-    if (!token.access_token) throw new Error("OAuth token refresh returned no access_token");
+    const token = response.json as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (typeof token.access_token !== "string" || !token.access_token) throw new Error("OAuth token refresh returned no access_token");
     const patch = {
       accessToken: token.access_token,
       refreshToken: token.refresh_token || config.refreshToken,

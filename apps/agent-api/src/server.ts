@@ -5,7 +5,10 @@ import { MinioObjectStorage } from "./object-storage";
 import { lookup } from "node:dns/promises";
 import { keepPoolErrorsFromCrashing } from "./pg-pool-errors";
 import { watchEventLoop } from "./event-loop-watch";
+import { assertProductionSecrets } from "@npati/workspace";
 
+// Audit C1: never serve with a secret that ships in this repository (or a missing encryption key).
+assertProductionSecrets();
 keepPoolErrorsFromCrashing();
 watchEventLoop();
 

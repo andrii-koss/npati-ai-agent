@@ -1360,3 +1360,25 @@ body:has(.project-chat-preview-layer) .message-stream {
   font-size: 13px;
   line-height: 1.35;
 }
+
+/* The agent's changes in an opened file, as an editor's change gutter: a bar beside added (green) and modified (blue)
+   lines, a red mark where lines were deleted; the before/after view lists removed and added lines. */
+.chat-file-marks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.chat-file-marks-inner { position: absolute; inset: 0 0 auto 0; will-change: transform; }
+.chat-file-mark { position: absolute; left: 0; right: 0; height: 20px; }
+.chat-file-mark.is-added { background: rgba(34, 197, 94, .13); box-shadow: inset 3px 0 0 #22c55e; }
+.chat-file-mark.is-modified { background: rgba(59, 130, 246, .14); box-shadow: inset 3px 0 0 #3b82f6; }
+.chat-file-mark.is-deleted { height: 2px; background: #ef4444; }
+.chat-file-mark.is-deleted::before { content: ""; position: absolute; left: 0; top: -4px; border: 5px solid transparent; border-left-color: #ef4444; }
+.chat-file-change-count { display: inline-flex; gap: 6px; margin-right: 6px; font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.preview-header-icon-btn.is-active { background: rgba(59, 130, 246, .14); color: #2563eb; }
+.chat-file-diff { flex: 1; min-width: 0; overflow: auto; padding: 8px 0; color: #e8edf5; scrollbar-width: thin; scrollbar-color: #b8b8b8 transparent; }
+.chat-file-diff-line { display: flex; min-width: max-content; white-space: pre; tab-size: 2; }
+.chat-file-diff-line.is-add { background: rgba(34, 197, 94, .16); }
+.chat-file-diff-line.is-del { background: rgba(239, 68, 68, .18); }
+.chat-file-diff-number { flex: 0 0 44px; padding-right: 8px; text-align: right; color: #64748b; user-select: none; }
+.chat-file-diff-sign { flex: 0 0 18px; text-align: center; color: #94a3b8; user-select: none; }
+.chat-file-diff-line.is-add .chat-file-diff-sign { color: #4ade80; }
+.chat-file-diff-line.is-del .chat-file-diff-sign { color: #f87171; }
+.chat-file-diff-line.is-del .chat-file-diff-text { color: #fca5a5; }
+.chat-file-diff-text { padding-right: 16px; }

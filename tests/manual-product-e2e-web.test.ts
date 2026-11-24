@@ -312,7 +312,11 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     expect(runBody.run.id).toBeDefined();
     expect(["completed", "queued", "running"], JSON.stringify(runBody.run)).toContain(runBody.run.status);
 
-    // Inspect capabilities & run via Inspector endpoint
+    // Inspect capabilities & run via Inspector endpoint. The Inspector is an administrator tool: the ordinary account
+    // in this flow is refused, and the same flow continues as the installation owner.
+    const refusedInspect = await app.inject({ method: "GET", url: `/capabilities/inspect?slice=agent-callable&companyId=${company.id}` });
+    expect(refusedInspect.statusCode).toBe(403);
+    authContext = { ...authContext, permissions: [...authContext.permissions, "owner"] };
     const inspectRes = await app.inject({
       method: "GET",
       url: `/capabilities/inspect?slice=agent-callable&companyId=${company.id}`,

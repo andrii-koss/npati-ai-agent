@@ -139,6 +139,8 @@ export function registerProjectProductionRoutes(app: FastifyInstance, workspace:
 
   app.get<{ Params: Pick<Params, "companyId"> }>("/companies/:companyId/projects/production/capabilities", async (request, reply) => {
     try {
+      // Sign-in first: even "Production is off" is not answered to a visitor without an account.
+      await auth.authenticate(request);
       if (!serviceConfig()) return { enabled: false };
       const { companyId } = request.params;
       const ctx = await owner(request, companyId);
@@ -176,6 +178,7 @@ export function registerProjectProductionRoutes(app: FastifyInstance, workspace:
         const production = await productionRequest(ctx, request.params, "GET", undefined, query.size ? `?${query}` : "");
         return { deployment, production };
       }
+      await auth.authenticate(request);
       if (!serviceConfig()) return { enabled: false };
       const { ctx, project } = await authorize(request);
       if (inactive.has(project.status)) return { enabled: false };

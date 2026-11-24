@@ -60,12 +60,14 @@ describe("a request naming a project several projects share", () => {
 });
 
 describe("credentials in request URLs", () => {
-  it("no longer accepts a session token as ?authToken=, but keeps ?token= for media and event streams", async () => {
+  it("accepts a session token in no URL parameter (audit L6: media and event streams use stream tickets)", async () => {
     const secret = "url-credential-secret-at-least-thirty-two-chars";
     const provider = new NpatiBackendAuthProvider({ jwtSecret: secret, workspaceStore: { initialize: async () => undefined } as never });
     const token = createMockNpatiJwt({ userId: "url-user" }, secret);
     await expect(provider.authenticate({ headers: {}, query: { authToken: token } } as never)).rejects.toThrow();
-    await expect(provider.authenticate({ headers: {}, query: { token } } as never)).resolves.toMatchObject({ workspaceId: "workspace:url-user" });
+    await expect(provider.authenticate({ headers: {}, query: { token }, url: "/attachments/x", method: "GET" } as never))
+      .rejects.toMatchObject({ code: "TOKEN_IN_URL_REFUSED" });
+    await expect(provider.authenticate({ headers: { authorization: `Bearer ${token}` }, query: {} } as never)).resolves.toMatchObject({ workspaceId: "workspace:url-user" });
   });
 
   it("writes request URLs to the log without their credentials", async () => {

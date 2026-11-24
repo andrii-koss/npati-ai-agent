@@ -20,7 +20,8 @@ import { projectConversationUrl } from "./chat-development-view";
 import { chatCardLabels } from "./chat-card-i18n";
 import { useChatResearchProgress } from "./use-chat-research-progress";
 import { useChatOpeningPosition } from "./use-chat-opening-position";
-import { mergeConversationMessages, nearChatBottom } from "./chat-timeline";
+import { mergeConversationMessages } from "./chat-timeline";
+import { useChatFollowBottom } from "./use-chat-follow-bottom";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer } from "./business-workspace-composer";
@@ -695,6 +696,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }
   const { displayMessages, timeline, agentWorking, previewBusyFor, deletedProcessOf, lastCardEntry, runTotal, previewAnchor, projectPreview, bottomCard } = chatTimelinePresentation({ messages, development, selected, sending, codeInbox, earlierMessages, entryProjectCard: needsEntryProject && entryProjectCard?.id === entryProjectId && entryProjectCard.companyId === entryCompanyId ? entryProjectCard : null, setSelectedProject });
+  const { noteUserInput, updateFollow } = useChatFollowBottom(messageStreamRef, followBottomRef, agentWorking || sending);
   rowStateRef.current = { displayMessages, activeTurn };
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
@@ -710,9 +712,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       )}
       <div className="onboarding-live-chat standard-live-chat">
-        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; if (!openingPosition || userScrolledRef.current || sending) followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
-          onPointerDown={() => { cancelOpeningPosition(); userScrolledRef.current = true; }}
-          onWheel={() => { cancelOpeningPosition(); userScrolledRef.current = true; }} onTouchMove={() => { cancelOpeningPosition(); userScrolledRef.current = true; }} onKeyDown={() => { cancelOpeningPosition(); userScrolledRef.current = true; }}>
+        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; if (!openingPosition || userScrolledRef.current || sending) updateFollow(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
+          onPointerDown={event => { cancelOpeningPosition(); userScrolledRef.current = true; noteUserInput(event); }}
+          onWheel={event => { cancelOpeningPosition(); userScrolledRef.current = true; noteUserInput(event); }} onTouchMove={event => { cancelOpeningPosition(); userScrolledRef.current = true; noteUserInput(event); }} onKeyDown={event => { cancelOpeningPosition(); userScrolledRef.current = true; noteUserInput(event); }}>
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>

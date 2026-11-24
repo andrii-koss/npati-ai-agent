@@ -258,6 +258,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     objectStorage,
     redisHealthCheck,
     coreBackendHealthCheck,
+    authProvider,
   });
 
   registerCapabilityRoutes(app, {

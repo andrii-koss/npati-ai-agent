@@ -1,5 +1,6 @@
 import net from "node:net";
 import tls from "node:tls";
+import { openMailSocket } from "./email-destination-policy";
 import type { CompanyEmailAccount, CompanyEmailMessage, EmailAttachment, ImapConfig, SmtpConfig } from "./email-inbox-types";
 
 type MailSocket = net.Socket | tls.TLSSocket;
@@ -79,9 +80,8 @@ export class SmtpEmailTransport {
     if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
       throw new Error(config.authType === "oauth2" ? "SMTP OAuth access token is required" : "SMTP password is required");
     }
-    let socket: MailSocket = config.secure
-      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
-      : net.createConnection({ host: config.host, port: config.port });
+    // Audit M2: resolved and validated (no private/internal destinations, mail ports only) before connecting.
+    let socket: MailSocket = await openMailSocket(config.host!, config.port!, Boolean(config.secure));
     await waitForSocket(socket, config.secure ? "secureConnect" : "connect", timeoutMs);
     let session = new SmtpSession(socket, timeoutMs);
     const greeting = await session.readReply();
@@ -113,9 +113,8 @@ export class SmtpEmailTransport {
       throw new Error(config.authType === "oauth2" ? "SMTP OAuth access token is required" : "SMTP password is required");
     }
 
-    let socket: MailSocket = config.secure
-      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
-      : net.createConnection({ host: config.host, port: config.port });
+    // Audit M2: resolved and validated (no private/internal destinations, mail ports only) before connecting.
+    let socket: MailSocket = await openMailSocket(config.host!, config.port!, Boolean(config.secure));
     await waitForSocket(socket, config.secure ? "secureConnect" : "connect", timeoutMs);
     let session = new SmtpSession(socket, timeoutMs);
     const greeting = await session.readReply();
@@ -311,9 +310,8 @@ export class ImapEmailTransport {
     if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
       throw new Error(config.authType === "oauth2" ? "IMAP OAuth access token is required" : "IMAP password is required");
     }
-    let socket: MailSocket = config.secure !== false
-      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
-      : net.createConnection({ host: config.host, port: config.port });
+    // Audit M2: resolved and validated (no private/internal destinations, mail ports only) before connecting.
+    let socket: MailSocket = await openMailSocket(config.host!, config.port!, config.secure !== false);
     await waitForSocket(socket, config.secure !== false ? "secureConnect" : "connect", timeoutMs);
     let session = new ImapSession(socket, timeoutMs);
     await session.readUntil(/(?:^|\r\n)\* (?:OK|PREAUTH)[^\r\n]*\r\n/i);
@@ -340,9 +338,8 @@ export class ImapEmailTransport {
     if (config.authType === "oauth2" ? !config.accessToken : !config.password) {
       throw new Error(config.authType === "oauth2" ? "IMAP OAuth access token is required" : "IMAP password is required");
     }
-    let socket: MailSocket = config.secure !== false
-      ? tls.connect({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: true })
-      : net.createConnection({ host: config.host, port: config.port });
+    // Audit M2: resolved and validated (no private/internal destinations, mail ports only) before connecting.
+    let socket: MailSocket = await openMailSocket(config.host!, config.port!, config.secure !== false);
     await waitForSocket(socket, config.secure !== false ? "secureConnect" : "connect", timeoutMs);
     let session = new ImapSession(socket, timeoutMs);
     await session.readUntil(/(?:^|\r\n)\* (?:OK|PREAUTH)[^\r\n]*\r\n/i);

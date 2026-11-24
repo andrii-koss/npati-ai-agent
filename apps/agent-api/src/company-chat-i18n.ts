@@ -213,6 +213,32 @@ export function selfReviewFindingsNotice(language: CompanyChatLanguage, detail: 
   return `**${labels[language]}**\n\n${detail}`;
 }
 
+/**
+ * The review's findings after a fix pass that changed the code in a project with no checks to re-run (a plain HTML
+ * site). The run does not certify the fix, but it must not tell the user the problems "could not be fixed" either.
+ */
+export function selfReviewFixedUnverifiedNotice(language: CompanyChatLanguage, detail: string): string {
+  const labels: Record<CompanyChatLanguage,string> = {
+    en:"The automatic code review found these issues; the agent changed the code to fix them (not re-checked automatically):",
+    uk:"Автоматична перевірка коду знайшла ці зауваження; агент змінив код, щоб їх виправити (повторно автоматично не перевірялось):",
+    ru:"Автоматическая проверка кода нашла эти замечания; агент изменил код, чтобы их исправить (повторно автоматически не проверялось):",
+    de:"Die automatische Code-Prüfung hat diese Probleme gefunden; der Agent hat den Code geändert, um sie zu beheben (nicht erneut automatisch geprüft):",
+    fr:"La revue automatique du code a trouvé ces problèmes ; l’agent a modifié le code pour les corriger (non revérifié automatiquement) :",
+    es:"La revisión automática del código encontró estos problemas; el agente cambió el código para corregirlos (no se volvió a comprobar automáticamente):",
+    it:"La revisione automatica del codice ha trovato questi problemi; l’agente ha modificato il codice per correggerli (non ricontrollato automaticamente):",
+    pl:"Automatyczny przegląd kodu znalazł te problemy; agent zmienił kod, aby je naprawić (nie sprawdzono ponownie automatycznie):",
+    pt:"A revisão automática do código encontrou estes problemas; o agente alterou o código para corrigi-los (não verificado novamente de forma automática):",
+    nl:"De automatische codereview vond deze problemen; de agent heeft de code aangepast om ze op te lossen (niet automatisch opnieuw gecontroleerd):",
+    tr:"Otomatik kod incelemesi bu sorunları buldu; ajan bunları düzeltmek için kodu değiştirdi (otomatik olarak yeniden denetlenmedi):",
+    zh:"自动代码审查发现了以下问题；代理已修改代码进行修复（未自动复查）：",
+    ja:"自動コードレビューで次の問題が見つかりました。エージェントが修正のためにコードを変更しました（自動の再確認はしていません）：",
+    ko:"자동 코드 검토에서 다음 문제를 발견했고, 에이전트가 이를 고치기 위해 코드를 변경했습니다(자동으로 다시 확인하지 않음):",
+    ar:"وجدت مراجعة الشيفرة التلقائية هذه المشكلات؛ عدّل الوكيل الشيفرة لإصلاحها (لم تتم إعادة التحقق تلقائيًا):",
+    hi:"स्वचालित कोड समीक्षा में ये समस्याएँ मिलीं; एजेंट ने इन्हें ठीक करने के लिए कोड बदला (स्वचालित रूप से दोबारा जाँचा नहीं गया):",
+  };
+  return `**${labels[language]}**\n\n${detail}`;
+}
+
 export function selfReviewUnavailableNotice(language: CompanyChatLanguage): string {
   const labels: Record<CompanyChatLanguage,string> = {
     en:"⚠️ Not verified: the automatic code review could not finish, so this result was not reviewed.",
@@ -237,7 +263,7 @@ export function selfReviewUnavailableNotice(language: CompanyChatLanguage): stri
 
 /** User-facing copy policy only; execution and verification remain unchanged. */
 export function codingChatResponseInstruction(): string {
-  return "\nCommunication: keep public progress updates to one short sentence about the actual next action. Unless the user explicitly asks for a detailed report, finish with 2-4 concise sentences: the concrete changes, actual verification result, and any actionable blocker. Do not repeat command logs, a file-by-file report, unchanged-file lists or unsolicited next steps; real execution details are available in the chat activity. Do not claim Preview is ready before the system confirms it. Answer in the user request language.";
+  return "\nCommunication: keep public progress updates to one short sentence about the actual next action. Unless the user explicitly asks for a detailed report, finish with a short structured Markdown summary (one bold result line, then 2-4 concise sentences as bullets): the concrete changes, actual verification result, and any actionable blocker. Do not repeat command logs, a file-by-file report, unchanged-file lists or unsolicited next steps; real execution details are available in the chat activity. Do not claim Preview is ready before the system confirms it. Answer in the user request language.";
 }
 
 type CardCopy = { type: string; business: string; confidence: string; company: string; status: string; active: string; completed: string; schedule: string; timezone: string; nextRun: string; mode: string; steps: string; toolCalls: string; duration: string; openMemory: string; openAutomations: string; openActivity: string; openContent: string };

@@ -1,12 +1,15 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { NpatiAuthClient } from "@npati/hub-connector";
 import { InstallationAuthStore } from "./installation-auth";
+import { sessionBearer } from "./auth";
+import { accessTokenFromCookie, clearSessionCookies } from "./browser-session";
 
 const COOKIE = "npati_agent_session";
 const cookie = (request: FastifyRequest) => (request.headers.cookie ?? "").split(";")
   .map((part) => part.trim().split("="))
   .find(([name]) => name === COOKIE)?.slice(1).join("=");
-const bearer = (request: FastifyRequest) => request.headers.authorization?.replace(/^Bearer /, "");
+// L6 stage 2: a browser's access token is in the HttpOnly session cookie, not in a header.
+const bearer = (request: FastifyRequest) => sessionBearer(request.headers.authorization) || accessTokenFromCookie(request);
 const failure = (reply: FastifyReply, error: unknown) => reply.code(Number((error as any)?.status ?? 502)).send({
   success: false,
   error: { code: "INSTALLATION_AUTH_FAILED", message: error instanceof Error ? error.message : "Installation authorization failed" },
@@ -91,7 +94,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
 
   registerPost("/auth/installation/browser-logout", async (request, reply) => {
     await store.clearBrowserSession(cookie(request));
-    reply.header("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`);
+    reply.header("set-cookie", [`${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`, ...clearSessionCookies(request)]);
     return reply.send({ success: true });
   });
 
@@ -105,7 +108,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
       await authClient!.revokeInstallation!(accessToken, state.installationId);
       await store.clearBrowserSession(cookie(request));
       if (options.deploymentType !== "npati_hosted") await store.clearAuthorization();
-      reply.header("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`);
+      reply.header("set-cookie", [`${COOKIE}=; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=0`, ...clearSessionCookies(request)]);
       return reply.send({ success: true });
     } catch (error) { return failure(reply, error); }
   });

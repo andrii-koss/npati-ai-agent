@@ -167,7 +167,7 @@ export function registerApiKeyRoutes(app: FastifyInstance, repo: ApiKeysReposito
       const { token, clientIp } = request.body || {};
       if (!token) return reply.status(400).send({ error: "TOKEN_REQUIRED", message: "Token is required" });
 
-      const checkIp = clientIp || (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || request.ip;
+      const checkIp = clientIp || request.ip /* audit L2: forwarded headers only via trustProxy */;
       const result = remoteTokens.verifyRemoteToken(token, checkIp);
       if (!result.isValid) {
         return reply.status(401).send({ isValid: false, error: result.error });

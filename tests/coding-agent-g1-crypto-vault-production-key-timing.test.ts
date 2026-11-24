@@ -66,7 +66,8 @@ const DERIVATION_GUARD_REMOVED = "    return scryptSync(this.masterKey, salt, KE
 const ENVIRONMENT_NAMES = ["NODE_ENV", "NPATI_ENV", "NPATI_ENCRYPTION_KEY", "ENCRYPTION_KEY"] as const;
 
 function readRepoFile(relativePath: string): string {
-  return readFileSync(path.join(workspaceRoot, relativePath), "utf8");
+  // The anchors below are written with "\n"; a Windows checkout (core.autocrlf) has CRLF in the working tree.
+  return readFileSync(path.join(workspaceRoot, relativePath), "utf8").replace(/\r\n/g, "\n");
 }
 
 function snapshotEnvironment(): Record<string, string | undefined> {

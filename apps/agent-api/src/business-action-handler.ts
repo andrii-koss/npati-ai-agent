@@ -566,7 +566,13 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
 
             let goal: Goal;
             if (directive.action === "create") {
-              goal = await workspaceStore.createGoal(auth, targetBusinessId, { ...goalInput, title });
+              // One answer can create the same goal twice (the Business Profile tool and a goal command): a goal with
+              // the same title in this Business is updated instead of duplicated.
+              const sameTitle = (await workspaceStore.listGoals(auth, targetBusinessId))
+                .find((item) => item.title.trim().toLocaleLowerCase() === title.toLocaleLowerCase());
+              goal = sameTitle
+                ? await workspaceStore.updateGoal(auth, targetBusinessId, sameTitle.id, { ...goalInput, title: sameTitle.title })
+                : await workspaceStore.createGoal(auth, targetBusinessId, { ...goalInput, title });
             } else {
               // Update existing goal
               const existingGoals = await workspaceStore.listGoals(auth, targetBusinessId);

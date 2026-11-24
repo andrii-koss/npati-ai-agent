@@ -15,6 +15,6 @@ export function assertSandboxProjectApiUrl(value: string, serviceBinding = false
 }
 function configurationError(): DataStudioError {
   return new DataStudioError(503, "gateway",
-    "Project API URL is incompatible with sandbox egress. Configure an existing reachable HTTP(S) hostname on port 80/443; loopback, private services and database access remain blocked.",
+    "Project API URL is incompatible with sandbox egress. Configure an existing reachable HTTP(S) hostname on port 80/443; loopback, private services and database access remain blocked. On a local installation set NPATI_PROJECT_API_SANDBOX_URL=http://project-api.npati.internal and NPATI_PROJECT_API_SERVICE_BINDING=dev (see .env.example).",
     false, "PROJECT_API_UNREACHABLE_CONFIGURATION");
 }

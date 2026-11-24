@@ -3,7 +3,7 @@ import { coreRouteOwns } from "./chat-core-routing";
 import type { CoreChatRoute } from "./chat-project-intent";
 
 import { createChatTurn } from "./chat-turn";
-import { createChatActions } from "./chat-actions";
+import { createChatActions, newChatTurnRecords } from "./chat-actions";
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { createAuditServices } from "./audit-services";
@@ -308,6 +308,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           activeConversationLanguage,
           semanticFiltering: routing,
         });
+        const turnRecords = newChatTurnRecords();
         const loop = await runChatToolLoop({
           ai: aiEngine,
           request: routedRequest,
@@ -318,7 +319,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           recoveryCall: companyPrimary && !needsResearch && plan?.entity?.trim() && (plan.company_agent_count === undefined || plan.company_agents?.length === plan.company_agent_count)
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
-          execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt, coreRoute,
+          execute: (call, args) => executeCoreChatTool({ auth, call, args, turn: turnRecords, requestMessage: safePrompt, coreRoute,
             conversationId: conversation?.id, selectedCompanyId: confirmedCompanyId, selectedBusinessId: businessId, noMemory: memoryPolicy.noMemoryActive, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),

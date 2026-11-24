@@ -69,6 +69,12 @@ export interface CodeApprovalPort {
     toolName: string;
     inputPayload: Record<string, unknown>;
   }): Promise<void>;
+  /**
+   * True when the person already approved (and the run used) a database change in this run or one of its repair
+   * passes (`<runId>:qa-repair:<n>`). One approval then covers the run's further ordinary database changes, so a
+   * single request does not ask again for every table, policy and seed row. Irreversible changes still ask.
+   */
+  approvedDataChangeInRun?(input: { ctx: AuthContext; companyId: string; runId: string }): Promise<boolean>;
 }
 
 export interface CodeWriteChange {
@@ -284,6 +290,7 @@ export function approvalsBackedPort(repo: {
   consumeApproved(ctx: AuthContext, companyId: string, id: string, params: {
     runId: string; agentId: string; toolName: string; inputPayload: Record<string, unknown>;
   }): Promise<unknown>;
+  hasApprovedDataChangeInRun?(ctx: AuthContext, companyId: string, runId: string): Promise<boolean>;
 }, options: { defaultTtlMs?: number } = {}): CodeApprovalPort {
   const ttlMs = options.defaultTtlMs ?? positiveInt(process.env.NPATI_CODE_APPROVAL_TTL_MS, 30 * 60 * 1000);
   return {
@@ -304,6 +311,10 @@ export function approvalsBackedPort(repo: {
         runId: input.runId, agentId: input.agentId, toolName: input.toolName, inputPayload: input.inputPayload,
       });
     },
+    ...(repo.hasApprovedDataChangeInRun ? {
+      approvedDataChangeInRun: (input: { ctx: AuthContext; companyId: string; runId: string }) =>
+        repo.hasApprovedDataChangeInRun!(input.ctx, input.companyId, input.runId),
+    } : {}),
   };
 }
 

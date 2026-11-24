@@ -752,7 +752,7 @@ export function AIProviderMarketplace() {
       )}
     </section>
     <CatalogScrollToTop gridRef={providerGridRef} items={providers} enabled={!error} />
-    {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} preloadModels onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
+    {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} preloadModels onClose={() => setSelected(null)} onChanged={changed} />}
   </main>;
 }
 

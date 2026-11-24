@@ -7,6 +7,7 @@ import { CompanyDelegationRuntime } from "./company-runtime";
 import { createCoreServices } from "./core-services";
 import { EmailInboxRepository } from "./email-inbox-repository";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
+import { asAccount } from "./ai-tenant-providers";
 
 export interface CreateAutomationExecutorDeps {
   config: AppConfig;
@@ -101,5 +102,9 @@ export function createAutomationExecutor(deps: CreateAutomationExecutorDeps) {
     return { result: details.run.result || `Company run ${details.run.id} completed.` };
   };
 
-  return { executeAutomation };
+  // Scheduled runs start outside any request: they reach the AI as the automation owner's account.
+  return {
+    executeAutomation: (automation: import("./automations-repository").CompanyAutomation, executionKey: string) =>
+      asAccount({ workspaceId: automation.workspaceId, userId: automation.userId, permissions: [] }, () => executeAutomation(automation, executionKey)),
+  };
 }

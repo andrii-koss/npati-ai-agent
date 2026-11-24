@@ -498,6 +498,7 @@ export function registerCodeRunRoutes(app: FastifyInstance, input: RegisterCodeR
     auth: authProvider,
     queue: codeRunQueue,
     rateLimits: codeRunRateLimiter,
+    companyAccess: (ctx, companyId) => workspaceStore.getCompany(ctx, companyId),
   });
 
   const codeExportContexts = new WeakMap<object, AuthContext>();

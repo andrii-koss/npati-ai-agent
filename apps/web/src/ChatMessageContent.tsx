@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "rea
 import { createPortal } from "react-dom";
 import { ChatCardSelectionToolbar } from "./ChatCardSelectionToolbar";
 import { requestCardChanges } from "./chat-card-draft";
-import { getStoredAuthToken } from "./AuthContext";
+import { AttachmentImage, downloadAttachment } from "./attachment-access";
 import { AttachmentFileIcon } from "./ChatAttachments";
 import { cardLinkHtml, escapeInlineText } from "./chat-markdown-inline";
 import type { ProjectCardData } from "@npati/shared";
@@ -194,30 +194,32 @@ export function sanitizeCardHtml(html: string): string {
     return html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
   const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
-  const visit = (parent: Element) => {
-    for (const child of Array.from(parent.children)) {
-      const tag = child.tagName.toUpperCase();
-      if (CARD_DROPPED_TAGS.has(tag)) {
-        child.remove();
-        continue;
-      }
-      if (!CARD_ALLOWED_TAGS.has(tag)) {
-        child.replaceWith(...Array.from(child.childNodes));
-        continue;
-      }
-      const allowed = CARD_ALLOWED_ATTRIBUTES[tag] ?? new Set<string>();
-      for (const attribute of Array.from(child.attributes)) {
-        if (!allowed.has(attribute.name.toLowerCase())) child.removeAttribute(attribute.name);
-      }
-      if (tag === "A") {
-        const href = child.getAttribute("href") ?? "";
-        if (!(/^https?:\/\//i.test(href) || href.startsWith("/"))) child.removeAttribute("href");
-        child.setAttribute("rel", "noopener noreferrer");
-      }
-      visit(child);
+  // Every element is checked, including the children of an unwrapped element: they were moved into the parent after
+  // its child list was read, so the old loop skipped them and `<x-a><img onerror=…></x-a>` came out live (audit L1).
+  const sanitize = (element: Element): void => {
+    const tag = element.tagName.toUpperCase();
+    if (CARD_DROPPED_TAGS.has(tag)) {
+      element.remove();
+      return;
     }
+    if (!CARD_ALLOWED_TAGS.has(tag)) {
+      const moved = Array.from(element.childNodes);
+      element.replaceWith(...moved);
+      for (const node of moved) if (node.nodeType === 1) sanitize(node as Element);
+      return;
+    }
+    const allowed = CARD_ALLOWED_ATTRIBUTES[tag] ?? new Set<string>();
+    for (const attribute of Array.from(element.attributes)) {
+      if (!allowed.has(attribute.name.toLowerCase())) element.removeAttribute(attribute.name);
+    }
+    if (tag === "A") {
+      const href = element.getAttribute("href") ?? "";
+      if (!(/^https?:\/\//i.test(href) || href.startsWith("/"))) element.removeAttribute("href");
+      element.setAttribute("rel", "noopener noreferrer");
+    }
+    for (const child of Array.from(element.children)) sanitize(child);
   };
-  visit(parsed.body);
+  for (const child of Array.from(parsed.body.children)) sanitize(child);
   return parsed.body.innerHTML;
 }
 
@@ -611,8 +613,6 @@ export function ChatMessageContent({ content }: { content: string }) {
       const id = attachment[2]!;
       let name = "attachment";
       try { name = decodeURIComponent(attachment[3]!); } catch {}
-      const token = getStoredAuthToken();
-      const src = "/api/attachments/" + id + (token ? "?token=" + encodeURIComponent(token) : "");
       const nonAttachmentLines = safeContent
         .split("\n")
         .filter((l) => !attachmentLine.test(l) && !voiceMessageRegex.test(l) && !/^Transcript:\s*/i.test(l))
@@ -623,7 +623,7 @@ export function ChatMessageContent({ content }: { content: string }) {
       elements.push(
         kind === "image" ? (
           <figure className="chat-message-attachment image" key={`att-${elements.length}`}>
-            <img src={src} alt={name} loading="lazy" decoding="async" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} />
+            <AttachmentImage id={id} name={name} onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} />
             <figcaption>{name}</figcaption>
           </figure>
         ) : kind === "audio" ? (
@@ -633,7 +633,8 @@ export function ChatMessageContent({ content }: { content: string }) {
             <AttachmentFileIcon item={{ name, kind }} />
             <div className="chat-document-info">
               <span className="chat-document-name" title={name}>{name}</span>
-              <a href={src} download={name} className="chat-attachment-download-btn" title={"Download " + name} aria-label={"Download " + name}>
+              <a href={"/api/attachments/" + id} download={name} className="chat-attachment-download-btn" title={"Download " + name} aria-label={"Download " + name}
+                onClick={(event) => { event.preventDefault(); void downloadAttachment(id, name).catch(() => undefined); }}>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
@@ -705,6 +706,38 @@ export function ChatMessageContent({ content }: { content: string }) {
       );
       i++;
       continue;
+    }
+
+    // 6b. Lists and notes: agent summaries are written as Markdown (bullets, numbered steps, a "> **Note:**" line);
+    // they were shown as raw "- " and "> " text. Source citation sections keep their own line layout.
+    if (!inSourceSection) {
+      const listKind = (value: string) => /^\s*[-*•]\s+\S/.test(value) ? "ul" : /^\s*\d{1,3}[.)]\s+\S/.test(value) ? "ol" : null;
+      const kind = listKind(line);
+      if (kind) {
+        const items: string[] = [];
+        while (i < lines.length && listKind(lines[i]!) === kind) {
+          items.push(lines[i]!.replace(kind === "ul" ? /^\s*[-*•]\s+/ : /^\s*\d{1,3}[.)]\s+/, ""));
+          i++;
+        }
+        const children = items.map((item, index) => <li key={index}>{renderInlineMarkdown(item, false, sourceTitles)}</li>);
+        elements.push(kind === "ul"
+          ? <ul className="chat-message-list" key={`ul-${elements.length}`}>{children}</ul>
+          : <ol className="chat-message-list" key={`ol-${elements.length}`}>{children}</ol>);
+        continue;
+      }
+      if (/^\s*>\s?/.test(line)) {
+        const noteLines: string[] = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i]!)) {
+          noteLines.push(lines[i]!.replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        elements.push(
+          <div className="chat-message-note" key={`note-${elements.length}`}>
+            {noteLines.map((note, index) => <div key={index}>{renderInlineMarkdown(note, false, sourceTitles)}</div>)}
+          </div>
+        );
+        continue;
+      }
     }
 
     // 7. Space

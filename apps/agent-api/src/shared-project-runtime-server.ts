@@ -7,10 +7,13 @@ import { authenticateRunnerRequest } from "./runner-readiness";
 import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest, type SandboxBrowserQaOptions } from "./sandbox-provider";
 import { runnerFailure } from "./sandbox-runner-diagnostics";
 import { createSharedRuntimeReadiness } from "./shared-runtime-readiness";
+import { isInsecureDefaultSecret } from "@npati/workspace";
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 assertProjectRuntimeProvider("shared");
 if (secret.length < 32 || process.env.NPATI_SANDBOX_RUNNER_MODE !== "local") throw new Error("Shared runtime requires local self-hosted mode and a 32-character runner secret");
+// The compose default is public; a runtime that accepted it would run commands for anyone on its network (audit C1).
+if (isInsecureDefaultSecret(secret)) throw new Error("NPATI_SANDBOX_RUNNER_SECRET is a publicly known default; generate a random value");
 const provider = new SharedProjectRuntimeProvider();
 const seen = new Map<string, number>();
 const app = Fastify({ bodyLimit: Number.MAX_SAFE_INTEGER, logger: false });

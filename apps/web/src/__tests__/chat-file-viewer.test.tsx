@@ -68,3 +68,36 @@ describe("chat file panel", () => {
     expect((await mount(true)).readOnly).toBe(true);
   });
 });
+
+describe("chat file panel: the agent's changes", () => {
+  function RunOpener() {
+    const open = useContext(ChatFileViewerContext)!;
+    useEffect(() => open({ companyId: "c", projectId: "p", path: "styles.css", runId: "run-1" }), [open]);
+    return null;
+  }
+  async function mountRun(before: unknown, status = 200) {
+    const fetchMock = vi.fn(async (url: string) => url.includes("files/before-run") ? reply(status, before) : reply(200, { content: "body {}\nh1 { color: red; }\np {}", revision: "r1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    await act(async () => root!.render(<ChatFileViewerProvider busy={false}><RunOpener /></ChatFileViewerProvider>));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    return fetchMock;
+  }
+
+  it("marks the lines the run changed and shows what they were", async () => {
+    const fetchMock = await mountRun({ content: "body {}\nh1 { color: blue; }" });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("/projects/p/files/before-run?path=styles.css&runId=run-1"))).toBe(true);
+    expect([...document.querySelectorAll(".chat-file-mark")].map(mark => mark.className)).toEqual(["chat-file-mark is-modified", "chat-file-mark is-modified"]);
+    expect(document.querySelector(".chat-file-change-count")!.textContent).toBe("+2-1");
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Show changes: before and after"]')!.click());
+    const lines = [...document.querySelectorAll(".chat-file-diff-line")].map(line => line.className.replace("chat-file-diff-line is-", "") + ":" + line.querySelector(".chat-file-diff-text")!.textContent);
+    expect(lines).toEqual(["equal:body {}", "del:h1 { color: blue; }", "add:h1 { color: red; }", "add:p {}"]);
+  });
+
+  it("shows the file without marks when the run has no checkpoint", async () => {
+    await mountRun({ error: { code: "checkpoint_not_found" } }, 404);
+    expect(document.querySelector(".chat-file-text")).not.toBeNull();
+    expect(document.querySelector(".chat-file-mark")).toBeNull();
+    expect(document.querySelector('button[aria-label="Show changes: before and after"]')).toBeNull();
+  });
+});

@@ -1,4 +1,5 @@
 export { OmniRouteEngine } from "./omniroute-engine";
+export { withOmniRouteCredential, currentOmniRouteCredential, type OmniRouteCredential } from "./credential-scope";
 export { observeProviderAttempt } from "./provider-attempt";
 export { retainProviderContinuation, providerContinuationFor } from "./provider-continuation";
 export { OmniRouteMarketplace, OmniRouteError } from "./marketplace-client";

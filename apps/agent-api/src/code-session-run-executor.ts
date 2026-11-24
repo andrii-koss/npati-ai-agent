@@ -221,6 +221,11 @@ const REPAIR_HEADING: Record<string, string> = {
   hi: "स्वचालित जाँच में एक त्रुटि मिली और उसे ठीक किया गया:",
 };
 
+/** A bold label line: the chat shows it as a section label above the repair's bullets, not as body text. */
+function repairHeading(language?: string): string {
+  return "**" + (REPAIR_HEADING[language ?? ""] ?? REPAIR_HEADING.en!) + "**";
+}
+
 /**
  * The reply of an automatic repair run describes only the repair. Shown alone, it replaced the summary of what was
  * built (V6-D06-01: a new todo app was answered with "replaced crypto.randomUUID"), so the root reply stays first.
@@ -231,7 +236,7 @@ export function withRootReply(result: unknown, rootReply: unknown, responseLangu
   if (typeof view.message !== "string" || !view.message.trim()) return { ...view, message: rootReply };
   if (view.message.includes(rootReply.trim())) return result;
   // A failed repair ends with the failure notice, which already says the error could not be fixed.
-  const heading = view.status === "completed" ? (REPAIR_HEADING[responseLanguage ?? ""] ?? REPAIR_HEADING.en!) + "\n" : "";
+  const heading = view.status === "completed" ? repairHeading(responseLanguage) + "\n" : "";
   return { ...view, message: rootReply.trimEnd() + "\n\n" + heading + view.message.trim() };
 }
 
@@ -242,7 +247,7 @@ export function withRootReply(result: unknown, rootReply: unknown, responseLangu
  */
 export function withInRunRepair(rootReply: string | undefined, finalText: string, responseLanguage?: string): string {
   if (!rootReply?.trim() || finalText.includes(rootReply.trim())) return finalText;
-  return rootReply.trimEnd() + "\n\n" + (REPAIR_HEADING[responseLanguage ?? ""] ?? REPAIR_HEADING.en!) + "\n" + finalText.trim();
+  return rootReply.trimEnd() + "\n\n" + repairHeading(responseLanguage) + "\n" + finalText.trim();
 }
 
 export function withUnchangedFilesNote(result: unknown, input: { readOnlyIntent?: boolean; responseLanguage?: string; session?: { mode?: string } }): unknown {

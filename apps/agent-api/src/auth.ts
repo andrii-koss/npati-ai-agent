@@ -4,8 +4,21 @@ import type { FastifyRequest } from "fastify";
 import type { NpatiAuthClient, NpatiUser } from "@npati/hub-connector";
 
 import { ApiKeysRepository } from "./api-keys-repository";
-import { OidcDashboardGate, ScopedRemoteAccessTokenManager, type OidcVerificationConfig } from "./security-guardrails-and-tokens";
+import { OidcDashboardGate, ScopedRemoteAccessTokenManager, type OidcVerificationConfig, configuredOidc } from "./security-guardrails-and-tokens";
 import { SessionRevocations } from "./session-revocation";
+import { StreamTicketError, StreamTicketService } from "./stream-tickets";
+import { accessTokenFromCookie, csrfFailure } from "./browser-session";
+
+/**
+ * The credential in an Authorization header. The web app's non-secret session marker (`npati-cookie-session:…`, which
+ * stands in for the token in page code since the session moved into an HttpOnly cookie) is never a credential.
+ */
+export const SESSION_MARKER_PREFIX = "npati-cookie-session:";
+export function sessionBearer(header: string | undefined): string | undefined {
+  if (!header || !header.startsWith("Bearer ")) return undefined;
+  const value = header.slice(7).trim();
+  return value && !value.startsWith(SESSION_MARKER_PREFIX) ? value : undefined;
+}
 
 export class AuthenticationError extends Error {
   readonly status: number;
@@ -30,6 +43,8 @@ export interface AuthProvider {
   authenticate(request: FastifyRequest): Promise<AuthContext>;
   /** Signs out the request's session token, or every token of the person with `everywhere` (V6 step 17). */
   revokeSession?(request: FastifyRequest, everywhere: boolean): Promise<boolean>;
+  /** Mints a short-lived ticket for one GET path (audit L6); providers without it cannot issue tickets. */
+  mintStreamTicket?(context: AuthContext, path: string): { ticket: string; expiresAt: number; path: string };
 }
 
 export class LocalDevAuthProvider implements AuthProvider {
@@ -53,6 +68,7 @@ export interface NpatiBackendAuthProviderOptions {
   allowDevFallback?: boolean;
   apiKeysRepository?: ApiKeysRepository;
   remoteTokensManager?: ScopedRemoteAccessTokenManager;
+  streamTickets?: StreamTicketService;
   oidcConfig?: Partial<OidcVerificationConfig>;
   /**
    * G1 (item 4): where a failed `workspaceStore.initialize()` is reported. Defaults to a structured
@@ -110,7 +126,9 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   private readonly allowDevFallback: boolean;
   private readonly apiKeysRepository?: ApiKeysRepository;
   private readonly remoteTokensManager: ScopedRemoteAccessTokenManager;
-  private readonly oidcConfig: OidcVerificationConfig;
+  private readonly streamTickets: StreamTicketService;
+  /** Null unless an operator configured OIDC (see configuredOidc): the x-oidc-token header is then refused. */
+  private readonly oidcConfig: OidcVerificationConfig | null;
   private readonly initializedWorkspaces = new Set<string>();
   private readonly initializingWorkspaces = new Map<string, Promise<void>>();
   /** G1 (item 4): the negative cache of failed initializations, keyed by workspace. */
@@ -128,13 +146,8 @@ export class NpatiBackendAuthProvider implements AuthProvider {
     this.allowDevFallback = options.allowDevFallback ?? false;
     this.apiKeysRepository = options.apiKeysRepository;
     this.remoteTokensManager = options.remoteTokensManager ?? new ScopedRemoteAccessTokenManager();
-    this.oidcConfig = {
-      expectedIssuer: options.oidcConfig?.expectedIssuer || "https://auth.npati.ai",
-      expectedAudience: options.oidcConfig?.expectedAudience || "npati-dashboard",
-      jwksUri: options.oidcConfig?.jwksUri || process.env.OIDC_JWKS_URI,
-      sharedSecret: options.oidcConfig?.sharedSecret || process.env.OIDC_SHARED_SECRET,
-      allowedAlgorithms: options.oidcConfig?.allowedAlgorithms || (process.env.OIDC_SHARED_SECRET ? ["RS256", "HS256"] : ["RS256"]),
-    };
+    this.streamTickets = options.streamTickets ?? new StreamTicketService();
+    this.oidcConfig = configuredOidc(process.env, options.oidcConfig);
     this.devFallback = new LocalDevAuthProvider();
     this.workspaceInitMaxAttempts = Math.max(1, options.workspaceInitMaxAttempts ?? 3);
     this.workspaceInitRetryMs = Math.max(0, options.workspaceInitRetryMs ?? 30_000);
@@ -206,16 +219,41 @@ export class NpatiBackendAuthProvider implements AuthProvider {
     return this.initializedWorkspaces.has(workspaceId);
   }
 
+  /** Mints a 60-second ticket for one GET path (audit L6). Called only from a request authenticated by header. */
+  mintStreamTicket(context: AuthContext, path: string) {
+    return this.streamTickets.mint(context, path);
+  }
+
   async authenticate(request: FastifyRequest): Promise<AuthContext> {
     const query = request.query as Record<string, string> | undefined;
-    // Only ?token= (browser media and event streams that cannot send headers); the old ?authToken= alias put a session
-    // token into navigable URLs (catalog Preview) and is gone with that use.
-    const queryToken = query?.token;
     const rawApiKey = (request.headers["x-api-key"] as string) || (request.headers["x-npati-api-key"] as string);
     const authHeader = request.headers.authorization;
-    const bearerToken = authHeader && authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7).trim()
-      : (queryToken && queryToken.trim() ? queryToken.trim() : undefined);
+    // Audit L6: a session credential is accepted only from the Authorization header. Elements that cannot send headers
+    // (downloads, images, event streams) use a short-lived ticket bound to one path (POST /stream-tickets).
+    let bearerToken = sessionBearer(authHeader);
+    if (!bearerToken && !rawApiKey) {
+      const ticket = typeof query?.ticket === "string" ? query.ticket.trim() : "";
+      if (ticket) {
+        let ticketContext: AuthContext;
+        try { ticketContext = this.streamTickets.verify(ticket, request.url, request.method); }
+        catch (error) {
+          if (error instanceof StreamTicketError) throw new AuthenticationError(error.message, error.status, error.code);
+          throw error;
+        }
+        await this.ensureWorkspaceInitialized(ticketContext);
+        return ticketContext;
+      }
+      if (typeof query?.token === "string" && query.token.trim()) {
+        throw new AuthenticationError("Session tokens are no longer accepted in URLs; send an Authorization header or use a stream ticket", 401, "TOKEN_IN_URL_REFUSED");
+      }
+      // L6 stage 2: the browser session is an HttpOnly cookie. Unsafe methods must pass the CSRF check.
+      const cookieToken = accessTokenFromCookie(request);
+      if (cookieToken) {
+        const csrf = csrfFailure(request);
+        if (csrf) throw new AuthenticationError("Cross-site request refused", 403, csrf);
+        bearerToken = cookieToken;
+      }
+    }
     const tokenOrApiKey = rawApiKey || bearerToken;
 
     // 1. API Key Authentication (#35 & #221)
@@ -223,7 +261,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
       if (!this.apiKeysRepository) {
         throw new AuthenticationError("API key authentication repository is not configured", 500, "CONFIGURATION_ERROR");
       }
-      const ip = (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || request.ip || "127.0.0.1";
+      const ip = request.ip || "127.0.0.1" /* audit L2: X-Forwarded-For is honoured only via Fastify trustProxy (NPATI_TRUST_PROXY) */;
       const userAgent = (request.headers["user-agent"] as string) || "unknown-agent";
       const deviceId = (request.headers["x-device-id"] as string) || undefined;
       const platform = (request.headers["sec-ch-ua-platform"] as string)?.replace(/"/g, "") || undefined;
@@ -274,7 +312,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
 
     // 2. Scoped Remote Access Token (#62)
     if (tokenOrApiKey && tokenOrApiKey.startsWith("rat_")) {
-      const clientIp = (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || request.ip || "127.0.0.1";
+      const clientIp = request.ip || "127.0.0.1" /* audit L2: X-Forwarded-For is honoured only via Fastify trustProxy (NPATI_TRUST_PROXY) */;
       const verifyRes = this.remoteTokensManager.verifyRemoteToken(tokenOrApiKey, clientIp);
       if (!verifyRes.isValid || !verifyRes.details) {
         throw new AuthenticationError(verifyRes.error || "Invalid remote access token", 401, "INVALID_REMOTE_TOKEN");
@@ -318,6 +356,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
     // 3. OIDC Dashboard Gate Token (#61)
     const oidcHeader = request.headers["x-oidc-token"] as string;
     if (oidcHeader) {
+      if (!this.oidcConfig) throw new AuthenticationError("OIDC sign-in is not configured on this installation", 401, "OIDC_NOT_CONFIGURED");
       const oidcRes = await OidcDashboardGate.verifyOidcToken(oidcHeader, this.oidcConfig);
       if (!oidcRes.isValid || !oidcRes.claims) {
         throw new AuthenticationError(oidcRes.error || "Invalid OIDC token", 401, "INVALID_OIDC_TOKEN");
@@ -389,8 +428,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
    * when the request carries no valid session token, which a sign-out of an already expired page is.
    */
   async revokeSession(request: FastifyRequest, everywhere: boolean): Promise<boolean> {
-    const header = request.headers.authorization;
-    const token = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
+    const token = sessionBearer(request.headers.authorization) || accessTokenFromCookie(request) || "";
     if (!token || !this.revocations || token.startsWith("npati_live_") || token.startsWith("rat_")) return false;
     let context: AuthContext;
     try { context = await this.authenticate(request); } catch { return false; }
@@ -484,7 +522,7 @@ export function createMockNpatiJwt(
  * cannot send an Authorization header, and Fastify logs every request URL, so a session or preview token in the URL
  * would otherwise be written to the log in full.
  */
-const SECRET_QUERY = /([?&](?:token|authToken|access_token|api_key|apiKey|key)=)[^&#]*/giu;
+const SECRET_QUERY = /([?&](?:token|ticket|authToken|access_token|api_key|apiKey|key)=)[^&#]*/giu;
 
 /**
  * Inbound webhook and channel URLs carry their secret as a path segment; every delivery wrote it to the request log in

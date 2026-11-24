@@ -264,7 +264,7 @@ export function CreateWebsiteDrawer({
                 <span>{t.domainLabel}</span>
                 <input
                   type="text"
-                  placeholder="ai.npati.com"
+                  placeholder="example.com"
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
                 />

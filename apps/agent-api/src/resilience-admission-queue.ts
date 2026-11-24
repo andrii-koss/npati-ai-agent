@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 export type PriorityTier = "critical-orchestration" | "enterprise" | "pro" | "free";
 
 export type AdmissionErrorCode = "ADMISSION_QUEUE_FULL" | "ADMISSION_QUEUE_SHED" | "ADMISSION_QUEUE_TIMEOUT" | "ADMISSION_CANCELLED";
@@ -116,7 +117,10 @@ export class AdaptiveAdmissionQueue {
         id: crypto.randomUUID(),
         tier,
         tenantId: options.tenantId ?? "anonymous",
-        task,
+        // A queued task is started later from whichever task just finished (processNext runs in its .finally). Bound
+        // here, it keeps the async context of the request that queued it — on a hosted installation that context
+        // carries the account's own AI key, which must never be another account's.
+        task: AsyncResource.bind(task),
         resolve,
         reject,
         enqueuedAt: Date.now(),

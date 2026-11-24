@@ -19,6 +19,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 
+from egress_guard import CHROMIUM_ARGS, PROXY_BYPASS, ensure_egress_proxy
+
 STATE_DIR = Path(os.getenv("NPATI_BROWSER_STATE_DIR", "/state")).resolve()
 PROFILE_DIR = STATE_DIR / "profiles"
 ARTIFACT_DIR = STATE_DIR / "artifacts"
@@ -26,9 +28,19 @@ DB_PATH = STATE_DIR / "jobs.sqlite3"
 TOKEN = os.getenv("NPATI_BROWSER_INTERNAL_TOKEN", "")
 if len(TOKEN) < 32:
     raise RuntimeError("NPATI_BROWSER_INTERNAL_TOKEN must contain at least 32 characters")
-if os.getenv("NPATI_ENV") == "production" and TOKEN.startswith("npati-local-"):
-    raise RuntimeError("Replace the local Browser Worker token before production")
+# The compose default is public whatever NPATI_ENV says (audit C1): refuse it everywhere.
+if TOKEN.startswith("npati-local-") or "change-before-production" in TOKEN:
+    raise RuntimeError("NPATI_BROWSER_INTERNAL_TOKEN is a publicly known default; generate a random value")
 MAX_RETRIES = max(0, min(int(os.getenv("NPATI_BROWSER_MAX_RETRIES", "2")), 5))
+# Files a job may upload come only from the API's upload directory (the only data mounted into this worker).
+UPLOAD_ROOT = Path(os.getenv("NPATI_BROWSER_UPLOAD_ROOT", "/app/data/browser-uploads")).resolve()
+
+
+def approved_upload_files(items: Any) -> list[str]:
+    files = [Path(str(item)).resolve() for item in (items or [])]
+    if any(UPLOAD_ROOT not in item.parents or not item.is_file() for item in files):
+        raise ValueError("Upload files must come from the approved shared directory")
+    return [str(item) for item in files]
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -110,9 +122,11 @@ async def deterministic(req: ExecuteRequest, action: str, payload: dict[str, Any
     traces: list[dict[str, Any]] = []
     artifacts: list[dict[str, str]] = []
     async with async_playwright() as playwright:
+        # H2: every connection goes through the egress guard (public addresses only, no DNS rebinding).
         context = await playwright.chromium.launch_persistent_context(
             str(profile_path(req.profile_scope)), headless=True,
             viewport={"width": 1440, "height": 1000}, accept_downloads=True,
+            proxy={"server": await ensure_egress_proxy(), "bypass": PROXY_BYPASS}, args=CHROMIUM_ARGS,
         )
         try:
             page = context.pages[0] if context.pages else await context.new_page()
@@ -147,8 +161,8 @@ async def deterministic(req: ExecuteRequest, action: str, payload: dict[str, Any
                 return {"url": page.url, "title": await page.title(), "fieldsFilled": len(fields)}, traces, artifacts
             if action == "upload":
                 selector = str(payload.get("selector", "input[type=file]"))
-                files = [str(Path(item).resolve()) for item in payload.get("files", [])]
-                if not files or any(not Path(item).is_file() for item in files):
+                files = approved_upload_files(payload.get("files", []))
+                if not files:
                     raise ValueError("Upload files are missing from the approved shared directory")
                 await page.locator(selector).set_input_files(files)
                 traces.append(trace("upload", "succeeded", url=page.url, detail=f"{len(files)} file(s)"))
@@ -191,12 +205,14 @@ async def autonomous(req: ExecuteRequest, payload: dict[str, Any]) -> tuple[Any,
         raise ValueError("Autonomous tasks require url or allowedDomains")
     for domain in allowed_domains:
         validate_public_url(f"https://{domain.removeprefix('*.')}")
-    browser = BrowserSession(user_data_dir=str(profile_path(req.profile_scope)), headless=True, allowed_domains=allowed_domains)
+    from browser_use.browser.profile import ProxySettings
+
+    # H2: the autonomous agent's browser uses the same egress guard as deterministic jobs.
+    browser = BrowserSession(user_data_dir=str(profile_path(req.profile_scope)), headless=True, allowed_domains=allowed_domains,
+                             proxy=ProxySettings(server=await ensure_egress_proxy(), bypass=PROXY_BYPASS), args=CHROMIUM_ARGS)
     llm = ChatBrowserUse(model=os.getenv("BROWSER_USE_MODEL", "bu-2-0"))
     domain_secrets = {domain: dict(req.secrets) for domain in allowed_domains} if req.secrets else None
-    available_files = [str(Path(item).resolve()) for item in payload.get("files", [])]
-    if any(not Path(item).is_file() for item in available_files):
-        raise ValueError("Autonomous task file is missing from the approved shared directory")
+    available_files = approved_upload_files(payload.get("files", []))
     agent = Agent(task=task, llm=llm, browser_session=browser, sensitive_data=domain_secrets,
                   available_file_paths=available_files or None)
     history = await agent.run(max_steps=max(1, min(int(payload.get("maxSteps", 50)), 200)))

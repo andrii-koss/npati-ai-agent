@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Maximize2, Minimize2, RefreshCw, Save, X } from "lucide-react";
+import { Check, Copy, GitCompare, Maximize2, Minimize2, RefreshCw, Save, X } from "lucide-react";
+import { fileChanges } from "./chat-file-diff";
 import { api } from "./business-workspace-shared";
 import { I18nContextRef } from "./i18n";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
@@ -8,7 +9,12 @@ import { PreviewSideButton } from "./PreviewSideButton";
 import { HighlightedCode, codeLanguage, codeWindow } from "./code-highlight";
 import { previewUpdateFailure } from "./preview-update-failure";
 
-export type ChatFileTarget = { companyId: string; projectId: string; path: string };
+/** `runId`: the agent run whose changes the viewer marks, from the run's first checkpoint to the current text. */
+export type ChatFileTarget = { companyId: string; projectId: string; path: string; runId?: string };
+const LINE_HEIGHT = 20;
+const CODE_PADDING_TOP = 14;
+/** The before/after view lists every line; above this the file is too long to render as one list. */
+const MAX_DIFF_VIEW_LINES = 6000;
 type FileContent = { content: string; revision: string; binary?: boolean };
 
 /** Opens a project file in the side panel; null where the chat has no panel. */
@@ -56,6 +62,13 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
   const [publishing, setPublishing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const gutter = useRef<HTMLPreElement>(null);
+  const marks = useRef<HTMLDivElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
+  // undefined: not known (no run, no checkpoint), null: the run created the file.
+  const [before, setBefore] = useState<string | null | undefined>(undefined);
+  const [showDiff, setShowDiff] = useState(false);
+  const scrolledToChange = useRef(false);
+  const changes = useMemo(() => before === undefined || binary ? null : fileChanges(before, text), [before, text, binary]);
   const dirty = text !== saved;
   dirtyRef.current = dirty;
   const lines = useMemo(() => text.split("\n").length, [text]);
@@ -80,6 +93,31 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
     } else void load();
     return () => { cancelled = true; };
   }, [load, opened, target, dirtyRef]);
+
+  useEffect(() => {
+    if (!target.runId) return;
+    let cancelled = false;
+    void api<{ content: string | null }>(`${fileUrl(target, "before-run")}?path=${encodeURIComponent(target.path)}&runId=${encodeURIComponent(target.runId)}`)
+      .then(file => { if (!cancelled) setBefore(typeof file.content === "string" ? file.content : null); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [target]);
+
+  // Opens at the first change, like an editor jumping to a diff, once the text and the changes are both known.
+  useEffect(() => {
+    const first = changes?.changes[0];
+    if (scrolledToChange.current || state !== "ready" || !first || !editor.current) return;
+    scrolledToChange.current = true;
+    editor.current.scrollTop = Math.max(0, (first.line - 4) * LINE_HEIGHT);
+    syncScroll(editor.current);
+  }, [changes, state]);
+
+  const syncScroll = (element: HTMLTextAreaElement) => {
+    setFirstLine(codeWindow(element.scrollTop));
+    if (gutter.current) gutter.current.scrollTop = element.scrollTop;
+    if (overlay.current) { overlay.current.scrollTop = element.scrollTop; overlay.current.scrollLeft = element.scrollLeft; }
+    if (marks.current) marks.current.style.transform = `translateY(${-element.scrollTop}px)`;
+  };
 
   /** The saved file stays saved whatever happens here: this only brings it to the running Preview. */
   async function applyToPreview() {
@@ -128,6 +166,8 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
             <h3 className="preview-header-project-name" title={target.path}>{target.path}{dirty ? " *" : ""}</h3>
           </div>
           <div className="preview-header-right">
+            {changes && (changes.added > 0 || changes.removed > 0) && <span className="chat-file-change-count" title={isUk ? "Зміни агента в цьому файлі" : "The agent's changes in this file"}><span className="coding-file-added">+{changes.added}</span><span className="coding-file-removed">-{changes.removed}</span></span>}
+            {changes && (changes.added > 0 || changes.removed > 0) && <button type="button" className={`preview-header-icon-btn ${showDiff ? "is-active" : ""}`} onClick={() => setShowDiff(value => !value)} aria-pressed={showDiff} aria-label={isUk ? "Показати зміни: було і стало" : "Show changes: before and after"} title={isUk ? "Показати зміни: було і стало" : "Show changes: before and after"}><GitCompare size={19} strokeWidth={1.9} aria-hidden="true" /></button>}
             <PreviewSideButton isUk={isUk} />
             <button type="button" className="preview-header-icon-btn" onClick={reload} aria-label={isUk ? "Оновити файл" : "Reload file"} title={isUk ? "Оновити файл" : "Reload file"}><RefreshCw size={19} strokeWidth={1.9} aria-hidden="true" /></button>
             <button type="button" className="preview-header-icon-btn" onClick={() => void save()} disabled={!canSave} aria-label={isUk ? "Зберегти" : "Save"} title={busy ? (isUk ? "Агент зараз змінює проєкт" : "The agent is changing this project") : `${isUk ? "Зберегти" : "Save"} (Ctrl+S)`}>{justSaved ? <Check size={19} strokeWidth={2.2} className="preview-icon-success" aria-hidden="true" /> : <Save size={19} strokeWidth={1.9} aria-hidden="true" />}</button>
@@ -142,13 +182,27 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
         {busy && !error && <p className="chat-file-note">{isUk ? "Агент зараз змінює проєкт. Зберегти можна після завершення." : "The agent is changing this project. You can save when it finishes."}</p>}
         {publishing && <p className="chat-file-note" role="status">{isUk ? "Оновлюю сайт у Preview…" : "Updating the site in Preview…"}</p>}
         <div className="chat-file-editor">
-          {binary ? <p className="chat-file-note">{isUk ? "Це не текстовий файл." : "This is not a text file."}</p> : state !== "loading" && <>
+          {binary ? <p className="chat-file-note">{isUk ? "Це не текстовий файл." : "This is not a text file."}</p> : state !== "loading" && showDiff && changes ? (
+            changes.ops.length > MAX_DIFF_VIEW_LINES
+              ? <p className="chat-file-note">{isUk ? "Файл задовгий для показу змін рядок за рядком." : "The file is too long to show its changes line by line."}</p>
+              : <div className="chat-file-diff" role="region" aria-label={isUk ? "Зміни: було і стало" : "Changes: before and after"}>
+                {changes.ops.map((op, index) => <div key={index} className={`chat-file-diff-line is-${op.type}`}>
+                  <span className="chat-file-diff-number">{op.oldLine !== undefined ? op.oldLine + 1 : ""}</span>
+                  <span className="chat-file-diff-number">{op.newLine !== undefined ? op.newLine + 1 : ""}</span>
+                  <span className="chat-file-diff-sign" aria-hidden="true">{op.type === "add" ? "+" : op.type === "del" ? "-" : " "}</span>
+                  <span className="chat-file-diff-text">{op.text || " "}</span>
+                </div>)}
+              </div>
+          ) : state !== "loading" && <>
             <pre ref={gutter} className="chat-file-gutter" aria-hidden="true">{numbers}</pre>
             <div className="chat-file-code">
+              {changes && changes.changes.length > 0 && <div className="chat-file-marks" aria-hidden="true"><div ref={marks} className="chat-file-marks-inner">
+                {changes.changes.map((change, index) => <span key={index} className={`chat-file-mark is-${change.kind}`} style={{ top: CODE_PADDING_TOP + change.line * LINE_HEIGHT - (change.kind === "deleted" ? 1 : 0) }} />)}
+              </div></div>}
               {colored && <pre ref={overlay} className="chat-file-highlight" aria-hidden="true"><HighlightedCode text={text} language={language} firstLine={firstLine} /></pre>}
-              <textarea className={`chat-file-text ${colored ? "is-colored" : ""}`} aria-label={target.path} spellCheck={false} wrap="off" value={text} readOnly={busy || Boolean(error && !revision)}
+              <textarea ref={editor} className={`chat-file-text ${colored ? "is-colored" : ""}`} aria-label={target.path} spellCheck={false} wrap="off" value={text} readOnly={busy || Boolean(error && !revision)}
                 onChange={event => setText(event.target.value)}
-                onScroll={event => { setFirstLine(codeWindow(event.currentTarget.scrollTop)); if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop; if (overlay.current) { overlay.current.scrollTop = event.currentTarget.scrollTop; overlay.current.scrollLeft = event.currentTarget.scrollLeft; } }}
+                onScroll={event => syncScroll(event.currentTarget)}
                 onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); } }} />
             </div>
           </>}
@@ -169,6 +223,6 @@ export function ChatFileViewerProvider({ busy, children }: { busy: boolean; chil
   }, []);
   return <ChatFileViewerContext.Provider value={open}>
     {children}
-    {target && <ChatFileDrawer key={`${target.projectId}:${target.path}`} target={target} busy={busy} dirtyRef={dirtyRef} onClose={() => { dirtyRef.current = false; setTarget(null); }} />}
+    {target && <ChatFileDrawer key={`${target.projectId}:${target.path}:${target.runId ?? ""}`} target={target} busy={busy} dirtyRef={dirtyRef} onClose={() => { dirtyRef.current = false; setTarget(null); }} />}
   </ChatFileViewerContext.Provider>;
 }

@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import { getTokenRefreshDelayMs } from "./auth-token-refresh";
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 
 export interface AuthUser {
@@ -38,8 +37,55 @@ export interface AuthState {
   disconnect(): Promise<void>;
 }
 
-const STORAGE_TOKEN_KEY = "npati_agent_access_token";
-const STORAGE_REFRESH_KEY = "npati_agent_refresh_token";
+/**
+ * Security audit 2026-11-24, L6 stage 2: the session is an HttpOnly cookie the page cannot read. Page code still uses
+ * "the token" as the session's identity (cache keys, "is this the same account?", "signed in?") and as an
+ * Authorization value; it now gets a random, non-secret marker instead. `installSessionFetch` removes the marker from
+ * same-origin API requests (the cookie carries the credential) and adds the CSRF header, and the server never accepts
+ * the marker as a credential. The keys of the old token storage are removed on load.
+ */
+export const SESSION_MARKER_PREFIX = "npati-cookie-session:";
+const STORAGE_TOKEN_KEY = "npati_agent_session_marker";
+const STORAGE_EXPIRES_KEY = "npati_agent_session_expires";
+const LEGACY_TOKEN_KEYS = ["npati_agent_access_token", "npati_agent_refresh_token"];
+try { for (const key of LEGACY_TOKEN_KEYS) localStorage.removeItem(key); } catch { /* storage unavailable */ }
+
+function newSessionMarker(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return SESSION_MARKER_PREFIX + Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+type SessionPayload = { accessToken?: unknown; session?: { expiresAt?: unknown } | null; tokens?: { accessToken?: unknown } | null; user?: { id?: unknown } | null } | null | undefined;
+
+/** True when a token-issuing response established a session (cookie mode, or a token from an older server). */
+function hasSession(data: SessionPayload): boolean {
+  return Boolean(data && (data.session || typeof data.accessToken === "string" || typeof data.tokens?.accessToken === "string"));
+}
+
+/**
+ * Records that the server established a session for `user`. Keeps the current marker for the same person (a renewal
+ * must not look like an account switch) and issues a new one otherwise. Never stores a credential.
+ */
+function startSession(data: SessionPayload, user?: { id?: unknown } | null): string {
+  const current = getStoredAuthToken();
+  const previousUser = getStoredAuthUser();
+  const nextUserId = typeof user?.id === "string" ? user.id : typeof data?.user?.id === "string" ? data.user.id : undefined;
+  const marker = current && (!nextUserId || previousUser?.id === nextUserId) ? current : newSessionMarker();
+  setStoredAuthToken(marker);
+  const expiresAt = typeof data?.session?.expiresAt === "string" ? data.session.expiresAt : null;
+  try { if (expiresAt) localStorage.setItem(STORAGE_EXPIRES_KEY, expiresAt); else localStorage.removeItem(STORAGE_EXPIRES_KEY); } catch { /* ignore */ }
+  return marker;
+}
+
+/** When to renew the cookie session: before the expiry the server reported, or the default interval. */
+export function sessionRefreshDelayMs(now = Date.now()): number {
+  let expiresAt = NaN;
+  try { expiresAt = Date.parse(localStorage.getItem(STORAGE_EXPIRES_KEY) ?? ""); } catch { /* ignore */ }
+  if (!Number.isFinite(expiresAt)) return 10 * 60 * 1000;
+  const remaining = expiresAt - now;
+  return Math.max(1000, Math.min(10 * 60 * 1000, remaining - Math.min(5 * 60 * 1000, Math.max(3000, remaining / 2))));
+}
 const STORAGE_USER_KEY = "npati_agent_user";
 const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
 const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
@@ -69,36 +115,27 @@ export function getStoredAuthToken(): string | null {
   }
 }
 
+/** Stores the session marker. A real credential is never written: anything that is not a marker becomes a new one. */
 export function setStoredAuthToken(token: string | null) {
   try {
     if (token) {
-      localStorage.setItem(STORAGE_TOKEN_KEY, token);
+      localStorage.setItem(STORAGE_TOKEN_KEY, token.startsWith(SESSION_MARKER_PREFIX) ? token : newSessionMarker());
     } else {
       localStorage.removeItem(STORAGE_TOKEN_KEY);
+      localStorage.removeItem(STORAGE_EXPIRES_KEY);
     }
   } catch {
     // Ignore localStorage errors
   }
 }
 
+/** The refresh token lives in an HttpOnly cookie (Path=/api/auth); page code never holds it. */
 export function getStoredRefreshToken(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_REFRESH_KEY);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-export function setStoredRefreshToken(token: string | null) {
-  try {
-    if (token) {
-      localStorage.setItem(STORAGE_REFRESH_KEY, token);
-    } else {
-      localStorage.removeItem(STORAGE_REFRESH_KEY);
-    }
-  } catch {
-    // Ignore localStorage errors
-  }
+export function setStoredRefreshToken(_token: string | null) {
+  // Intentionally empty: see getStoredRefreshToken.
 }
 
 export function getStoredAuthUser(): AuthUser | null {
@@ -215,17 +252,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const payload = await response.json().catch(() => null);
     if (response.status === 202 || payload?.data?.status === "authorization_pending") return false;
-    if (!response.ok || !payload?.success || !payload.data?.accessToken || !payload.data?.user) {
+    if (!response.ok || !payload?.success || !hasSession(payload.data) || !payload.data?.user) {
       const message = payload?.error?.message || "NPATI account connection failed.";
       setError(message);
       throw new Error(message);
     }
     sessionStorage.removeItem(PENDING_PAIRING_KEY);
     sessionStorage.removeItem(SSO_SUPPRESSED_KEY);
-    setStoredAuthToken(payload.data.accessToken);
-    setStoredRefreshToken(null);
+    const marker = startSession(payload.data, payload.data.user);
     setStoredAuthUser(payload.data.user);
-    setToken(payload.data.accessToken);
+    setToken(marker);
     setUser(payload.data.user);
     window.dispatchEvent(new Event("npati:auth-changed"));
     return true;
@@ -289,11 +325,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const sessionResponse = await fetch("/api/auth/installation/session", { method: "POST" });
         if (sessionResponse.ok) {
           const sessionPayload = await sessionResponse.json().catch(() => null);
-          if (sessionPayload?.success && sessionPayload.data?.accessToken && sessionPayload.data?.user) {
-            setStoredAuthToken(sessionPayload.data.accessToken);
-            setStoredRefreshToken(null);
+          if (sessionPayload?.success && hasSession(sessionPayload.data) && sessionPayload.data?.user) {
+            const marker = startSession(sessionPayload.data, sessionPayload.data.user);
             setStoredAuthUser(sessionPayload.data.user);
-            setToken(sessionPayload.data.accessToken);
+            setToken(marker);
             setUser(sessionPayload.data.user);
             setError(null);
             setIsLoading(false);
@@ -386,10 +421,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const response = await fetch("/api/auth/installation/session", { method: "POST" });
         const payload = await response.json().catch(() => null);
-        if (response.ok && payload?.success && payload.data?.accessToken && payload.data?.user) {
-          setStoredAuthToken(payload.data.accessToken);
+        if (response.ok && payload?.success && hasSession(payload.data) && payload.data?.user) {
+          const marker = startSession(payload.data, payload.data.user);
           setStoredAuthUser(payload.data.user);
-          setToken(payload.data.accessToken);
+          setToken(marker);
           setUser(payload.data.user);
           setIsLoading(false);
           return;
@@ -430,22 +465,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else if (response.status === 401) {
         // Try refresh token if available
-        const refreshToken = getStoredRefreshToken();
-        if (refreshToken) {
+        {
+          // The refresh token, when the sign-in method issued one, is an HttpOnly cookie the server reads itself.
           const refreshRes = await fetch("/api/auth/refresh", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ refreshToken }),
+            body: "{}",
           });
           if (refreshRes.ok) {
             const refreshData = await refreshRes.json();
-            const newAccess = refreshData.data?.tokens?.accessToken || refreshData.tokens?.accessToken;
-            if (newAccess) {
-              setStoredAuthToken(newAccess);
+            if (hasSession(refreshData.data) || typeof refreshData.tokens?.accessToken === "string") {
+              const newAccess = startSession(refreshData.data);
               setToken(newAccess);
-              if (refreshData.data?.tokens?.refreshToken || refreshData.tokens?.refreshToken) {
-                setStoredRefreshToken(refreshData.data?.tokens?.refreshToken || refreshData.tokens?.refreshToken);
-              }
               const meRes = await fetch("/api/auth/me", {
                 headers: { authorization: `Bearer ${newAccess}` },
               });
@@ -470,10 +501,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const installationSession = await fetch("/api/auth/installation/session", { method: "POST" }).catch(() => null);
         if (installationSession?.ok) {
           const installationData = await installationSession.json().catch(() => null);
-          if (installationData?.data?.accessToken && installationData.data?.user) {
-            setStoredAuthToken(installationData.data.accessToken);
+          if (hasSession(installationData?.data) && installationData.data?.user) {
+            const marker = startSession(installationData.data, installationData.data.user);
             setStoredAuthUser(installationData.data.user);
-            setToken(installationData.data.accessToken);
+            setToken(marker);
             setUser(installationData.data.user);
             return;
           }
@@ -528,11 +559,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const response = await fetch("/api/auth/installation/session", { method: "POST" });
         if (response.ok) {
           const payload = await response.json().catch(() => null);
-          if (!payload?.data?.accessToken || !payload.data?.user) return "temporary";
+          if (!hasSession(payload?.data) || !payload.data?.user) return "temporary";
           if (getStoredAuthToken() !== currentToken) return "temporary";
-          setStoredAuthToken(payload.data.accessToken);
+          const marker = startSession(payload.data, payload.data.user);
           setStoredAuthUser(payload.data.user);
-          setToken(payload.data.accessToken);
+          setToken(marker);
           setUser(payload.data.user);
           return "ok";
         }
@@ -541,22 +572,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return "temporary";
       }
 
-      const refreshToken = getStoredRefreshToken();
-      if (!refreshToken) return "unauthorized";
       try {
         const response = await fetch("/api/auth/refresh", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
+          body: "{}",
         });
         if (!response.ok) return response.status === 401 || response.status === 403 ? "unauthorized" : "temporary";
         const payload = await response.json().catch(() => null);
-        const tokens = payload?.data?.tokens || payload?.tokens;
-        if (!tokens?.accessToken) return "temporary";
+        if (!hasSession(payload?.data) && typeof payload?.tokens?.accessToken !== "string") return "temporary";
         if (getStoredAuthToken() !== currentToken) return "temporary";
-        setStoredAuthToken(tokens.accessToken);
-        setToken(tokens.accessToken);
-        if (tokens.refreshToken) setStoredRefreshToken(tokens.refreshToken);
+        setToken(startSession(payload.data));
         return "ok";
       } catch {
         return "temporary";
@@ -582,11 +608,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await checkAuth(true);
           if (!cancelled && getStoredAuthToken() === token) schedule(30_000);
         } else {
-          schedule(result === "ok" ? getTokenRefreshDelayMs(getStoredAuthToken() || token) : 5000);
+          schedule(result === "ok" ? sessionRefreshDelayMs() : 5000);
         }
       }, delayMs);
     };
-    schedule(getTokenRefreshDelayMs(token));
+    schedule(sessionRefreshDelayMs());
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -623,16 +649,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = payload?.data || payload;
       const authedUser = data?.user || payload?.user;
       const tokens = data?.tokens || payload?.tokens;
-      if (!tokens?.accessToken) {
-        throw new Error("No access token received from authentication service.");
+      if (!hasSession(data) && !tokens?.accessToken) {
+        throw new Error("No session received from authentication service.");
       }
 
-      setStoredAuthToken(tokens.accessToken);
-      if (tokens.refreshToken) {
-        setStoredRefreshToken(tokens.refreshToken);
-      }
+      const marker = startSession(data, authedUser);
       setStoredAuthUser(authedUser);
-      setToken(tokens.accessToken);
+      setToken(marker);
       setUser(authedUser);
       window.dispatchEvent(new Event("npati:auth-changed"));
     } finally {
@@ -665,15 +688,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = payload?.data || payload;
       const authedUser = data?.user || payload?.user;
       const tokens = data?.tokens || payload?.tokens;
-      if (!tokens?.accessToken) {
-        throw new Error("No access token received from registration service.");
+      if (!hasSession(data) && !tokens?.accessToken) {
+        throw new Error("No session received from registration service.");
       }
 
-      setStoredAuthToken(tokens.accessToken);
-      if (tokens.refreshToken) {
-        setStoredRefreshToken(tokens.refreshToken);
-      }
-      setToken(tokens.accessToken);
+      const marker = startSession(data, authedUser);
+      setStoredAuthUser(authedUser);
+      setToken(marker);
       setUser(authedUser);
       window.dispatchEvent(new Event("npati:auth-changed"));
     } finally {

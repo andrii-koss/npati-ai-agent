@@ -36,7 +36,7 @@
  * from its inputs — and a run's verdict can be persisted and compared instead of re-derived.
  */
 
-import { resolveCodingConversationLanguage, selfReviewFindingsNotice, selfReviewUnavailableNotice } from "./company-chat-i18n";
+import { resolveCodingConversationLanguage, selfReviewFindingsNotice, selfReviewFixedUnverifiedNotice, selfReviewUnavailableNotice } from "./company-chat-i18n";
 import {
   CODE_SELF_REVIEW_MAX_FIX_ITERATIONS,
   resolveSelfReviewFixIterations,
@@ -508,12 +508,14 @@ export function selfReviewDeliveryNotice(verdict: SelfReviewVerdict, prompt: str
 }
 
 /** Findings the fix turn did not resolve reach the user as a warning next to the finished work. */
-export function selfReviewUnresolvedNotice(verdict: SelfReviewVerdict | undefined, prompt: string): string {
+export function selfReviewUnresolvedNotice(verdict: SelfReviewVerdict | undefined, prompt: string, fixChangedUnverified = false): string {
   const unresolved = verdict?.unresolved ?? [];
   const blocking = unresolved.filter((finding) => finding.blocking);
   const detail = (blocking.length ? blocking : unresolved).slice(0, 5)
     .map((finding) => `- **${(finding.file || finding.category).replace(/([\\`*_\[\]])/g, "\\$1")}**: ${finding.reason}`).join("\n\n");
-  return selfReviewFindingsNotice(resolveCodingConversationLanguage(prompt), detail);
+  const language = resolveCodingConversationLanguage(prompt);
+  // The fix changed the code but nothing could re-check it: the findings are reported as addressed, not as failed.
+  return fixChangedUnverified ? selfReviewFixedUnverifiedNotice(language, detail) : selfReviewFindingsNotice(language, detail);
 }
 
 export function selfReviewStopMessage(verdict: SelfReviewVerdict | undefined): string {

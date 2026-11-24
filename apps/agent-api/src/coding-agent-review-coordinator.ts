@@ -63,8 +63,8 @@ export class CodingAgentReviewCoordinator {
   }
 
   private selfReviewNotice: string | null = null;
-  private deliverWithFindings(): { action: "complete" } {
-    if (!this.host.input.signal?.aborted) this.selfReviewNotice = selfReviewUnresolvedNotice(this.selfReviewVerdict ?? undefined, this.host.input.prompt);
+  private deliverWithFindings(fixChangedUnverified = false): { action: "complete" } {
+    if (!this.host.input.signal?.aborted) this.selfReviewNotice = selfReviewUnresolvedNotice(this.selfReviewVerdict ?? undefined, this.host.input.prompt, fixChangedUnverified);
     return { action: "complete" };
   }
   private withSelfReviewNotice(message: string): string { return this.selfReviewNotice ? `${message}\n\n${this.selfReviewNotice}` : message; }
@@ -534,6 +534,9 @@ export class CodingAgentReviewCoordinator {
   }
 
   async afterSelfReviewFix(steps: number, stateRunId?: string): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> {
+    // A project with no checks to re-run (a plain HTML site) cannot certify the fix, but a fix that changed the code
+    // must not be reported to the user as one that "could not be fixed".
+    const fixChangedUnverified = this.verificationTools.length === 0 && this.currentChangeSignature() !== this.verifiedSignature;
     const outcome = await this.host.reviewPhases.afterSelfReviewFixOnce({
       ctx: this.host.ctx,
       input: this.host.input,
@@ -557,7 +560,7 @@ export class CodingAgentReviewCoordinator {
       toCheckReports: (outcome) => this.toCheckReports(outcome),
       record: this.host.record,
     });
-    return outcome.action === "stop" && outcome.reason === "self_review_unresolved" ? this.deliverWithFindings() : outcome;
+    return outcome.action === "stop" && outcome.reason === "self_review_unresolved" ? this.deliverWithFindings(fixChangedUnverified) : outcome;
   }
 
   async onVerifyToolExecuted(

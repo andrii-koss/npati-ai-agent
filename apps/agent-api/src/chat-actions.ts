@@ -38,6 +38,18 @@ import { defaultSkillRegistry } from "@npati/skills";
 import { ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, Business } from "@npati/workspace";
 
+/** What the tool calls of one chat turn created; see the `turn` input of executeCoreChatTool. */
+export interface ChatTurnRecords { businesses: Map<string, { goals: string[]; memories: string[] }> }
+export const newChatTurnRecords = (): ChatTurnRecords => ({ businesses: new Map() });
+
+/** The goals or memories a Business got with its creation in this turn, when a later call targets that Business. */
+function createdThisTurn(turn: ChatTurnRecords | undefined, businessId: unknown, kind: "goals" | "memories"): string[] | undefined {
+  if (!turn?.businesses.size) return undefined;
+  const id = typeof businessId === "string" && businessId.trim() ? businessId.trim() : turn.businesses.size === 1 ? [...turn.businesses.keys()][0] : undefined;
+  const created = id ? turn.businesses.get(id)?.[kind] : undefined;
+  return created?.length ? created : undefined;
+}
+
 export function createChatActions(deps: ChatActionDeps) {
   const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore, removeCompanyProjects } = deps;
   const contextBuilder = new ContextBuilder({
@@ -398,6 +410,12 @@ ${localized.next}`;
   async function executeCoreChatTool(input: {
     auth: AuthContext;
     call: ChatToolCall;
+    /**
+     * Shared by every tool call of one chat turn. A Business created in this turn together with its goals and memories
+     * must not get extra ones from separate goal or memory calls in the same turn ("a business idea with a goal" is one
+     * goal, not one from the profile and another from the goal tool).
+     */
+    turn?: ChatTurnRecords;
     args: Record<string, unknown>;
     requestMessage: string;
     /** The classifier's decision for this request; it names the records the user asked to manage. */
@@ -453,6 +471,8 @@ ${localized.next}`;
         ? WorkspaceChatActions.isManagementRequest(input.requestMessage, { includeGoals: false }) || await WorkspaceChatActions.namesOwnedAutomation(input.auth, workspaceStore, input.requestMessage, automationsRepo)
         : EmailChatActions.isManagementRequest(input.requestMessage));
       if (!allowed) throw new Error("The user did not request this management operation");
+      const createdMemories = workspace && input.args.action === "memory.create" ? createdThisTurn(input.turn, input.args.businessId, "memories") : undefined;
+      if (createdMemories) return { output: { kind: "already_saved", note: `This Business was created in this request together with its memory record(s): ${createdMemories.join("; ")}. Nothing more was added. Report those records; do not save another memory in this request.` }, metadata: { kind: "workspace_action_skipped" } };
       const directive = "```" + (workspace ? "workspace-action" : "email-action") + "\n" + JSON.stringify(input.args) + "\n```";
       const route = { model: input.model, fallbackModel: input.fallbackModel, signal: input.signal, selectedCompanyId: input.selectedCompanyId, selectedProjectId: input.selectedProjectId, selectedBusinessId: input.selectedBusinessId, addressReferences: input.emailAddressReferences };
       const outcome = workspace
@@ -465,6 +485,8 @@ ${localized.next}`;
     if (input.call.function.name === "npati_goal_action" || input.call.function.name === "npati_business_profile") await assertNamedBusinessTarget(workspaceStore, input.auth, input.requestMessage, input.args.businessId);
     if (input.call.function.name === "npati_goal_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Goal management permission is required");
+      const createdWith = input.args.action === "create" ? createdThisTurn(input.turn, input.args.businessId, "goals") : undefined;
+      if (createdWith) return { output: { kind: "already_saved", note: `This Business was created in this request together with its goal(s): ${createdWith.join("; ")}. Nothing more was added. Report those goals; do not create another goal in this request.` }, metadata: { kind: "goal_action_skipped" } };
       const directive = "\x60\x60\x60goal-action\n" + JSON.stringify(input.args) + "\n\x60\x60\x60";
       const executed = await BusinessActionHandler.extractAndExecute(input.auth, directive, workspaceStore, log);
       if (!executed.goalAction) throw new Error("Goal action did not persist; do not report success");
@@ -489,6 +511,11 @@ ${localized.next}`;
       // A request that also creates a company ("створи компанію … і бізнес-профіль") links to that new company after the turn.
       const linkedCompany = requestCreatesCompany(input.requestMessage) ? undefined : await linkNewBusinessToSelectedCompany(input.auth, outcome, input.selectedCompanyId);
       const result = linkedCompany ? { ...outcome, linkedCompanyId: linkedCompany.id, linkedCompanyName: linkedCompany.name } : outcome;
+      const createdId = (outcome as { businessId?: unknown }).businessId;
+      if (input.turn && args.action === "create" && typeof createdId === "string") {
+        const titles = (list: unknown) => Array.isArray(list) ? list.map((item) => String((item as { title?: unknown })?.title ?? "").trim()).filter(Boolean) : [];
+        input.turn.businesses.set(createdId, { goals: titles(args.goals), memories: titles(args.memories) });
+      }
       return { output: result, metadata: { kind: "business_profile", outcome: result } };
     }
     if (input.call.function.name === "npati_company_action") {

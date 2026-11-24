@@ -37,8 +37,8 @@ const context = (): AuthContext => ({
 });
 
 /** One real application, composed exactly the way `coding-agent-c10-route-auth-wiring.test.ts` composes it. */
-function realApp() {
-  const authProvider: AuthProvider = { authenticate: async () => context() };
+function realApp(extraPermissions: string[] = []) {
+  const authProvider: AuthProvider = { authenticate: async () => { const base = context(); return { ...base, permissions: [...base.permissions, ...extraPermissions] }; } };
   const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
   const aiEngine = {
     chat: async () => ({ content: "ok" }),
@@ -119,7 +119,8 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
   });
 
   it("composes a fresh application whose Inspector still answers over the shared discovery", async () => {
-    const app = realApp();
+    // The Inspector is an administrator tool (ordinary accounts get 403, see developer-capability-inspector.test.ts).
+    const app = realApp(["admin:all"]);
     try {
       // The static report is unchanged …
       const staticReport = await app.inject({ method: "GET", url: "/capabilities/inspect" });

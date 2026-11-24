@@ -121,7 +121,7 @@ export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformB
     await databaseProvisioner?.close();
     await dataBackendRepository?.close();
   });
-  registerProjectFileRoutes(app, projectWorkspace, authProvider, projectMediaService, projectService);
+  registerProjectFileRoutes(app, projectWorkspace, authProvider, projectMediaService, projectService, projectGitService);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectProductionRoutes(app, projectWorkspace, authProvider, workspaceStore);

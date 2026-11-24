@@ -1,6 +1,6 @@
 import { runInterruptedNotice } from "./run-interrupted-notice";
 import { createProjectImplementationPrompt } from "./project-creation-prompt";
-import { briefCreationAssumptions } from "./code-creation-assumptions";
+import { assumptionsNote, briefCreationAssumptions } from "./code-creation-assumptions";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
 import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, isDesktopProjectFramework, planChatDevelopment, developmentTargetKind, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
@@ -17,7 +17,7 @@ import type { ProjectSandboxService } from "./project-sandbox-service";
 import type { ProjectPreviewService } from "./project-preview-service";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { hasCodeChatPreview, isCodeChatWebsite, isPlainProjectFramework } from "./code-chat-website";
-import { saveChatProjectCard } from "./project-chat-cards";
+import { readChatDatabaseCards, saveChatProjectCard } from "./project-chat-cards";
 
 import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails, compactProgress, metadataOnlyProgress } from "./chat-development-trace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
@@ -191,6 +191,15 @@ export class ChatDevelopmentService {
       const conversationMessages: NonNullable<DevelopmentProcess["conversationMessages"]> = [];
       const queueLanguages = new Map<string,string>();
       const chatHistory = detailed && stored.conversationId ? (await this.d.store.getNeutralConversation(ctx,stored.conversationId).catch(()=>({messages:[]}))).messages : [];
+      // A database created during the run is announced at once with its block, not only after the run's final reply:
+      // the chat loads conversation messages again only when the turn ends, while it shows these with every change.
+      if (detailed && stored.conversationId && chatHistory.length) {
+        const databaseCards = await readChatDatabaseCards(this.d.store, ctx, stored.conversationId);
+        for (const message of chatHistory) {
+          const card = databaseCards[message.id];
+          if (card && message.role === "assistant") conversationMessages.push({ id: message.id, role: "assistant", content: message.content, createdAt: message.createdAt, databaseCard: card });
+        }
+      }
       if (detailed && stored.sessionId && this.d.inbox && inboxEnabled.get(stored.companyId)) {
         const session = await this.d.code.getSession(ctx,stored.companyId,stored.sessionId);
         const inbox = await this.d.inbox.transact(session,{kind:"read"});
@@ -538,7 +547,7 @@ export class ChatDevelopmentService {
       const desktop = isDesktopProjectFramework(target.framework) || target.kind === "mobile_app";
       const ready = desktop ? outcome.terminalStatus === "completed" : hasCodeChatPreview(outcome.result);
       const result = outcome.result as { message?: string } | null;
-      const displayMessage = [assumptions, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion")].filter(Boolean).join("\n\n");
+      const displayMessage = [result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"), assumptions ? assumptionsNote(assumptions) : ""].filter(Boolean).join("\n\n");
       const status = controller.signal.aborted ? "cancelled" : outcome.needsApproval ? "awaiting_approval"
         : outcome.terminalStatus === "completed" && !ready ? "failed" : outcome.terminalStatus;
       await this.settleProgress(ctx, process.id, status);

@@ -455,6 +455,9 @@ export function registerReliabilityAndOperationsRoutes(
     }
   });
 
+  const ownGroupSession = async (scope: { workspaceId: string }, request: { params: { id: string }; query?: unknown }) =>
+    Boolean(await globalGroupSessions.getSession(request.params.id, (request.query as { companyId?: string } | undefined)?.companyId || scope.workspaceId, scope.workspaceId));
+
   // 13. #46: Session Tools
   app.post<{
     Params: { id: string };
@@ -466,7 +469,9 @@ export function registerReliabilityAndOperationsRoutes(
     };
   }>("/group-sessions/:id/tools", async (request, reply) => {
     try {
-      await authorize(auth, request, "chat:use");
+      const scope = await authorize(auth, request, "chat:use");
+      // Session tools live in one process-wide map: only the session's own workspace may read or change them.
+      if (!(await ownGroupSession(scope, request))) return reply.code(404).send({ error: { code: "SESSION_NOT_FOUND", message: "Group session not found" } });
       const { toolName, description, ttlSeconds, metadata } = request.body || {};
       if (!toolName) {
         return reply.code(400).send({ error: { code: "TOOL_NAME_REQUIRED", message: "toolName is required" } });
@@ -487,7 +492,9 @@ export function registerReliabilityAndOperationsRoutes(
 
   app.get<{ Params: { id: string } }>("/group-sessions/:id/tools", async (request, reply) => {
     try {
-      await authorize(auth, request, "workspace:read");
+      const scope = await authorize(auth, request, "workspace:read");
+      // Session tools live in one process-wide map: only the session's own workspace may read or change them.
+      if (!(await ownGroupSession(scope, request))) return reply.code(404).send({ error: { code: "SESSION_NOT_FOUND", message: "Group session not found" } });
       const tools = globalSessionTools.getActiveTools(request.params.id);
       return { sessionId: request.params.id, tools, count: tools.length };
     } catch (err) {
@@ -499,7 +506,9 @@ export function registerReliabilityAndOperationsRoutes(
     "/group-sessions/:id/tools/:toolName",
     async (request, reply) => {
       try {
-        await authorize(auth, request, "chat:use");
+        const scope = await authorize(auth, request, "chat:use");
+        // Session tools live in one process-wide map: only the session's own workspace may read or change them.
+        if (!(await ownGroupSession(scope, request))) return reply.code(404).send({ error: { code: "SESSION_NOT_FOUND", message: "Group session not found" } });
         const detached = globalSessionTools.detachTool(request.params.id, request.params.toolName);
         const activeTools = globalSessionTools.getActiveTools(request.params.id);
         return { sessionId: request.params.id, toolName: request.params.toolName, detached, tools: activeTools };
@@ -517,7 +526,9 @@ export function registerReliabilityAndOperationsRoutes(
     };
   }>("/group-sessions/:id/tools/resolve", async (request, reply) => {
     try {
-      await authorize(auth, request, "chat:use");
+      const scope = await authorize(auth, request, "chat:use");
+      // Session tools live in one process-wide map: only the session's own workspace may read or change them.
+      if (!(await ownGroupSession(scope, request))) return reply.code(404).send({ error: { code: "SESSION_NOT_FOUND", message: "Group session not found" } });
       const { baseTools, agentRole } = request.body || {};
       const resolution = globalSessionTools.resolveEffectiveTools(
         request.params.id,

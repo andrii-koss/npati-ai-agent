@@ -9,7 +9,7 @@ const authScript=`(async()=>{const fs=require('fs');const s=JSON.parse(fs.readFi
 (async()=>{const auth=JSON.parse(execFileSync('docker',['exec','npati-agent-api','node','-e',authScript],{encoding:'utf8'}));
 assert.ok(auth.accessToken, 'Installation owner session unavailable');
 const browser=await chromium.launch({executablePath:process.env.NPATI_BROWSER_EXECUTABLE || (process.platform==='win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined),headless:true});
-try{const context=await browser.newContext({viewport:{width:1500,height:1000}});const page=await context.newPage();await page.addInitScript(token=>localStorage.setItem('npati_agent_access_token',token),auth.accessToken);
+try{const context=await browser.newContext({viewport:{width:1500,height:1000}});const page=await context.newPage();await page.addInitScript(token=>(document.cookie='npati_access='+encodeURIComponent(token)+'; path=/; samesite=lax',document.cookie.includes('npati_csrf=')||(document.cookie='npati_csrf=qa-'+Math.random().toString(36).slice(2)+'; path=/; samesite=strict'),localStorage.setItem('npati_agent_session_marker','npati-cookie-session:qa')),auth.accessToken);
 let result,events=[],streamDone;
 page.on('response',r=>{if(r.url().endsWith('/api/chat/stream'))streamDone=r.text().then(body=>{for(const block of body.split(/\r?\n\r?\n/)){const line=block.split(/\r?\n/).find(l=>l.startsWith('data:'));if(!line)continue;const data=JSON.parse(line.slice(5));if(block.includes('event: progress')&&data.type==='project_progress')events.push({stage:data.stage,title:data.title,status:data.status});if(block.includes('event: result'))result=data;}})});
 await page.goto('http://localhost:3000/chat');await page.waitForTimeout(3000);
